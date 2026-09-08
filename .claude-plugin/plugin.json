@@ -1,0 +1,9 @@
+{
+  "name": "obs-toolkit",
+  "version": "0.1.0",
+  "description": "홈랩 관측 스택(Prometheus·Loki·Tempo) 조회 코어와 obs-query 스킬 — 원본은 코어가 받고 요약만 돌려준다",
+  "author": { "name": "jyoliar-lab", "url": "https://github.com/jyoliar-lab" },
+  "repository": "https://github.com/jyoliar-lab/obs-toolkit",
+  "license": "MIT",
+  "keywords": ["observability", "prometheus", "loki", "tempo", "promql", "logql", "traceql"]
+}

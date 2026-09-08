@@ -1,0 +1,10 @@
+[project]
+name = "obs-toolkit"
+version = "0.1.0"
+description = "관측 분석 코어(Prometheus·Loki·Tempo) — 표준 라이브러리만. Claude Code 플러그인 루트 = 저장소 루트"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

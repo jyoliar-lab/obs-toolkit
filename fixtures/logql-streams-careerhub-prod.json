@@ -1,0 +1,56 @@
+{
+ "status": "success",
+ "data": {
+  "resultType": "streams",
+  "result": [
+   {
+    "stream": {
+     "container": "zitadel",
+     "detected_level": "warn",
+     "env": "prod",
+     "instance": "careerhub-prod/zitadel-f65b884bd-jm9zg:zitadel",
+     "job": "loki.source.kubernetes.pod_logs",
+     "namespace": "careerhub-prod",
+     "pod": "zitadel-f65b884bd-jm9zg",
+     "service_name": "zitadel"
+    },
+    "values": [
+     [
+      "1788855749699618965",
+      "time=\"2026-09-08T08:22:29Z\" level=warning msg=\"authz: verify access token\" caller=\"/home/runner/work/zitadel/zitadel/internal/api/authz/context.go:114\" error=\"I"
+     ],
+     [
+      "1788855749699596614",
+      "time=\"2026-09-08T08:22:29Z\" level=warning msg=\"token verifier repo: verify JWT access token\" caller=\"/home/runner/work/zitadel/zitadel/internal/authz/repository"
+     ],
+     [
+      "1788855749699499281",
+      "time=\"2026-09-08T08:22:29Z\" level=warning msg=\"token verifier repo: decrypt access token\" caller=\"/home/runner/work/zitadel/zitadel/internal/authz/repository/ev"
+     ]
+    ]
+   },
+   {
+    "stream": {
+     "container": "zitadel",
+     "detected_level": "info",
+     "env": "prod",
+     "instance": "careerhub-prod/zitadel-f65b884bd-jm9zg:zitadel",
+     "job": "loki.source.kubernetes.pod_logs",
+     "namespace": "careerhub-prod",
+     "pod": "zitadel-f65b884bd-jm9zg",
+     "service_name": "zitadel"
+    },
+    "values": [
+     [
+      "1788855749702179990",
+      "time=2026-09-08T08:22:29.702Z level=INFO msg=\"request served\" request.id=dafsbh9cm36s73cni4m0 request.instance_host=id.careerhub.jyo-liar.com request.public_hos"
+     ],
+     [
+      "1788855749701978232",
+      "time=\"2026-09-08T08:22:29Z\" level=info msg=activity caller=\"/home/runner/work/zitadel/zitadel/internal/activity/activity.go:105\" domain=\"https://id.careerhub.jy"
+     ]
+    ]
+   }
+  ]
+ }
+}

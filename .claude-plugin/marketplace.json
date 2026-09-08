@@ -1,0 +1,15 @@
+{
+  "name": "obs-toolkit",
+  "description": "jyoliar-lab 관측 도구 마켓플레이스 — 이 저장소 자신이 유일한 플러그인(obs-toolkit)이다",
+  "owner": {
+    "name": "jyoliar-lab",
+    "url": "https://github.com/jyoliar-lab"
+  },
+  "plugins": [
+    {
+      "name": "obs-toolkit",
+      "source": "./",
+      "description": "홈랩 관측 스택 조회 코어 + obs-query 스킬. 하네스는 enabledPlugins 로 선언해 받는다 — 사본 없음"
+    }
+  ]
+}
