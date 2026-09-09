@@ -7,11 +7,11 @@ from pathlib import Path
 import pytest
 
 from obs.core import (
-    DEFAULT_GRAFANA_URL, DEFAULT_UIDS, Client, ObsError, config_file_candidates, load_config, to_dict, token_from_env,
+    DEFAULT_GRAFANA_URL, DEFAULT_UIDS, Client, Config, ObsError, config_file_candidates, load_config, to_dict, token_from_env,
 )
 
 
-def _write(p: Path, data: dict) -> Path:
+def _write(p: Path, data: dict[str, object]) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(data), encoding="utf-8")
     return p
@@ -76,6 +76,12 @@ def test_client_from_env_requires_token(base_env: dict[str, str]) -> None:
     assert "OBS_GRAFANA_TOKEN" in str(ei.value)
 
 
+def test_non_string_config_value_is_an_error(base_env: dict[str, str], tmp_path: Path) -> None:
+    _write(Path(base_env["CLAUDE_PLUGIN_DATA"]) / "config.json", {"uids": {"metrics": 42}})
+    with pytest.raises(ObsError):
+        load_config(base_env, home=tmp_path / "home")
+
+
 def test_bad_config_file_is_an_error(base_env: dict[str, str], tmp_path: Path) -> None:
     p = Path(base_env["CLAUDE_PLUGIN_DATA"]) / "config.json"
     p.parent.mkdir(parents=True)
@@ -84,6 +90,6 @@ def test_bad_config_file_is_an_error(base_env: dict[str, str], tmp_path: Path) -
         load_config(base_env, home=tmp_path / "home")
 
 
-def test_unknown_backend(config) -> None:
+def test_unknown_backend(config: Config) -> None:
     with pytest.raises(ObsError):
         config.uid("nope")

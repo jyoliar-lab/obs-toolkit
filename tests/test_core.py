@@ -3,17 +3,15 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from pathlib import Path
-from typing import Callable
 
 import pytest
 
 from obs.core import (
-    Budget, BudgetExceeded, Client, Evidence, ObsError, Response, Window, doctor, fmt_rfc3339, http_error_message,
-    load_config, parse_duration, parse_time, prune, spill, spill_ref, spill_root, to_dict, to_json,
+    Budget, Config, Lines, BudgetExceeded, Evidence, ObsError, Response, Window, doctor, fmt_rfc3339, http_error_message,
+    parse_duration, parse_time, prune, spill, spill_ref, spill_root, to_dict, to_json,
 )
-from tests.conftest import FakeTransport
+from tests.conftest import ClientFactory, FakeTransport
 
 PHYSICAL: tuple[str, ...] = ("obs.mg", "jyo-liar", "prometheus", "loki-careerhub", "tempo-careerhub", "datasources/proxy")
 
@@ -42,16 +40,21 @@ def test_window() -> None:
     assert b.baseline is not None and b.baseline.end == w.end - 86400 and b.baseline.seconds == w.seconds
     assert w.label() == "%s ~ %s" % (fmt_rfc3339(4600.0), fmt_rfc3339(8200.0))
     d = to_dict(b)
-    assert d["baseline"]["start"] == 4600.0 - 86400 and d["baseline"]["baseline"] is None
+    assert isinstance(d, dict)
+    bl = d["baseline"]
+    assert isinstance(bl, dict) and bl["start"] == 4600.0 - 86400 and bl["baseline"] is None
 
 
 # ── 직렬화 ──────────────────────────────────────────────────────────────────────
 
-def test_dataclasses_are_json_serializable(config) -> None:
-    ev = Evidence(backend="metrics", query="up", window=Window(1.0, 2.0), value={"lines": ["1 {}"]}, raw_ref="tmp/obs/x.json")
+def test_dataclasses_are_json_serializable(config: Config) -> None:
+    ev = Evidence(backend="metrics", query="up", window=Window(1.0, 2.0), value=Lines(["1 {}"]), raw_ref="tmp/obs/x.json")
     for obj in (ev, config, Budget(), Response("metrics", "api/v1/query", 200, {"a": 1})):
         json.loads(to_json(obj))
-    assert to_dict(ev)["window"] == {"start": 1.0, "end": 2.0, "baseline": None}
+    d = to_dict(ev)
+    assert isinstance(d, dict) and d["window"] == {"start": 1.0, "end": 2.0, "baseline": None} and d["value"] == {"lines": ["1 {}"]}
+    with pytest.raises(TypeError):
+        to_dict(object())
 
 
 # ── spill ───────────────────────────────────────────────────────────────────────
@@ -83,7 +86,7 @@ def test_prune_oldest_first(tmp_path: Path) -> None:
 
 # ── 예산 ────────────────────────────────────────────────────────────────────────
 
-def test_budget_queries(make_client: Callable) -> None:
+def test_budget_queries(make_client: ClientFactory) -> None:
     client, t = make_client({"api/v1/query": (200, {"status": "success", "data": {}})})
     client.budget = Budget(max_queries=2)
     client.get("metrics", "api/v1/query"); client.get("metrics", "api/v1/query")
@@ -92,7 +95,7 @@ def test_budget_queries(make_client: Callable) -> None:
     assert len(t.calls) == 2
 
 
-def test_budget_bytes(make_client: Callable) -> None:
+def test_budget_bytes(make_client: ClientFactory) -> None:
     client, _ = make_client({"api/v1/query": (200, {"pad": "x" * 100})})
     client.budget = Budget(max_response_bytes=150)
     client.get("metrics", "api/v1/query")
@@ -102,7 +105,7 @@ def test_budget_bytes(make_client: Callable) -> None:
 
 # ── Client.get ──────────────────────────────────────────────────────────────────
 
-def test_get_builds_proxy_url_and_bearer(make_client: Callable, config) -> None:
+def test_get_builds_proxy_url_and_bearer(make_client: ClientFactory, config: Config) -> None:
     client, t = make_client({"api/v1/query": (200, {"status": "success"})})
     r = client.get("metrics", "/api/v1/query", {"query": "up", "time": 1.5, "empty": "", "none": None})
     assert r == Response("metrics", "/api/v1/query", 200, {"status": "success"})
@@ -112,19 +115,19 @@ def test_get_builds_proxy_url_and_bearer(make_client: Callable, config) -> None:
     assert call.headers["Accept"] == "application/json"
 
 
-def test_get_logical_names_only(make_client: Callable) -> None:
+def test_get_logical_names_only(make_client: ClientFactory) -> None:
     client, _ = make_client()
     with pytest.raises(ObsError):
         client.get("prometheus", "api/v1/query")
 
 
-def test_get_non_json_body(make_client: Callable) -> None:
+def test_get_non_json_body(make_client: ClientFactory) -> None:
     client, _ = make_client({"api/echo": (200, b"echo")})
     assert client.get("traces", "api/echo").body == "echo"
 
 
 @pytest.mark.parametrize("status,needle", [(401, "인증 실패"), (403, "거부"), (404, "거부"), (500, "오류"), (429, "속도 제한")])
-def test_http_errors_are_logical(make_client: Callable, status: int, needle: str) -> None:
+def test_http_errors_are_logical(make_client: ClientFactory, status: int, needle: str) -> None:
     client, _ = make_client({"loki/api/v1/query_range": (status, {"message": "secret host obs.mg.jyo-liar.com"})})
     with pytest.raises(ObsError) as ei:
         client.get("logs", "loki/api/v1/query_range")
@@ -134,7 +137,7 @@ def test_http_errors_are_logical(make_client: Callable, status: int, needle: str
         assert word not in msg, msg
 
 
-def test_query_error_passes_backend_message(make_client: Callable) -> None:
+def test_query_error_passes_backend_message(make_client: ClientFactory) -> None:
     client, _ = make_client({"api/v1/query": (400, {"status": "error", "error": 'parse error: unexpected "}"'})})
     with pytest.raises(ObsError) as ei:
         client.get("metrics", "api/v1/query", {"query": "up}"})
@@ -142,7 +145,7 @@ def test_query_error_passes_backend_message(make_client: Callable) -> None:
     assert http_error_message("logs", 422, "plain text reason") == "logs 백엔드가 질의를 거부했다(422): plain text reason — 질의를 고쳐 다시."
 
 
-def test_transport_failure_is_logical(make_client: Callable) -> None:
+def test_transport_failure_is_logical(make_client: ClientFactory) -> None:
     client, _ = make_client(fail="[Errno 8] nodename nor servname provided")
     with pytest.raises(ObsError) as ei:
         client.get("traces", "api/search")
@@ -152,7 +155,7 @@ def test_transport_failure_is_logical(make_client: Callable) -> None:
         assert word not in msg
 
 
-def test_error_messages_never_carry_token(make_client: Callable) -> None:
+def test_error_messages_never_carry_token(make_client: ClientFactory) -> None:
     client, _ = make_client({"api/v1/query": (401, {"message": "bad token test-token-not-real"})})
     with pytest.raises(ObsError) as ei:
         client.get("metrics", "api/v1/query")
@@ -161,7 +164,7 @@ def test_error_messages_never_carry_token(make_client: Callable) -> None:
 
 # ── doctor ──────────────────────────────────────────────────────────────────────
 
-def test_doctor_shows_physical_and_probes(config, base_env: dict[str, str]) -> None:
+def test_doctor_shows_physical_and_probes(config: Config, base_env: dict[str, str]) -> None:
     t = FakeTransport(routes={"buildinfo": (200, {}), "labels": (200, {}), "api/echo": (401, b"")})
     rep = doctor(config, "test-token-not-real", env=base_env, transport=t)
     assert rep.grafana_url.value.startswith("https://") and rep.token_present and not rep.ok
@@ -173,7 +176,7 @@ def test_doctor_shows_physical_and_probes(config, base_env: dict[str, str]) -> N
     assert "test-token-not-real" not in to_json(rep)
 
 
-def test_doctor_without_token_skips_probes(config, base_env: dict[str, str]) -> None:
+def test_doctor_without_token_skips_probes(config: Config, base_env: dict[str, str]) -> None:
     t = FakeTransport()
     rep = doctor(config, "", env=base_env, transport=t)
     assert not rep.token_present and not rep.ok and not t.calls

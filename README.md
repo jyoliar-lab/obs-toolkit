@@ -27,6 +27,7 @@ agent 인터페이스에는 URL · uid · 토큰이 없다. 물리는 `obs-docto
 ## 테스트
 
 ```bash
-python -m pip install pytest==9.1.1
+python -m pip install pytest==9.1.1 pyright==1.1.411
+python -m pyright   # strict — Any 없음
 python -m pytest
 ```

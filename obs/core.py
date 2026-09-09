@@ -9,6 +9,7 @@
     논리 이름 · 상태 · 다음 행동만 말한다. 호스트·uid 는 `doctor` 가 사람에게만 보여준다.
   - 토큰은 env(OBS_GRAFANA_TOKEN)에서만 읽는다 — 설정 파일·인자로 받지 않고, 어느 dataclass 에도 싣지 않는다.
   - 모든 dataclass 는 `to_dict` 로 JSON 직렬화된다 — 나중에 MCP outputSchema · structuredContent 로 그대로 쓴다.
+  - `Any` 를 쓰지 않는다. 외부 경계(HTTP 응답 · 설정 파일)는 `JSON` 으로 받고, 어댑터가 즉시 dataclass 로 옮긴다.
 
 설정 해석 순서(Config): env → 설정 파일(JSON) → 내장 기본값.
   env:  OBS_GRAFANA_URL · OBS_PROXY_PREFIX · OBS_UID_METRICS · OBS_UID_LOGS · OBS_UID_TRACES
@@ -28,9 +29,14 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Callable, Generic, Mapping, Sequence, TypeAlias, TypeVar, cast
 
 LOGICAL_BACKENDS: tuple[str, ...] = ("metrics", "logs", "traces")
+
+# 외부 경계의 값 — 파싱된 JSON. 형태를 모르는 것이 사실이라 이 타입이다. 내부에서는 dataclass 로 옮겨 쓴다.
+JSON: TypeAlias = "dict[str, JSON] | list[JSON] | str | int | float | bool | None"
+# 질의 문자열 인자 — None · "" 은 Client.get 이 버린다
+Params: TypeAlias = Mapping[str, "str | int | float | None"]
 
 # ── 물리 기본값 — 사람의 기록용. 설정 해석 계층 안에서만 산다 ────────────────────
 DEFAULT_GRAFANA_URL: str = "https://obs.mg.jyo-liar.com"   # agent 게이트웨이(GET 만). 클러스터 내 소비자는 설정으로 바꾼다
@@ -71,20 +77,22 @@ class TransportError(Exception):
 
 # ── 직렬화 ──────────────────────────────────────────────────────────────────────
 
-def to_dict(obj: Any) -> Any:
-    """dataclass(중첩 포함)를 JSON 직렬화 가능한 dict 로. dict/list/스칼라는 그대로."""
+def to_dict(obj: object) -> JSON:
+    """dataclass(중첩 포함)를 JSON 값으로. Mapping/Sequence 는 재귀, Path 는 str, 스칼라는 그대로. 그 외는 TypeError."""
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         return {f.name: to_dict(getattr(obj, f.name)) for f in dataclasses.fields(obj)}
-    if isinstance(obj, dict):
-        return {str(k): to_dict(v) for k, v in obj.items()}
+    if isinstance(obj, Mapping):
+        return {str(k): to_dict(v) for k, v in cast(Mapping[object, object], obj).items()}
     if isinstance(obj, (list, tuple)):
-        return [to_dict(v) for v in obj]
+        return [to_dict(v) for v in cast(Sequence[object], obj)]
     if isinstance(obj, Path):
         return str(obj)
-    return obj
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+    raise TypeError("JSON 으로 옮길 수 없는 값: %r" % type(obj).__name__)
 
 
-def to_json(obj: Any) -> str:
+def to_json(obj: object) -> str:
     return json.dumps(to_dict(obj), ensure_ascii=False, indent=1)
 
 
@@ -133,12 +141,12 @@ def config_file_candidates(env: Mapping[str, str], home: Path | None = None) -> 
     return out
 
 
-def _read_config_file(env: Mapping[str, str], home: Path | None) -> tuple[dict[str, Any], str | None]:
+def _read_config_file(env: Mapping[str, str], home: Path | None) -> tuple[dict[str, JSON], str | None]:
     for p in config_file_candidates(env, home):
         if not p.is_file():
             continue
         try:
-            data = json.loads(p.read_text(encoding="utf-8"))
+            data: JSON = json.loads(p.read_text(encoding="utf-8"))
         except ValueError as e:
             raise ObsError("설정 파일이 JSON 이 아니다(%s): %s — 사람에게" % (p, e))
         if not isinstance(data, dict):
@@ -151,20 +159,23 @@ def load_config(env: Mapping[str, str] | None = None, home: Path | None = None) 
     """env → 설정 파일 → 내장 기본값. 각 값의 출처를 Resolved 로 남긴다."""
     env = os.environ if env is None else env
     file_data, file_path = _read_config_file(env, home)
-    file_uids = file_data.get("uids") or {}
-    if not isinstance(file_uids, dict):
+    raw_uids = file_data.get("uids")
+    if raw_uids is not None and not isinstance(raw_uids, dict):
         raise ObsError("설정 파일의 uids 는 객체여야 한다 — 사람에게")
+    file_uids: dict[str, JSON] = raw_uids or {}
 
-    def resolve(env_name: str, file_key: str | None, file_val: Any, default: str) -> Resolved:
+    def resolve(env_name: str, file_key: str, file_val: JSON, default: str) -> Resolved:
         v = env.get(env_name, "").strip()
         if v:
             return Resolved(v, "env:" + env_name)
-        if file_val not in (None, ""):
-            return Resolved(str(file_val), "file:%s" % file_path)
-        return Resolved(default, "default")
+        if file_val is None or file_val == "":
+            return Resolved(default, "default")
+        if not isinstance(file_val, str):
+            raise ObsError("설정 파일의 %s 는 문자열이어야 한다 — 사람에게" % file_key)
+        return Resolved(file_val, "file:%s" % file_path)
 
     uids = {
-        name: resolve(ENV_UIDS[name], name, file_uids.get(name), DEFAULT_UIDS[name])
+        name: resolve(ENV_UIDS[name], "uids.%s" % name, file_uids.get(name), DEFAULT_UIDS[name])
         for name in LOGICAL_BACKENDS
     }
     return Config(
@@ -256,12 +267,23 @@ class Window:
 # ── 근거 ────────────────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
-class Evidence:
-    """한 질의의 결과 — 질의 · 창 · 백엔드(논리) · 환원된 값 · 원본 포인터. 재실행 가능해야 한다."""
+class Lines:
+    """가장 단순한 환원물 — 사람·agent 가 읽는 요약 줄. 후속 환원 연산이 다른 환원물 dataclass 를 더한다."""
+    lines: list[str]
+
+
+V = TypeVar("V")
+
+
+@dataclass(frozen=True)
+class Evidence(Generic[V]):
+    """한 질의의 결과 — 질의 · 창 · 백엔드(논리) · 환원물 · 원본 포인터. 재실행 가능해야 한다.
+
+    `V` 는 환원물 dataclass(Lines · 후속의 SeriesSummary …) — JSON 직렬화 가능해야 한다."""
     backend: str
     query: str
     window: Window | None
-    value: Any                 # JSON 직렬화 가능한 환원물(요약 줄·수치·표)
+    value: V
     raw_ref: str | None = None  # 어댑터가 정한다 — 파일 경로(CLI) / bundle_id(MCP)
 
 
@@ -275,7 +297,7 @@ def spill_root(env: Mapping[str, str] | None = None, cwd: Path | None = None) ->
     return base / "tmp" / "obs"
 
 
-def spill(kind: str, payload: Any, env: Mapping[str, str] | None = None,
+def spill(kind: str, payload: object, env: Mapping[str, str] | None = None,
           cwd: Path | None = None, keep: int = SPILL_KEEP) -> Path:
     """원본 전체를 <spill_root>/<UTC시각>-<kind>.json 으로 떨어뜨리고 경로를 돌려준다. 최근 keep 개만 남긴다."""
     root = spill_root(env, cwd)
@@ -348,7 +370,7 @@ class Response:
     backend: str    # 논리 이름
     path: str       # 백엔드 네이티브 경로(api/v1/query 등) — 호스트·uid 없음
     status: int
-    body: Any       # JSON 이면 파싱된 값, 아니면 str
+    body: JSON      # 파싱된 JSON — 어댑터가 즉시 dataclass 로 옮긴다. JSON 이 아니면 str
 
 
 def _scrub(text: str, secrets: tuple[str, ...]) -> str:
@@ -391,13 +413,14 @@ def http_error_message(backend: str, code: int, body: str) -> str:
 
 def _json_message(body: str) -> str:
     try:
-        obj = json.loads(body)
+        obj: JSON = json.loads(body)
     except ValueError:
         return body.strip()[:300]
     if isinstance(obj, dict):
         for k in ("error", "message"):
-            if obj.get(k):
-                return str(obj[k])[:300]
+            v = obj.get(k)
+            if v:
+                return str(v)[:300]
     return ""
 
 
@@ -421,12 +444,12 @@ class Client:
                 "agent 는 값을 다루지 않는다." % ENV_TOKEN)
         return cls(config=load_config(env), token=token, budget=budget or Budget(), transport=transport)
 
-    def get(self, backend: str, path: str, params: Mapping[str, Any] | None = None) -> Response:
+    def get(self, backend: str, path: str, params: Params | None = None) -> Response:
         """GET <proxy>/<uid>/<path>?params. 오류는 ObsError 로 — 논리 이름만 말한다."""
         if backend not in LOGICAL_BACKENDS:
             raise ObsError("알 수 없는 백엔드 %r — metrics · logs · traces 중 하나" % backend)
         self.budget.charge_query()
-        query = {k: v for k, v in (params or {}).items() if v is not None and v != ""}
+        query: dict[str, str | int | float] = {k: v for k, v in (params or {}).items() if v is not None and v != ""}
         url = self.config.proxy_url(backend, path)
         if query:
             url += "?" + urllib.parse.urlencode(query, doseq=True)
@@ -440,8 +463,9 @@ class Client:
         if status >= 400:
             raise ObsError(http_error_message(backend, status, raw.decode("utf-8", "replace")))
         text = raw.decode("utf-8", "replace")
+        body: JSON
         try:
-            body: Any = json.loads(text) if text else {}
+            body = json.loads(text) if text else {}
         except ValueError:
             body = text
         return Response(backend=backend, path=path, status=status, body=body)
@@ -449,10 +473,10 @@ class Client:
 
 # ── 진단 — 사람용. 여기서만 물리(URL·uid)가 보인다 ──────────────────────────────
 
-_PROBES: dict[str, tuple[str, dict[str, Any]]] = {
-    "metrics": ("api/v1/status/buildinfo", {}),
-    "logs": ("loki/api/v1/labels", {}),
-    "traces": ("api/echo", {}),
+_PROBES: dict[str, str] = {
+    "metrics": "api/v1/status/buildinfo",
+    "logs": "loki/api/v1/labels",
+    "traces": "api/echo",
 }
 
 
@@ -489,13 +513,13 @@ def doctor(config: Config, token: str, env: Mapping[str, str] | None = None,
     probes: list[Probe] = []
     client = Client(config=config, token=token, budget=Budget(max_queries=len(_PROBES) + 1), transport=transport)
     for backend in LOGICAL_BACKENDS:
-        path, params = _PROBES[backend]
+        path = _PROBES[backend]
         url = config.proxy_url(backend, path)
         if not token:
             probes.append(Probe(backend, config.uid(backend), url, False, None, "토큰 없음 — 연결 확인 생략"))
             continue
         try:
-            r = client.get(backend, path, params)
+            r = client.get(backend, path)
             probes.append(Probe(backend, config.uid(backend), url, True, r.status, "ok"))
         except ObsError as e:
             probes.append(Probe(backend, config.uid(backend), url, False, None, str(e)))

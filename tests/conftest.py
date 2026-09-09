@@ -4,17 +4,17 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Mapping, Protocol
 
 import pytest
 
-from obs.core import Client, Config, TransportError, load_config
+from obs.core import JSON, Client, Config, TransportError, load_config
 
 ROOT: Path = Path(__file__).resolve().parents[1]
 FIXTURES: Path = ROOT / "fixtures"
 
 
-def load_fixture(name: str) -> Any:
+def load_fixture(name: str) -> JSON:
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
 
@@ -28,8 +28,8 @@ class Call:
 @dataclass
 class FakeTransport:
     """(url, headers, timeout) → (status, body). 경로 조각으로 응답을 고른다. 부른 기록을 남긴다."""
-    routes: dict[str, tuple[int, Any]] = field(default_factory=dict)
-    calls: list[Call] = field(default_factory=list)
+    routes: dict[str, tuple[int, object]] = field(default_factory=dict[str, tuple[int, object]])
+    calls: list[Call] = field(default_factory=list[Call])
     fail: str | None = None   # TransportError 문구 — 있으면 항상 실패
 
     def __call__(self, url: str, headers: Mapping[str, str], timeout: float) -> tuple[int, bytes]:
@@ -59,9 +59,13 @@ def config(base_env: dict[str, str], tmp_path: Path) -> Config:
     return load_config(base_env, home=tmp_path / "home")
 
 
+class ClientFactory(Protocol):
+    def __call__(self, routes: dict[str, tuple[int, object]] | None = None, fail: str | None = None) -> tuple[Client, FakeTransport]: ...
+
+
 @pytest.fixture
-def make_client(config: Config) -> Callable[..., tuple[Client, FakeTransport]]:
-    def _make(routes: dict[str, tuple[int, Any]] | None = None, fail: str | None = None) -> tuple[Client, FakeTransport]:
+def make_client(config: Config) -> ClientFactory:
+    def _make(routes: dict[str, tuple[int, object]] | None = None, fail: str | None = None) -> tuple[Client, FakeTransport]:
         t = FakeTransport(routes=routes or {}, fail=fail)
         return Client(config=config, token="test-token-not-real", transport=t), t
     return _make

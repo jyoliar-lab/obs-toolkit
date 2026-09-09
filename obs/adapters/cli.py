@@ -4,6 +4,9 @@
 코어 함수는 dataclass 를 주고받는다. 각 `*_run` 은 Evidence 를 돌려주고, `*_main` 이 그것을 stdout 에 찍는다 —
 셸 없는 소비자(MCP)는 `*_run` 만 다시 쓴다.
 
+외부 경계 규약: 백엔드 응답(JSON)은 `parse_*` 가 받는 즉시 dataclass 로 옮기고, 포맷 함수는 그 타입만 받는다.
+`Any` 는 쓰지 않는다.
+
 agent 인터페이스에 물리(URL · uid · 토큰)가 없다. `--uid` 같은 인자를 두지 않는다 — 논리 이름은 명령 자체가 정한다
 (promql → metrics · logql → logs · traceql → traces). 물리는 `obs-doctor` 만 사람에게 보인다.
 """
@@ -12,14 +15,261 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 from obs.core import (
-    Client, DoctorReport, Evidence, ObsError, Window, doctor, fmt_ts, load_config, parse_duration,
-    parse_time, now, spill, spill_ref, to_json, token_from_env,
+    JSON, Client, DoctorReport, Evidence, Lines, ObsError, Params, Window, doctor, fmt_ts, load_config,
+    parse_duration, parse_time, now, spill, spill_ref, to_json, token_from_env,
 )
 
 DEFAULT_MAX_LINES: int = 40
+DEFAULT_LOG_LIMIT: int = 30
+
+RunResult = tuple[Evidence[Lines], JSON, str]
+"""(근거, 원본 body, spill 종류 이름)"""
+
+
+# ── JSON 접근자 — 외부 경계에서 dataclass 로 옮길 때만 쓴다 ─────────────────────
+
+def _obj(v: JSON) -> dict[str, JSON]:
+    return v if isinstance(v, dict) else {}
+
+
+def _list(v: JSON) -> list[JSON]:
+    return v if isinstance(v, list) else []
+
+
+def _str(v: JSON, default: str = "") -> str:
+    if v is None:
+        return default
+    return v if isinstance(v, str) else str(v)
+
+
+def _int(v: JSON) -> int:
+    if isinstance(v, bool) or v is None:
+        return 0
+    if isinstance(v, (int, float)):
+        return int(v)
+    if isinstance(v, str):
+        try:
+            return int(float(v))
+        except ValueError:
+            return 0
+    return 0
+
+
+def _labels(v: JSON) -> dict[str, str]:
+    return {k: _str(x) for k, x in _obj(v).items()}
+
+
+def _strs(v: JSON) -> list[str]:
+    return [_str(x) for x in _list(v)]
+
+
+def _pair(v: JSON) -> tuple[str, str] | None:
+    """[ts, value] 쌍. 둘 다 문자열로 — 해석(초·나노초·수치)은 받는 쪽이 한다."""
+    items = _list(v)
+    if len(items) < 2:
+        return None
+    return _str(items[0]), _str(items[1])
+
+
+# ── 응답 dataclass + 파서 — Prometheus · Loki ────────────────────────────────────
+
+@dataclass(frozen=True)
+class Series:
+    """시계열 하나 — Prometheus·Loki 메트릭 응답의 vector/matrix 항목."""
+    labels: dict[str, str]
+    values: list[tuple[float, str]]   # (unix 초, 값 문자열)
+
+
+@dataclass(frozen=True)
+class MetricResult:
+    """`{status, data: {resultType, result}}` 형 응답."""
+    result_type: str            # vector · matrix · scalar · string
+    scalar: str | None          # scalar/string 일 때 값
+    series: list[Series]
+
+
+@dataclass(frozen=True)
+class Stream:
+    """Loki 로그 스트림 — 레이블 집합과 (나노초, 줄) 목록."""
+    labels: dict[str, str]
+    values: list[tuple[int, str]]
+
+
+@dataclass(frozen=True)
+class LogResult:
+    result_type: str            # streams · matrix
+    streams: list[Stream]
+    series: list[Series]
+
+
+def check_status(body: JSON, backend: str) -> dict[str, JSON]:
+    """Prometheus·Loki 형 응답의 `status: error` 를 논리 이름의 오류로. 통과하면 객체를 돌려준다."""
+    if not isinstance(body, dict):
+        raise ObsError("%s 백엔드가 JSON 이 아닌 응답을 냈다: %s" % (backend, clip(_str(body), 300)))
+    if body.get("status") == "error":
+        raise ObsError("%s 백엔드 질의 오류(%s): %s" % (backend, _str(body.get("errorType")), _str(body.get("error"))))
+    for w in _strs(body.get("warnings")):
+        print("warning: %s" % w, file=sys.stderr)
+    return body
+
+
+def _series_items(result: JSON) -> list[Series]:
+    out: list[Series] = []
+    for item in _list(result):
+        o = _obj(item)
+        pairs: list[tuple[str, str]] = []
+        single = _pair(o.get("value"))
+        if single is not None:
+            pairs.append(single)
+        for v in _list(o.get("values")):
+            pr = _pair(v)
+            if pr is not None:
+                pairs.append(pr)
+        values: list[tuple[float, str]] = []
+        for ts, val in pairs:
+            try:
+                values.append((float(ts), val))
+            except ValueError:
+                continue
+        out.append(Series(labels=_labels(o.get("metric")), values=values))
+    return out
+
+
+def parse_metric(body: dict[str, JSON]) -> MetricResult:
+    data = _obj(body.get("data"))
+    rtype = _str(data.get("resultType"))
+    result = data.get("result")
+    if rtype in ("scalar", "string"):
+        pr = _pair(result)
+        return MetricResult(result_type=rtype, scalar=pr[1] if pr else None, series=[])
+    return MetricResult(result_type=rtype, scalar=None, series=_series_items(result))
+
+
+def parse_strings(body: dict[str, JSON]) -> list[str]:
+    """labels · label values 응답 — `data: [str]`."""
+    return _strs(body.get("data"))
+
+
+def parse_label_sets(body: dict[str, JSON]) -> list[dict[str, str]]:
+    """series 응답 — `data: [{label: value}]`."""
+    return [_labels(m) for m in _list(body.get("data"))]
+
+
+def parse_logs(body: dict[str, JSON]) -> LogResult:
+    data = _obj(body.get("data"))
+    rtype = _str(data.get("resultType"))
+    if rtype == "matrix":
+        return LogResult(result_type=rtype, streams=[], series=_series_items(data.get("result")))
+    streams: list[Stream] = []
+    for item in _list(data.get("result")):
+        o = _obj(item)
+        values: list[tuple[int, str]] = []
+        for v in _list(o.get("values")):
+            pr = _pair(v)
+            if pr is not None:
+                values.append((_int(pr[0]), pr[1]))
+        streams.append(Stream(labels=_labels(o.get("stream")), values=values))
+    return LogResult(result_type=rtype, streams=streams, series=[])
+
+
+# ── 응답 dataclass + 파서 — Tempo ───────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class TraceHit:
+    trace_id: str
+    duration_ms: str
+    start_ns: int
+    root_service: str
+    root_name: str
+
+
+@dataclass
+class Span:
+    service: str
+    name: str
+    span_id: str
+    parent_id: str
+    start_ns: int
+    end_ns: int
+    status_code: str      # STATUS_CODE_ERROR / 2 / ""
+    attrs: dict[str, str] = field(default_factory=dict[str, str])
+
+    @property
+    def duration_ms(self) -> float:
+        return (self.end_ns - self.start_ns) / 1e6
+
+    @property
+    def is_error(self) -> bool:
+        return self.status_code in ("STATUS_CODE_ERROR", "2")
+
+
+@dataclass(frozen=True)
+class TagScope:
+    name: str
+    tags: list[str]
+
+
+def check_json(body: JSON, backend: str) -> dict[str, JSON]:
+    if not isinstance(body, dict):
+        raise ObsError("%s 백엔드가 JSON 이 아닌 응답을 냈다: %s" % (backend, clip(_str(body), 300)))
+    return body
+
+
+def parse_search(body: dict[str, JSON]) -> list[TraceHit]:
+    hits: list[TraceHit] = []
+    for t in _list(body.get("traces")):
+        o = _obj(t)
+        hits.append(TraceHit(
+            trace_id=_str(o.get("traceID"), "?"), duration_ms=_str(o.get("durationMs"), "?"),
+            start_ns=_int(o.get("startTimeUnixNano")),
+            root_service=_str(o.get("rootServiceName"), "?"), root_name=_str(o.get("rootTraceName"), "?")))
+    return hits
+
+
+def _attr_value(v: JSON) -> str:
+    o = _obj(v)
+    for k in ("stringValue", "intValue", "doubleValue", "boolValue"):
+        if k in o:
+            return _str(o[k])
+    return _str(v)
+
+
+def _attrs(items: JSON) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for a in _list(items):
+        o = _obj(a)
+        out[_str(o.get("key"), "?")] = _attr_value(o.get("value"))
+    return out
+
+
+def parse_spans(body: dict[str, JSON]) -> list[Span]:
+    """OTLP JSON — Tempo 는 `batches`(v1) 또는 `resourceSpans`(v2) 로 준다."""
+    batches = body.get("batches") or body.get("resourceSpans") or _obj(body.get("trace")).get("resourceSpans")
+    spans: list[Span] = []
+    for b in _list(batches):
+        bo = _obj(b)
+        service = _attrs(_obj(bo.get("resource")).get("attributes")).get("service.name", "?")
+        for ss in _list(bo.get("scopeSpans") or bo.get("instrumentationLibrarySpans")):
+            for s in _list(_obj(ss).get("spans")):
+                so = _obj(s)
+                spans.append(Span(
+                    service=service, name=_str(so.get("name"), "?"), span_id=_str(so.get("spanId")),
+                    parent_id=_str(so.get("parentSpanId")),
+                    start_ns=_int(so.get("startTimeUnixNano")), end_ns=_int(so.get("endTimeUnixNano")),
+                    status_code=_str(_obj(so.get("status")).get("code")), attrs=_attrs(so.get("attributes")),
+                ))
+    return spans
+
+
+def parse_tags(body: dict[str, JSON]) -> list[TagScope]:
+    return [TagScope(name=_str(_obj(sc).get("name")), tags=_strs(_obj(sc).get("tags"))) for sc in _list(body.get("scopes"))]
+
+
+def parse_tag_values(body: dict[str, JSON]) -> list[str]:
+    return [_str(_obj(v).get("value")) for v in _list(body.get("tagValues"))]
 
 
 # ── 출력 절제 ────────────────────────────────────────────────────────────────────
@@ -32,7 +282,7 @@ class Emitted:
     raw_ref: str | None
 
 
-def emit(lines: list[str], full: Any, kind: str, max_lines: int, force_spill: bool = False,
+def emit(lines: list[str], full: object, kind: str, max_lines: int, force_spill: bool = False,
          env: Mapping[str, str] | None = None, out: Callable[[str], None] = print) -> Emitted:
     """앞 max_lines 줄만 stdout 에. 잘렸거나 force_spill 이면 원본을 파일로 떨어뜨리고 경로를 알린다."""
     shown = lines[:max_lines]
@@ -59,10 +309,10 @@ def labels_str(labels: Mapping[str, str], drop: tuple[str, ...] = ()) -> str:
     return "{" + ", ".join(items) + "}"
 
 
-def fmt_val(v: Any) -> str:
+def fmt_val(v: str | int | float) -> str:
     try:
         f = float(v)
-    except (TypeError, ValueError):
+    except ValueError:
         return str(v)
     if f != f:  # NaN
         return "NaN"
@@ -71,13 +321,12 @@ def fmt_val(v: Any) -> str:
     return "%.6g" % f
 
 
-def _finish(a: argparse.Namespace, ev: Evidence, body: Any, kind: str, force_spill: bool = False) -> None:
-    """Evidence 를 stdout 규약으로. --json 은 원본만 파일로."""
-    lines: list[str] = list(ev.value.get("lines") or ["(결과 없음)"])
-    if a.json:
+def _finish(ev: Evidence[Lines], body: JSON, kind: str, max_lines: int, as_json: bool, force_spill: bool = False) -> None:
+    """Evidence 를 stdout 규약으로. as_json 은 원본만 파일로."""
+    if as_json:
         print("원본 전체: %s" % spill_ref(spill(kind, body)))
         return
-    emit(lines, body, kind, a.max_lines, force_spill=force_spill)
+    emit(ev.value.lines or ["(결과 없음)"], body, kind, max_lines, force_spill=force_spill)
 
 
 def _common(ap: argparse.ArgumentParser) -> None:
@@ -99,14 +348,8 @@ def main_guard(fn: Callable[[], None]) -> None:
         sys.exit(1)
 
 
-def _check_status(r_body: Any, backend: str) -> None:
-    """Prometheus·Loki 형 응답({status, data}) 의 오류를 논리 이름으로."""
-    if not isinstance(r_body, dict):
-        raise ObsError("%s 백엔드가 JSON 이 아닌 응답을 냈다: %s" % (backend, clip(str(r_body), 300)))
-    if r_body.get("status") == "error":
-        raise ObsError("%s 백엔드 질의 오류(%s): %s" % (backend, r_body.get("errorType"), r_body.get("error")))
-    for w in r_body.get("warnings") or []:
-        print("warning: %s" % w, file=sys.stderr)
+def _evidence(backend: str, query: str, window: Window, lines: list[str]) -> Evidence[Lines]:
+    return Evidence(backend=backend, query=query, window=window, value=Lines(lines or ["(결과 없음)"]))
 
 
 # ── promql ───────────────────────────────────────────────────────────────────────
@@ -133,34 +376,30 @@ PROMQL_DOC = """promql — 즉시 조회·구간 조회 (metrics 백엔드, GET 
 """
 
 
-def instant_lines(data: dict[str, Any]) -> list[str]:
-    rtype = data.get("resultType")
-    result = data.get("result")
-    if rtype in ("scalar", "string"):
-        return [fmt_val(result[1])]
+def instant_lines(res: MetricResult) -> list[str]:
+    if res.scalar is not None:
+        return [fmt_val(res.scalar)]
     lines: list[str] = []
-    for item in result or []:
-        labels = item.get("metric", {})
-        if "value" in item:
-            lines.append("%s  %s" % (fmt_val(item["value"][1]), labels_str(labels)))
-        elif "values" in item:   # 즉시 조회에 range vector 를 준 경우
-            vals = [fmt_val(v[1]) for v in item["values"]]
-            lines.append("[%s]  %s" % (", ".join(vals[:10]) + (" …" if len(vals) > 10 else ""), labels_str(labels)))
+    for s in res.series:
+        if len(s.values) == 1:
+            lines.append("%s  %s" % (fmt_val(s.values[0][1]), labels_str(s.labels)))
+        elif s.values:   # 즉시 조회에 range vector 를 준 경우
+            vals = [fmt_val(v) for _, v in s.values]
+            lines.append("[%s]  %s" % (", ".join(vals[:10]) + (" …" if len(vals) > 10 else ""), labels_str(s.labels)))
     return lines or ["(결과 없음)"]
 
 
-def range_lines(data: dict[str, Any], points: bool) -> list[str]:
+def range_lines(res: MetricResult, points: bool) -> list[str]:
     lines: list[str] = []
-    for item in data.get("result") or []:
-        labels = labels_str(item.get("metric", {}))
-        vals = item.get("values") or []
+    for s in res.series:
+        labels = labels_str(s.labels)
         if points:
             lines.append(labels)
-            for ts, v in vals:
-                lines.append("  %s  %s" % (fmt_ts(float(ts)), fmt_val(v)))
+            for ts, v in s.values:
+                lines.append("  %s  %s" % (fmt_ts(ts), fmt_val(v)))
             continue
         nums: list[float] = []
-        for _, v in vals:
+        for _, v in s.values:
             try:
                 nums.append(float(v))
             except ValueError:
@@ -189,47 +428,42 @@ class PromqlArgs:
     series: str | None = None
 
 
-def promql_run(client: Client, a: PromqlArgs, at: float | None = None) -> tuple[Evidence, Any, str]:
+def promql_run(client: Client, a: PromqlArgs, at: float | None = None) -> RunResult:
     """→ (Evidence, 원본 body, kind). stdout 을 만지지 않는다."""
     end = parse_time(a.end, now() if at is None else at)
     start = end - parse_duration(a.range_) if a.range_ else None
-    window = Window(start=start, end=end) if start is not None else Window(start=end, end=end)
+    window = Window(start=start if start is not None else end, end=end)
     match = a.query
 
     if a.labels:
-        params: dict[str, Any] = {"match[]": match, "start": start, "end": end}
-        r = client.get("metrics", "api/v1/labels", params)
-        _check_status(r.body, "metrics")
-        lines = sorted(r.body.get("data") or [])
+        params: Params = {"match[]": match, "start": start, "end": end}
+        body = check_status(client.get("metrics", "api/v1/labels", params).body, "metrics")
+        lines = sorted(parse_strings(body))
         kind, query = "promql-labels", "labels(%s)" % (match or "")
     elif a.label_values:
         params = {"match[]": match, "start": start, "end": end}
-        r = client.get("metrics", "api/v1/label/%s/values" % a.label_values, params)
-        _check_status(r.body, "metrics")
-        lines = sorted(r.body.get("data") or [])
+        body = check_status(client.get("metrics", "api/v1/label/%s/values" % a.label_values, params).body, "metrics")
+        lines = sorted(parse_strings(body))
         kind, query = "promql-label-values", "label_values(%s, %s)" % (a.label_values, match or "")
     elif a.series:
         params = {"match[]": a.series, "start": start if start is not None else end - 3600, "end": end}
-        r = client.get("metrics", "api/v1/series", params)
-        _check_status(r.body, "metrics")
-        lines = [labels_str(m) for m in r.body.get("data") or []]
+        body = check_status(client.get("metrics", "api/v1/series", params).body, "metrics")
+        lines = [labels_str(m) for m in parse_label_sets(body)]
         kind, query = "promql-series", "series(%s)" % a.series
     elif not match:
         raise ObsError("PromQL 이 필요하다")
     elif start is not None:
         step = a.step or auto_step(end - start)
-        r = client.get("metrics", "api/v1/query_range", {"query": match, "start": start, "end": end, "step": step})
-        _check_status(r.body, "metrics")
-        lines = range_lines(r.body["data"], a.points)
+        params = {"query": match, "start": start, "end": end, "step": step}
+        body = check_status(client.get("metrics", "api/v1/query_range", params).body, "metrics")
+        lines = range_lines(parse_metric(body), a.points)
         kind, query = "promql-range", match
     else:
-        r = client.get("metrics", "api/v1/query", {"query": match, "time": end})
-        _check_status(r.body, "metrics")
-        lines = instant_lines(r.body["data"])
+        body = check_status(client.get("metrics", "api/v1/query", {"query": match, "time": end}).body, "metrics")
+        lines = instant_lines(parse_metric(body))
         kind, query = "promql", match
 
-    ev = Evidence(backend="metrics", query=query, window=window, value={"lines": lines or ["(결과 없음)"]})
-    return ev, r.body, kind
+    return _evidence("metrics", query, window, lines), body, kind
 
 
 def promql_main(argv: Sequence[str] | None = None) -> None:
@@ -248,7 +482,7 @@ def promql_main(argv: Sequence[str] | None = None) -> None:
     args = PromqlArgs(query=a.query, end=a.end, range_=a.range_, step=a.step, points=a.points,
                       labels=a.labels, label_values=a.label_values, series=a.series)
     ev, body, kind = promql_run(_client(), args)
-    _finish(a, ev, body, kind)
+    _finish(ev, body, kind, a.max_lines, a.json)
 
 
 # ── logql ────────────────────────────────────────────────────────────────────────
@@ -275,51 +509,54 @@ LOGQL_DOC = """logql — 로그 조회 (logs 백엔드, GET 만).
 출력은 `시각  {스트림 레이블 차이}  줄` — 모든 스트림에 공통인 레이블은 머리에 한 번만 찍는다.
 """
 
-DEFAULT_LOG_LIMIT: int = 30
 
-
-def common_labels(streams: list[dict[str, Any]]) -> dict[str, str]:
-    sets = [s.get("stream", {}) for s in streams]
-    if not sets:
+def common_labels(streams: Sequence[Stream]) -> dict[str, str]:
+    if not streams:
         return {}
-    common = dict(sets[0])
-    for labels in sets[1:]:
+    common = dict(streams[0].labels)
+    for s in streams[1:]:
         for k in list(common):
-            if labels.get(k) != common[k]:
+            if s.labels.get(k) != common[k]:
                 del common[k]
     return common
 
 
-def stream_lines(data: dict[str, Any], direction: str, width: int) -> list[str]:
-    streams = data.get("result") or []
-    common = common_labels(streams)
-    entries: list[tuple[int, dict[str, str], str]] = []
-    for s in streams:
-        labels = {k: v for k, v in s.get("stream", {}).items() if k not in common}
-        for ts, line in s.get("values") or []:
-            entries.append((int(ts), labels, line))
-    entries.sort(key=lambda e: e[0], reverse=(direction == "backward"))
+@dataclass(frozen=True)
+class _Entry:
+    ts_ns: int
+    labels: dict[str, str]
+    line: str
+
+
+def stream_lines(res: LogResult, direction: str, width: int) -> list[str]:
+    common = common_labels(res.streams)
+    entries: list[_Entry] = []
+    for s in res.streams:
+        labels = {k: v for k, v in s.labels.items() if k not in common}
+        for ts, line in s.values:
+            entries.append(_Entry(ts, labels, line))
+    entries.sort(key=lambda e: e.ts_ns, reverse=(direction == "backward"))
     lines: list[str] = []
     if common:
         lines.append("공통 레이블 %s" % labels_str(common))
-    for ts, labels, line in entries:
-        tag = (" " + labels_str(labels)) if labels else ""
-        lines.append("%s%s  %s" % (fmt_ts(ts / 1e9), tag, clip(line, width)))
+    for e in entries:
+        tag = (" " + labels_str(e.labels)) if e.labels else ""
+        lines.append("%s%s  %s" % (fmt_ts(e.ts_ns / 1e9), tag, clip(e.line, width)))
     if not entries:
         lines.append("(결과 없음)")
     return lines
 
 
-def matrix_lines(data: dict[str, Any]) -> list[str]:
+def matrix_lines(res: LogResult) -> list[str]:
     lines: list[str] = []
-    for item in data.get("result") or []:
+    for s in res.series:
         nums: list[float] = []
-        for _, v in item.get("values") or []:
+        for _, v in s.values:
             try:
                 nums.append(float(v))
             except ValueError:
                 pass
-        labels = labels_str(item.get("metric", {}))
+        labels = labels_str(s.labels)
         if nums:
             lines.append("n=%d  min=%g  max=%g  last=%g  %s" % (len(nums), min(nums), max(nums), nums[-1], labels))
         else:
@@ -340,37 +577,32 @@ class LogqlArgs:
     series: str | None = None
 
 
-def logql_run(client: Client, a: LogqlArgs, at: float | None = None) -> tuple[Evidence, Any, str]:
+def logql_run(client: Client, a: LogqlArgs, at: float | None = None) -> RunResult:
     window = Window.last(a.since, a.end, at)
-    ns = {"start": int(window.start * 1e9), "end": int(window.end * 1e9)}
+    ns: Params = {"start": int(window.start * 1e9), "end": int(window.end * 1e9)}
 
     if a.labels:
-        r = client.get("logs", "loki/api/v1/labels", ns)
-        _check_status(r.body, "logs")
-        lines = sorted(r.body.get("data") or [])
+        body = check_status(client.get("logs", "loki/api/v1/labels", ns).body, "logs")
+        lines = sorted(parse_strings(body))
         kind, query = "logql-labels", "labels()"
     elif a.label_values:
-        r = client.get("logs", "loki/api/v1/label/%s/values" % a.label_values, ns)
-        _check_status(r.body, "logs")
-        lines = sorted(r.body.get("data") or [])
+        body = check_status(client.get("logs", "loki/api/v1/label/%s/values" % a.label_values, ns).body, "logs")
+        lines = sorted(parse_strings(body))
         kind, query = "logql-label-values", "label_values(%s)" % a.label_values
     elif a.series:
-        r = client.get("logs", "loki/api/v1/series", {**ns, "match[]": a.series})
-        _check_status(r.body, "logs")
-        lines = [labels_str(m) for m in r.body.get("data") or []]
+        body = check_status(client.get("logs", "loki/api/v1/series", {**ns, "match[]": a.series}).body, "logs")
+        lines = [labels_str(m) for m in parse_label_sets(body)]
         kind, query = "logql-series", "series(%s)" % a.series
     elif not a.query:
         raise ObsError("LogQL 이 필요하다")
     else:
-        params: dict[str, Any] = {**ns, "query": a.query, "limit": a.limit, "direction": a.direction}
-        r = client.get("logs", "loki/api/v1/query_range", params)
-        _check_status(r.body, "logs")
-        data = r.body.get("data") or {}
-        lines = matrix_lines(data) if data.get("resultType") == "matrix" else stream_lines(data, a.direction, a.width)
+        params: Params = {**ns, "query": a.query, "limit": a.limit, "direction": a.direction}
+        body = check_status(client.get("logs", "loki/api/v1/query_range", params).body, "logs")
+        res = parse_logs(body)
+        lines = matrix_lines(res) if res.result_type == "matrix" else stream_lines(res, a.direction, a.width)
         kind, query = "logql", a.query
 
-    ev = Evidence(backend="logs", query=query, window=window, value={"lines": lines or ["(결과 없음)"]})
-    return ev, r.body, kind
+    return _evidence("logs", query, window, lines), body, kind
 
 
 def logql_main(argv: Sequence[str] | None = None) -> None:
@@ -390,7 +622,7 @@ def logql_main(argv: Sequence[str] | None = None) -> None:
     args = LogqlArgs(query=a.query, since=a.since, end=a.end, limit=a.limit, direction=a.direction,
                      width=a.width, labels=a.labels, label_values=a.label_values, series=a.series)
     ev, body, kind = logql_run(_client(), args)
-    _finish(a, ev, body, kind)
+    _finish(ev, body, kind, a.max_lines, a.json)
 
 
 # ── traceql ──────────────────────────────────────────────────────────────────────
@@ -417,68 +649,13 @@ trace 는 원본이 항상 크므로 요약(서비스·span 수·오류·느린 
 """
 
 
-def search_lines(body: dict[str, Any]) -> list[str]:
-    lines: list[str] = []
-    for t in body.get("traces") or []:
-        start_ns = int(t.get("startTimeUnixNano") or 0)
-        lines.append("%s  %6sms  %s  %s / %s" % (
-            t.get("traceID", "?"), t.get("durationMs", "?"),
-            fmt_ts(start_ns / 1e9) if start_ns else "?",
-            t.get("rootServiceName", "?"), t.get("rootTraceName", "?")))
+def search_lines(hits: Sequence[TraceHit]) -> list[str]:
+    lines = ["%s  %6sms  %s  %s / %s" % (h.trace_id, h.duration_ms, fmt_ts(h.start_ns / 1e9) if h.start_ns else "?",
+                                         h.root_service, h.root_name) for h in hits]
     return lines or ["(결과 없음)"]
 
 
-@dataclass
-class Span:
-    service: str
-    name: str
-    span_id: str
-    parent_id: str
-    start_ns: int
-    end_ns: int
-    status_code: str      # STATUS_CODE_ERROR / 2 / ""
-    attrs: dict[str, str] = field(default_factory=dict)
-
-    @property
-    def duration_ms(self) -> float:
-        return (self.end_ns - self.start_ns) / 1e6
-
-    @property
-    def is_error(self) -> bool:
-        return self.status_code in ("STATUS_CODE_ERROR", "2")
-
-
-def _attr_value(v: dict[str, Any]) -> str:
-    for k in ("stringValue", "intValue", "doubleValue", "boolValue"):
-        if k in v:
-            return str(v[k])
-    return str(v)
-
-
-def _attrs(items: list[dict[str, Any]] | None) -> dict[str, str]:
-    return {a.get("key", "?"): _attr_value(a.get("value") or {}) for a in items or []}
-
-
-def parse_spans(body: dict[str, Any]) -> list[Span]:
-    """OTLP JSON — Tempo 는 `batches`(v1) 또는 `resourceSpans`(v2) 로 준다."""
-    batches = body.get("batches") or body.get("resourceSpans") or (body.get("trace") or {}).get("resourceSpans") or []
-    spans: list[Span] = []
-    for b in batches:
-        res_attrs = _attrs((b.get("resource") or {}).get("attributes"))
-        service = res_attrs.get("service.name", "?")
-        for ss in b.get("scopeSpans") or b.get("instrumentationLibrarySpans") or []:
-            for s in ss.get("spans") or []:
-                status = s.get("status") or {}
-                spans.append(Span(
-                    service=service, name=s.get("name", "?"), span_id=s.get("spanId", ""),
-                    parent_id=s.get("parentSpanId", "") or "",
-                    start_ns=int(s.get("startTimeUnixNano") or 0), end_ns=int(s.get("endTimeUnixNano") or 0),
-                    status_code=str(status.get("code", "")), attrs=_attrs(s.get("attributes")),
-                ))
-    return spans
-
-
-def trace_lines(trace_id: str, spans: list[Span], top: int) -> list[str]:
+def trace_lines(trace_id: str, spans: Sequence[Span], top: int) -> list[str]:
     if not spans:
         return ["트레이스 %s — span 없음" % trace_id]
     start = min(s.start_ns for s in spans)
@@ -504,6 +681,10 @@ def trace_lines(trace_id: str, spans: list[Span], top: int) -> list[str]:
     return lines
 
 
+def tags_lines(scopes: Sequence[TagScope]) -> list[str]:
+    return ["[%s] %s" % (sc.name, ", ".join(sorted(sc.tags))) for sc in scopes] or ["(결과 없음)"]
+
+
 @dataclass
 class TraceqlArgs:
     cmd: str
@@ -517,46 +698,35 @@ class TraceqlArgs:
     top: int = 15
 
 
-def traceql_run(client: Client, a: TraceqlArgs, at: float | None = None) -> tuple[Evidence, Any, str]:
+def traceql_run(client: Client, a: TraceqlArgs, at: float | None = None) -> RunResult:
     window = Window.last(a.since, a.end, at)
-    w: dict[str, Any] = {"start": int(window.start), "end": int(window.end)}
+    w: Params = {"start": int(window.start), "end": int(window.end)}
 
     if a.cmd == "search":
-        params: dict[str, Any] = {**w, "limit": a.limit, "q": a.q, "minDuration": a.min_duration}
-        r = client.get("traces", "api/search", params)
-        _check_json(r.body)
-        lines = search_lines(r.body)
+        params: Params = {**w, "limit": a.limit, "q": a.q, "minDuration": a.min_duration}
+        body = check_json(client.get("traces", "api/search", params).body, "traces")
+        lines = search_lines(parse_search(body))
         kind, query = "traceql-search", "search(%s)" % (a.q or "")
     elif a.cmd == "trace":
         if not a.arg:
             raise ObsError("traceID 가 필요하다")
-        r = client.get("traces", "api/traces/%s" % a.arg)
-        _check_json(r.body)
-        lines = trace_lines(a.arg, parse_spans(r.body), a.top)
+        body = check_json(client.get("traces", "api/traces/%s" % a.arg).body, "traces")
+        lines = trace_lines(a.arg, parse_spans(body), a.top)
         kind, query = "traceql-trace", "trace(%s)" % a.arg
     elif a.cmd == "tags":
-        r = client.get("traces", "api/v2/search/tags", {**w, "scope": a.scope})
-        _check_json(r.body)
-        lines = ["[%s] %s" % (sc.get("name"), ", ".join(sorted(sc.get("tags") or [])))
-                 for sc in r.body.get("scopes") or []]
+        body = check_json(client.get("traces", "api/v2/search/tags", {**w, "scope": a.scope}).body, "traces")
+        lines = tags_lines(parse_tags(body))
         kind, query = "traceql-tags", "tags(%s)" % (a.scope or "")
     elif a.cmd == "tag-values":
         if not a.arg:
             raise ObsError("태그 이름이 필요하다")
-        r = client.get("traces", "api/v2/search/tag/%s/values" % a.arg, {**w, "q": a.q})
-        _check_json(r.body)
-        lines = sorted(str(v.get("value")) for v in r.body.get("tagValues") or [])
+        body = check_json(client.get("traces", "api/v2/search/tag/%s/values" % a.arg, {**w, "q": a.q}).body, "traces")
+        lines = sorted(parse_tag_values(body))
         kind, query = "traceql-tag-values", "tag_values(%s, %s)" % (a.arg, a.q or "")
     else:
         raise ObsError("알 수 없는 명령 %r — search · trace · tags · tag-values" % a.cmd)
 
-    ev = Evidence(backend="traces", query=query, window=window, value={"lines": lines or ["(결과 없음)"]})
-    return ev, r.body, kind
-
-
-def _check_json(body: Any) -> None:
-    if not isinstance(body, dict):
-        raise ObsError("traces 백엔드가 JSON 이 아닌 응답을 냈다: %s" % clip(str(body), 300))
+    return _evidence("traces", query, window, lines), body, kind
 
 
 def traceql_main(argv: Sequence[str] | None = None) -> None:
@@ -576,7 +746,7 @@ def traceql_main(argv: Sequence[str] | None = None) -> None:
     args = TraceqlArgs(cmd=a.cmd, arg=a.arg, q=a.q, since=a.since, end=a.end, limit=a.limit,
                        min_duration=a.min_duration, scope=a.scope, top=a.top)
     ev, body, kind = traceql_run(_client(), args)
-    _finish(a, ev, body, kind, force_spill=(a.cmd == "trace"))
+    _finish(ev, body, kind, a.max_lines, a.json, force_spill=(a.cmd == "trace"))
 
 
 # ── obs-doctor — 사람용. 물리가 보이는 유일한 출력 ───────────────────────────────

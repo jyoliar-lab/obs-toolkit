@@ -8,3 +8,8 @@ dependencies = []
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.pyright]
+include = ["obs", "tests", "skills"]
+pythonVersion = "3.10"
+typeCheckingMode = "strict"
