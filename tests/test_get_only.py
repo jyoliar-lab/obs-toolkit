@@ -25,6 +25,9 @@ def _py_files() -> list[Path]:
 
 
 def test_only_core_imports_http() -> None:
+    """GET 유일성의 절반 — HTTP 를 만지는 모듈은 obs/core.py 하나여야 한다.
+    obs/** 와 skills/** 의 파이썬 파일을 AST 로 훑어 urllib·http·socket·ssl·requests 류 import 가 core.py 밖에 없음을 확인한다.
+    새 어댑터가 자기 HTTP 클라이언트를 들이면 여기서 막힌다."""
     offenders: list[str] = []
     for path in _py_files():
         if path == ROOT / "obs" / "core.py":
@@ -49,6 +52,8 @@ def test_core_never_sets_http_method() -> None:
 
 
 def test_no_forbidden_method_names_in_core() -> None:
+    """느슨한 마지막 겹 — core.py 소스에 "POST"·"PUT"·"DELETE"·"PATCH"·set_method·get_method 문자열이 없어야 한다.
+    AST 검사가 놓칠 우회(문자열로 메서드를 조립하는 식)를 문자열 검색으로 한 번 더 막는다."""
     src = (ROOT / "obs" / "core.py").read_text(encoding="utf-8")
     for word in ('"POST"', '"PUT"', '"DELETE"', '"PATCH"', "set_method", "get_method"):
         assert word not in src, "코어에 GET 외 메서드 흔적: %s" % word

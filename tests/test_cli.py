@@ -25,6 +25,7 @@ def _no_physical(text: str) -> None:
 # ── promql ───────────────────────────────────────────────────────────────────────
 
 def test_promql_instant_up(make_client: ClientFactory) -> None:
+    """AC 3 의 첫 실측 `up` — 녹화 응답이 Evidence[Lines] 로 옮겨지고 시계열마다 `값  {레이블}` 한 줄이며, 나간 URL 에 query·time 이 있고 출력에 물리 정보가 없다."""
     client, t = make_client({"api/v1/query?": (200, load_fixture("promql-instant-up.json"))})
     ev, _, kind = cli.promql_run(client, cli.PromqlArgs(query="up"), at=1000.0)
     assert isinstance(ev, Evidence) and isinstance(ev.value, Lines) and ev.backend == "metrics" and ev.query == "up" and kind == "promql"
@@ -35,6 +36,7 @@ def test_promql_instant_up(make_client: ClientFactory) -> None:
 
 
 def test_promql_range_summary(make_client: ClientFactory) -> None:
+    """--range 구간 조회 — 창 길이가 계산되고 step 이 자동(range/60, 최소 15s)으로 붙으며, 시계열이 `n min max first last` 한 줄로 요약된다."""
     client, t = make_client({"api/v1/query_range": (200, load_fixture("promql-range-sum-up.json"))})
     ev, _, kind = cli.promql_run(client, cli.PromqlArgs(query="sum(up)", range_="30m"), at=10000.0)
     assert kind == "promql-range" and ev.window is not None and ev.window.seconds == 1800.0
@@ -43,18 +45,21 @@ def test_promql_range_summary(make_client: ClientFactory) -> None:
 
 
 def test_promql_points(make_client: ClientFactory) -> None:
+    """--points — 요약 대신 레이블 줄 아래 시각별 값이 전부 나온다(많으니 보통 spill 로 떨어지는 형태)."""
     client, _ = make_client({"api/v1/query_range": (200, load_fixture("promql-range-sum-up.json"))})
     ev, _, _ = cli.promql_run(client, cli.PromqlArgs(query="sum(up)", range_="30m", points=True), at=10000.0)
     assert ev.value.lines[0] == "{}" and len(ev.value.lines) == 7 and ev.value.lines[1].strip().endswith("65")
 
 
 def test_promql_requires_query(make_client: ClientFactory) -> None:
+    """질의 없이 즉시 조회를 부르면 ObsError — argparse 가 아니라 *_run 이 거부하므로 MCP 경로에서도 같은 검사가 산다."""
     client, _ = make_client()
     with pytest.raises(cli.ObsError):
         cli.promql_run(client, cli.PromqlArgs())
 
 
 def test_parse_metric_shapes() -> None:
+    """파서 단독 — vector 응답이 MetricResult(시계열·값)로, scalar 응답은 scalar 필드로 옮겨지고, 형태가 깨진 result 는 빈 목록으로 조용히 처리된다."""
     res = cli.parse_metric(cli.check_status(load_fixture("promql-instant-up.json"), "metrics"))
     assert res.result_type == "vector" and res.scalar is None and len(res.series) == 5
     assert all(len(s.values) == 1 and s.values[0][1] == "1" for s in res.series)
@@ -64,6 +69,7 @@ def test_parse_metric_shapes() -> None:
 
 
 def test_promql_backend_error_status(make_client: ClientFactory) -> None:
+    """HTTP 200 이지만 본문이 `status: error` 인 경우 — 논리 이름·errorType·메시지로 ObsError. 백엔드 이름(Prometheus)이 아니라 논리 이름(metrics)으로 말한다."""
     client, _ = make_client({"api/v1/query": (200, {"status": "error", "errorType": "bad_data", "error": "boom"})})
     with pytest.raises(cli.ObsError) as ei:
         cli.promql_run(client, cli.PromqlArgs(query="up"))
@@ -73,6 +79,8 @@ def test_promql_backend_error_status(make_client: ClientFactory) -> None:
 # ── logql ────────────────────────────────────────────────────────────────────────
 
 def test_logql_streams(make_client: ClientFactory) -> None:
+    """AC 3 의 둘째 실측 careerhub-prod 로그 — 공통 레이블은 머리에 한 번, 각 줄은 시각으로 시작하고 최신순이며, URL 에 limit·direction·나노초 창이 있고 출력에 물리 정보가 없다.
+    줄 수 기대값은 fixture 를 파서로 다시 읽어 계산한다(숫자를 하드코딩하지 않는다)."""
     client, t = make_client({"loki/api/v1/query_range": (200, load_fixture("logql-streams-careerhub-prod.json"))})
     ev, _, kind = cli.logql_run(client, cli.LogqlArgs(query='{namespace="careerhub-prod"}', limit=5), at=10000.0)
     lines = ev.value.lines
@@ -89,12 +97,14 @@ def test_logql_streams(make_client: ClientFactory) -> None:
 
 
 def test_logql_matrix(make_client: ClientFactory) -> None:
+    """메트릭형 LogQL(count_over_time) — resultType=matrix 를 알아보고 시계열 요약(`n=… detected_level=…`)으로 낸다."""
     client, _ = make_client({"loki/api/v1/query_range": (200, load_fixture("logql-matrix-count-over-time.json"))})
     ev, _, _ = cli.logql_run(client, cli.LogqlArgs(query="sum by (detected_level) (count_over_time({namespace=\"careerhub-prod\"}[5m]))"))
     assert all(l.startswith("n=") and "detected_level=" in l for l in ev.value.lines)
 
 
 def test_logql_width_clip(make_client: ClientFactory) -> None:
+    """--width — 로그 본문이 지정 폭에서 잘린다. 긴 줄이 컨텍스트를 먹지 않게 하는 절제다."""
     client, _ = make_client({"loki/api/v1/query_range": (200, load_fixture("logql-streams-careerhub-prod.json"))})
     ev, _, _ = cli.logql_run(client, cli.LogqlArgs(query="{a=\"b\"}", width=60))
     assert all(len(l.split("  ", 2)[-1]) <= 60 for l in ev.value.lines[1:])
@@ -103,6 +113,7 @@ def test_logql_width_clip(make_client: ClientFactory) -> None:
 # ── traceql ──────────────────────────────────────────────────────────────────────
 
 def test_traceql_search_then_trace(make_client: ClientFactory) -> None:
+    """AC 3 의 셋째 실측 — search 결과 첫 줄에서 trace ID 를 뽑아 trace 명령에 넣는 흐름. search URL 에 limit·창이 있고, trace URL 이 api/traces/<id> 로 끝나며, 요약(총시간·루트·오류 수)에 물리 정보가 없다."""
     client, t = make_client({"api/search": (200, load_fixture("traceql-search.json")),
                              "api/traces/": (200, load_fixture("traceql-trace.json"))})
     ev, _, kind = cli.traceql_run(client, cli.TraceqlArgs(cmd="search", since="24h", limit=3), at=10000.0)
@@ -120,18 +131,22 @@ def test_traceql_search_then_trace(make_client: ClientFactory) -> None:
 
 
 def test_traceql_tags(make_client: ClientFactory) -> None:
+    """tags — scope 별로 `[resource] a, b, c` 한 줄. 탐색용 명령의 형식."""
     client, _ = make_client({"api/v2/search/tags": (200, load_fixture("traceql-tags.json"))})
     ev, _, _ = cli.traceql_run(client, cli.TraceqlArgs(cmd="tags"))
     assert any(l.startswith("[resource] ") and "service.name" in l for l in ev.value.lines)
 
 
 def test_traceql_trace_requires_id(make_client: ClientFactory) -> None:
+    """trace 명령에 ID 가 없으면 ObsError."""
     client, _ = make_client()
     with pytest.raises(cli.ObsError):
         cli.traceql_run(client, cli.TraceqlArgs(cmd="trace"))
 
 
 def test_parse_spans_error_detection() -> None:
+    """span 파서와 오류 표시 — 녹화 트레이스가 Span 으로 옮겨지고(service·오류 아님), 상태를 STATUS_CODE_ERROR 로 바꾸면 `오류 span: 1` 과 ✗ 줄이 나온다.
+    fixture dict 를 고치지 않고 dataclasses.replace 로 바꾼다 — Any 없이 쓰는 방식."""
     spans = cli.parse_spans(cli.check_json(load_fixture("traceql-trace.json"), "traces"))
     assert len(spans) == 1 and spans[0].service == "posting-service" and not spans[0].is_error
     errored = [dataclasses.replace(spans[0], status_code="STATUS_CODE_ERROR")]
@@ -142,6 +157,7 @@ def test_parse_spans_error_detection() -> None:
 # ── 출력 절제 ────────────────────────────────────────────────────────────────────
 
 def test_emit_truncates_and_spills(tmp_path: Path) -> None:
+    """출력 절제 — max_lines 를 넘으면 앞부분만 찍고 "N줄 더 있음" 과 spill 경로를 안내하며, 원본 전체가 그 경로에 JSON 으로 있다."""
     env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     out: list[str] = []
     res = cli.emit(["l%d" % i for i in range(10)], {"full": True}, "k", max_lines=3, env=env, out=out.append)
@@ -151,6 +167,7 @@ def test_emit_truncates_and_spills(tmp_path: Path) -> None:
 
 
 def test_emit_force_spill(tmp_path: Path) -> None:
+    """force_spill — 잘리지 않아도 원본을 파일로 떨어뜨린다(trace 처럼 원본이 늘 큰 종류)."""
     env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     out: list[str] = []
     res = cli.emit(["a"], {"x": 1}, "k", max_lines=3, force_spill=True, env=env, out=out.append)
@@ -158,6 +175,7 @@ def test_emit_force_spill(tmp_path: Path) -> None:
 
 
 def test_emit_no_spill_when_fits(tmp_path: Path) -> None:
+    """상한 안에 들어가면 spill 하지 않는다 — tmp/obs 디렉터리조차 만들지 않는다."""
     env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     res = cli.emit(["a", "b"], {}, "k", max_lines=3, env=env, out=lambda s: None)
     assert res.raw_ref is None and not (tmp_path / "tmp" / "obs").exists()
@@ -166,6 +184,7 @@ def test_emit_no_spill_when_fits(tmp_path: Path) -> None:
 # ── doctor 렌더링 — 물리가 보이는 유일한 출력 ─────────────────────────────────────
 
 def test_doctor_lines_show_url_and_hide_token() -> None:
+    """AC 2 — obs-doctor 렌더링에는 URL·uid·출처가 보이고(물리가 보이는 유일한 출력), 토큰은 있음/없음만이며, 실패 probe 는 ✗·HTTP 상태·문구와 "문제 있음" 결론으로 이어진다."""
     rep = DoctorReport(
         grafana_url=Resolved("https://gw.example", "default"), proxy_prefix=Resolved("/p", "default"),
         uids={"metrics": Resolved("prom", "env:OBS_UID_METRICS")}, config_path=None, config_candidates=["/x/config.json"],
@@ -181,6 +200,7 @@ def test_doctor_lines_show_url_and_hide_token() -> None:
 
 @pytest.mark.parametrize("main", [cli.promql_main, cli.logql_main, cli.traceql_main])
 def test_no_physical_flags(main: Callable[[list[str]], None], capsys: pytest.CaptureFixture[str]) -> None:
+    """AC 2 의 반대편 — 세 명령의 --help 에 --uid·--url·--token·--host 가 없고 물리 문자열도 없다. agent 인터페이스에 물리 인자를 두지 않는다는 요구."""
     with pytest.raises(SystemExit):
         main(["--help"])
     text = capsys.readouterr().out
@@ -192,6 +212,7 @@ def test_no_physical_flags(main: Callable[[list[str]], None], capsys: pytest.Cap
 # ── 플러그인 골격 ────────────────────────────────────────────────────────────────
 
 def test_scripts_are_thin_executable_shims() -> None:
+    """skills/obs-query/scripts 의 4개 파일은 실행 가능하고 20줄 미만의 shim 이며 본체 함수(obs.adapters.cli.*_main)를 부른다 — 로직이 스크립트로 새지 않는다."""
     d = ROOT / "skills" / "obs-query" / "scripts"
     for name, fn in (("promql.py", "promql_main"), ("logql.py", "logql_main"), ("traceql.py", "traceql_main"), ("obs-doctor", "doctor_main")):
         p = d / name
@@ -201,6 +222,7 @@ def test_scripts_are_thin_executable_shims() -> None:
 
 
 def test_plugin_manifests() -> None:
+    """플러그인 골격 — plugin.json 이름, marketplace.json 이 자기 자신(./)을 가리킴, hooks.json 이 ${CLAUDE_PLUGIN_ROOT} 로 session-env.sh 를 부르고 그 스크립트가 CLAUDE_ENV_FILE 에 PATH·PYTHONPATH 를 쓴다."""
     plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
     assert plugin["name"] == "obs-toolkit"
     market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text())
@@ -213,6 +235,7 @@ def test_plugin_manifests() -> None:
 
 
 def test_skill_frontmatter_spec_fields_only() -> None:
+    """SKILL.md 프론트매터는 Agent Skills 스펙 6필드 안에서만(name·description 이 앞), name 이 디렉터리 이름과 같고, 본문에 물리 정보(호스트·경로)가 없다."""
     text = (ROOT / "skills" / "obs-query" / "SKILL.md").read_text(encoding="utf-8")
     m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
     assert m
@@ -224,6 +247,7 @@ def test_skill_frontmatter_spec_fields_only() -> None:
 
 
 def test_gitignore_and_rules() -> None:
+    """저장소 기본 — .gitignore 에 tmp/·settings.local.json, 규칙 파일(.claude/rules/python-typehints.md)과 CI 워크플로가 있다."""
     gi = (ROOT / ".gitignore").read_text().splitlines()
     assert "tmp/" in gi and "settings.local.json" in gi
     assert (ROOT / ".claude" / "rules" / "python-typehints.md").is_file()
