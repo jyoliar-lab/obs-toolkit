@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping, Protocol
+from typing import Callable, Iterator, Mapping, ParamSpec, Protocol
 
 import pytest
 
-from obs.core import JSON, Client, Config, TransportError, load_config
+from obs.adapters import cli
+from obs.core import JSON, Client, Config, Evidence, Lines, TransportError, load_config
 
 ROOT: Path = Path(__file__).resolve().parents[1]
 FIXTURES: Path = ROOT / "fixtures"
@@ -69,3 +71,38 @@ def make_client(config: Config) -> ClientFactory:
         t = FakeTransport(routes=routes or {}, fail=fail)
         return Client(config=config, token="test-token-not-real", transport=t), t
     return _make
+
+
+# ── 출력 덤프 — 테스트가 받은 Evidence 를 사람이 파일로 본다 ─────────────────────
+
+P = ParamSpec("P")
+
+
+def _recording(fn: Callable[P, cli.RunResult], sink: list[Evidence[Lines]]) -> Callable[P, cli.RunResult]:
+    def wrapped(*args: P.args, **kwargs: P.kwargs) -> cli.RunResult:
+        result = fn(*args, **kwargs)
+        sink.append(result[0])
+        return result
+    return wrapped
+
+
+@pytest.fixture(autouse=True)
+def dump_evidence(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """OBS_TEST_DUMP=1 이면 각 테스트가 promql_run·logql_run·traceql_run 에서 받은 Evidence.value.lines 를
+    tmp/test-output/<테스트 이름>.txt 로 쓴다. 테스트 본문은 건드리지 않는다 — cli 모듈의 함수를 감싸서 가로챈다.
+    env 가 없으면 아무것도 하지 않는다(CI · 평소 실행)."""
+    if not os.environ.get("OBS_TEST_DUMP"):
+        yield
+        return
+    captured: list[Evidence[Lines]] = []
+    monkeypatch.setattr(cli, "promql_run", _recording(cli.promql_run, captured))
+    monkeypatch.setattr(cli, "logql_run", _recording(cli.logql_run, captured))
+    monkeypatch.setattr(cli, "traceql_run", _recording(cli.traceql_run, captured))
+    yield
+    if not captured:
+        return
+    out = ROOT / "tmp" / "test-output" / (request.node.name + ".txt")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    blocks = ["# %s  %s  %s\n%s" % (e.backend, e.query, e.window.label() if e.window else "-", "\n".join(e.value.lines))
+              for e in captured]
+    out.write_text("\n\n".join(blocks) + "\n", encoding="utf-8")

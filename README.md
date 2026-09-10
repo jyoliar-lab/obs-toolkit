@@ -30,4 +30,5 @@ agent 인터페이스에는 URL · uid · 토큰이 없다. 물리는 `obs-docto
 python -m pip install pytest==9.1.1 pyright==1.1.411
 python -m pyright   # strict — Any 없음
 python -m pytest
+OBS_TEST_DUMP=1 python -m pytest tests/test_cli.py   # 각 테스트가 받은 Evidence.lines 를 tmp/test-output/ 에 덤프
 ```
