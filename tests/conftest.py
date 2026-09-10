@@ -5,7 +5,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterator, Mapping, ParamSpec, Protocol
+from typing import Callable, Iterator, Mapping, ParamSpec, Protocol, cast
 
 import pytest
 
@@ -101,7 +101,8 @@ def dump_evidence(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatc
     yield
     if not captured:
         return
-    out = ROOT / "tmp" / "test-output" / (request.node.name + ".txt")
+    node = cast(pytest.Item, getattr(request, "node"))   # FixtureRequest.node 는 pytest stub 에 타입이 없다
+    out = ROOT / "tmp" / "test-output" / (node.name + ".txt")
     out.parent.mkdir(parents=True, exist_ok=True)
     blocks = ["# %s  %s  %s\n%s" % (e.backend, e.query, e.window.label() if e.window else "-", "\n".join(e.value.lines))
               for e in captured]
