@@ -10,7 +10,7 @@ from typing import Callable, Iterator, Mapping, ParamSpec, Protocol, cast
 import pytest
 
 from obs.adapters import cli
-from obs.core import JSON, Client, Config, Evidence, Lines, TransportError, load_config
+from obs.core import JSON, Client, Config, DoctorReport, TransportError, load_config
 
 ROOT: Path = Path(__file__).resolve().parents[1]
 FIXTURES: Path = ROOT / "fixtures"
@@ -78,32 +78,47 @@ def make_client(config: Config) -> ClientFactory:
 P = ParamSpec("P")
 
 
-def _recording(fn: Callable[P, cli.RunResult], sink: list[Evidence[Lines]]) -> Callable[P, cli.RunResult]:
+@dataclass(frozen=True)
+class Block:
+    """덤프 파일의 한 블록 — 제목 줄과 본문 줄."""
+    title: str
+    lines: list[str]
+
+
+def _recording(fn: Callable[P, cli.RunResult], sink: list[Block]) -> Callable[P, cli.RunResult]:
     def wrapped(*args: P.args, **kwargs: P.kwargs) -> cli.RunResult:
         result = fn(*args, **kwargs)
-        sink.append(result[0])
+        e = result[0]
+        sink.append(Block("# %s  %s  %s" % (e.backend, e.query, e.window.label() if e.window else "-"), e.value.lines))
         return result
+    return wrapped
+
+
+def _recording_doctor(fn: Callable[[DoctorReport], list[str]], sink: list[Block]) -> Callable[[DoctorReport], list[str]]:
+    def wrapped(rep: DoctorReport) -> list[str]:
+        lines = fn(rep)
+        sink.append(Block("# doctor", lines))
+        return lines
     return wrapped
 
 
 @pytest.fixture(autouse=True)
 def dump_evidence(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """OBS_TEST_DUMP=1 이면 각 테스트가 promql_run·logql_run·traceql_run 에서 받은 Evidence.value.lines 를
-    tmp/test-output/<테스트 이름>.txt 로 쓴다. 테스트 본문은 건드리지 않는다 — cli 모듈의 함수를 감싸서 가로챈다.
-    env 가 없으면 아무것도 하지 않는다(CI · 평소 실행)."""
+    """OBS_TEST_DUMP=1 이면 각 테스트가 promql_run·logql_run·traceql_run 에서 받은 Evidence.value.lines 와
+    doctor_lines 의 반환을 tmp/test-output/<테스트 이름>.txt 로 쓴다. 테스트 본문은 건드리지 않는다 —
+    cli 모듈의 함수를 감싸서 가로챈다. env 가 없으면 아무것도 하지 않는다(CI · 평소 실행)."""
     if not os.environ.get("OBS_TEST_DUMP"):
         yield
         return
-    captured: list[Evidence[Lines]] = []
+    captured: list[Block] = []
     monkeypatch.setattr(cli, "promql_run", _recording(cli.promql_run, captured))
     monkeypatch.setattr(cli, "logql_run", _recording(cli.logql_run, captured))
     monkeypatch.setattr(cli, "traceql_run", _recording(cli.traceql_run, captured))
+    monkeypatch.setattr(cli, "doctor_lines", _recording_doctor(cli.doctor_lines, captured))
     yield
     if not captured:
         return
     node = cast(pytest.Item, getattr(request, "node"))   # FixtureRequest.node 는 pytest stub 에 타입이 없다
     out = ROOT / "tmp" / "test-output" / (node.name + ".txt")
     out.parent.mkdir(parents=True, exist_ok=True)
-    blocks = ["# %s  %s  %s\n%s" % (e.backend, e.query, e.window.label() if e.window else "-", "\n".join(e.value.lines))
-              for e in captured]
-    out.write_text("\n\n".join(blocks) + "\n", encoding="utf-8")
+    out.write_text("\n\n".join("%s\n%s" % (b.title, "\n".join(b.lines)) for b in captured) + "\n", encoding="utf-8")
