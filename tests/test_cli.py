@@ -184,7 +184,7 @@ def test_emit_no_spill_when_fits(tmp_path: Path) -> None:
 # ── doctor 렌더링 — 물리가 보이는 유일한 출력 ─────────────────────────────────────
 
 def test_doctor_lines_show_url_and_hide_token() -> None:
-    """AC 2 — obs-doctor 렌더링에는 URL·uid·출처가 보이고(물리가 보이는 유일한 출력), 토큰은 있음/없음만이며, 실패 probe 는 ✗·HTTP 상태·문구와 "문제 있음" 결론으로 이어진다."""
+    """AC 2 — obs-doctor.py 렌더링에는 URL·uid·출처가 보이고(물리가 보이는 유일한 출력), 토큰은 있음/없음만이며, 실패 probe 는 ✗·HTTP 상태·문구와 "문제 있음" 결론으로 이어진다."""
     rep = DoctorReport(
         grafana_url=Resolved("https://gw.example", "default"), proxy_prefix=Resolved("/p", "default"),
         uids={"metrics": Resolved("prom", "env:OBS_UID_METRICS")}, config_path=None, config_candidates=["/x/config.json"],
@@ -214,7 +214,7 @@ def test_no_physical_flags(main: Callable[[list[str]], None], capsys: pytest.Cap
 def test_scripts_are_thin_executable_shims() -> None:
     """skills/obs-query/scripts 의 4개 파일은 실행 가능하고 20줄 미만의 shim 이며 본체 함수(obs.adapters.cli.*_main)를 부른다 — 로직이 스크립트로 새지 않는다."""
     d = ROOT / "skills" / "obs-query" / "scripts"
-    for name, fn in (("promql.py", "promql_main"), ("logql.py", "logql_main"), ("traceql.py", "traceql_main"), ("obs-doctor", "doctor_main")):
+    for name, fn in (("promql.py", "promql_main"), ("logql.py", "logql_main"), ("traceql.py", "traceql_main"), ("obs-doctor.py", "doctor_main")):
         p = d / name
         assert p.stat().st_mode & stat.S_IXUSR, "%s 는 실행 가능해야 한다" % name
         src = p.read_text(encoding="utf-8")

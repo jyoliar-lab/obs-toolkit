@@ -1,4 +1,4 @@
-"""obs.adapters.cli — Claude Code(셸 있는 호스트)용 명령 4개: promql · logql · traceql · obs-doctor.
+"""obs.adapters.cli — Claude Code(셸 있는 호스트)용 명령 4개: promql · logql · traceql · obs-doctor.py.
 
 호스트 특정 코드는 여기(어댑터)에만 있다 — stdout 절제(max_lines) · spill 경로 · exit 코드.
 코어 함수는 dataclass 를 주고받는다. 각 `*_run` 은 Evidence 를 돌려주고, `*_main` 이 그것을 stdout 에 찍는다 —
@@ -8,7 +8,7 @@
 `Any` 는 쓰지 않는다.
 
 agent 인터페이스에 물리(URL · uid · 토큰)가 없다. `--uid` 같은 인자를 두지 않는다 — 논리 이름은 명령 자체가 정한다
-(promql → metrics · logql → logs · traceql → traces). 물리는 `obs-doctor` 만 사람에게 보인다.
+(promql → metrics · logql → logs · traceql → traces). 물리는 `obs-doctor.py` 만 사람에게 보인다.
 """
 from __future__ import annotations
 
@@ -749,15 +749,15 @@ def traceql_main(argv: Sequence[str] | None = None) -> None:
     _finish(ev, body, kind, a.max_lines, a.json, force_spill=(a.cmd == "trace"))
 
 
-# ── obs-doctor — 사람용. 물리가 보이는 유일한 출력 ───────────────────────────────
+# ── obs-doctor.py — 사람용. 물리가 보이는 유일한 출력 ───────────────────────────────
 
-DOCTOR_DOC = """obs-doctor — 사람용 진단. 해석된 물리 경로(URL·uid) · 설정 출처 · 연결 · 인증 상태를 보여준다.
+DOCTOR_DOC = """obs-doctor.py — 사람용 진단. 해석된 물리 경로(URL·uid) · 설정 출처 · 연결 · 인증 상태를 보여준다.
 
 agent 가 받는 오류("metrics 백엔드 인증 실패(401) — 사람에게")의 원인을 사람이 여기서 본다.
 토큰 값은 절대 보이지 않는다 — 있음/없음만.
 
-  obs-doctor            진단 실행
-  obs-doctor --json     같은 내용을 JSON 으로
+  obs-doctor.py            진단 실행
+  obs-doctor.py --json     같은 내용을 JSON 으로
 """
 
 
@@ -784,7 +784,7 @@ def doctor_lines(rep: DoctorReport) -> list[str]:
 
 
 def doctor_main(argv: Sequence[str] | None = None) -> None:
-    ap = argparse.ArgumentParser(prog="obs-doctor", description=DOCTOR_DOC,
+    ap = argparse.ArgumentParser(prog="obs-doctor.py", description=DOCTOR_DOC,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)

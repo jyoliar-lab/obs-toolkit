@@ -180,12 +180,12 @@ def test_query_error_passes_backend_message(make_client: ClientFactory) -> None:
 
 
 def test_transport_failure_is_logical(make_client: ClientFactory) -> None:
-    """연결 실패(DNS·VPN) — 논리 이름으로 "닿지 못했다" 와 obs-doctor 안내만 말하고 호스트·uid 는 없다."""
+    """연결 실패(DNS·VPN) — 논리 이름으로 "닿지 못했다" 와 obs-doctor.py 안내만 말하고 호스트·uid 는 없다."""
     client, _ = make_client(fail="[Errno 8] nodename nor servname provided")
     with pytest.raises(ObsError) as ei:
         client.get("traces", "api/search")
     msg = str(ei.value)
-    assert msg.startswith("traces 백엔드에 닿지 못했다") and "obs-doctor" in msg
+    assert msg.startswith("traces 백엔드에 닿지 못했다") and "obs-doctor.py" in msg
     for word in PHYSICAL:
         assert word not in msg
 

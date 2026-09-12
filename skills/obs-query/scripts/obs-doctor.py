@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""obs-doctor — 얇은 shim. 본체는 obs/adapters/cli.py 의 doctor_main 이다.
+"""obs-doctor.py — 얇은 shim. 본체는 obs/adapters/cli.py 의 doctor_main 이다.
 플러그인 루트(이 파일의 세 단계 위)를 sys.path 에 올려 PYTHONPATH 없이도 돈다."""
 import os
 import sys

@@ -20,7 +20,7 @@ def _imports(tree: ast.AST) -> set[str]:
 
 def _py_files() -> list[Path]:
     files = list((ROOT / "obs").rglob("*.py"))
-    files += [p for p in (ROOT / "skills").rglob("*") if p.is_file() and (p.suffix == ".py" or p.name == "obs-doctor")]
+    files += list((ROOT / "skills").rglob("*.py"))
     return files
 
 

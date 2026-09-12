@@ -405,15 +405,15 @@ def _urllib_transport(url: str, headers: Mapping[str, str], timeout: float) -> t
 def http_error_message(backend: str, code: int, body: str) -> str:
     """상태별로 논리 이름 · 상태 · 다음 행동만. 질의 오류(400·422)는 백엔드 메시지를 통과시킨다 — agent 가 고칠 수 있다."""
     if code == 401:
-        return "%s 백엔드 인증 실패(401). 사람에게: %s 확인(obs-doctor)." % (backend, ENV_TOKEN)
+        return "%s 백엔드 인증 실패(401). 사람에게: %s 확인(obs-doctor.py)." % (backend, ENV_TOKEN)
     if code in (403, 404, 405):
-        return "%s 백엔드가 요청을 거부했다(%d). 읽기 경로 밖이거나 백엔드가 없다 — 사람에게(obs-doctor)." % (backend, code)
+        return "%s 백엔드가 요청을 거부했다(%d). 읽기 경로 밖이거나 백엔드가 없다 — 사람에게(obs-doctor.py)." % (backend, code)
     if code in (400, 422):
         msg = _json_message(body)
         return "%s 백엔드가 질의를 거부했다(%d)%s — 질의를 고쳐 다시." % (backend, code, (": " + msg) if msg else "")
     if code == 429:
         return "%s 백엔드가 속도 제한을 걸었다(429). 잠시 후 다시, 범위를 좁혀서." % backend
-    return "%s 백엔드 오류(%d). 잠시 후 다시, 반복되면 사람에게(obs-doctor)." % (backend, code)
+    return "%s 백엔드 오류(%d). 잠시 후 다시, 반복되면 사람에게(obs-doctor.py)." % (backend, code)
 
 
 def _json_message(body: str) -> str:
@@ -463,7 +463,7 @@ class Client:
         try:
             status, raw = transport(url, headers, self.timeout)
         except TransportError as e:
-            raise ObsError("%s 백엔드에 닿지 못했다(%s). 사람에게: 게이트웨이·VPN 확인(obs-doctor)." % (backend, e))
+            raise ObsError("%s 백엔드에 닿지 못했다(%s). 사람에게: 게이트웨이·VPN 확인(obs-doctor.py)." % (backend, e))
         self.budget.charge_bytes(len(raw))
         if status >= 400:
             raise ObsError(http_error_message(backend, status, raw.decode("utf-8", "replace")))
