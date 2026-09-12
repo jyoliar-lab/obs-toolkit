@@ -36,11 +36,15 @@ def test_parse_time() -> None:
 
 
 def test_window() -> None:
-    """Window — since/end 로 창을 만들고(길이·경계), with_baseline 이 같은 길이의 창을 앞으로 옮겨 기준선으로 달며, label 과 to_dict(중첩 baseline 포함)가 맞는지."""
+    """Window — since/end 로 창을 만들고(길이·경계), shifted 가 창을 옮기며, with_baseline 은 본 창을 그대로 둔 채
+    같은 창을 offset 만큼 앞으로 옮겨 기준선으로 달고(start·end 둘 다 명시 검증), label 과 to_dict(중첩 baseline 포함)가 맞는지."""
     w = Window.last("1h", "-30m", at=10000.0)
     assert (w.start, w.end, w.seconds) == (4600.0, 8200.0, 3600.0)
+    assert w.shifted(60) == Window(4660.0, 8260.0)
     b = w.with_baseline("1d")
-    assert b.baseline is not None and b.baseline.end == w.end - 86400 and b.baseline.seconds == w.seconds
+    assert (b.start, b.end) == (w.start, w.end)                                   # 본 창은 그대로
+    assert b.baseline is not None
+    assert (b.baseline.start, b.baseline.end) == (w.start - 86400, w.end - 86400)  # 하루 앞의 같은 창
     assert w.label() == "%s ~ %s" % (fmt_rfc3339(4600.0), fmt_rfc3339(8200.0))
     d = to_dict(b)
     assert isinstance(d, dict)
