@@ -75,14 +75,16 @@ def test_spill_root_prefers_project_dir(tmp_path: Path) -> None:
 
 
 def test_spill_writes_and_prunes(tmp_path: Path) -> None:
-    """spill — 원본이 JSON 파일로 떨어지고, keep 개를 넘으면 오래된 것부터 지워 최근 것만 남으며, spill_ref 가 프로젝트 기준 상대 경로를 돌려준다."""
+    """spill — 원본이 JSON 파일로 떨어지고(이름은 재사용되지 않는다), keep 개를 넘으면 오래된 것부터 지워 정확히 최근 keep 개(어느 파일인지 · 내용까지)만 남으며,
+    spill_ref 가 프로젝트 기준 상대 경로를 돌려준다."""
     env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     paths = [spill("k", {"i": i}, env, keep=3) for i in range(5)]
     root = spill_root(env)
     assert all(p.parent == root for p in paths)
-    remaining = sorted(root.glob("*.json"))
-    assert len(remaining) == 3
-    assert json.loads(paths[-1].read_text()) == {"i": 4} and paths[-1] in remaining
+    assert len(set(paths)) == 5                                                        # 이름 재사용 없음 — raw_ref 는 그 응답만 가리킨다
+    assert set(root.glob("*.json")) == set(paths[2:])                                  # 최근 3개만 남는다
+    assert all(not p.exists() for p in paths[:2])                                     # 오래된 2개는 지워졌다
+    assert [json.loads(p.read_text()) for p in paths[2:]] == [{"i": 2}, {"i": 3}, {"i": 4}]   # 내용도 제자리
     assert spill_ref(paths[-1], env) == "tmp/obs/" + paths[-1].name
 
 
@@ -93,6 +95,18 @@ def test_prune_oldest_first(tmp_path: Path) -> None:
         p.write_text("{}")
         os.utime(p, (1000 + i, 1000 + i))
     assert prune(tmp_path, keep=2) == 2
+    assert sorted(p.name for p in tmp_path.glob("*.json")) == ["2.json", "3.json"]
+
+
+def test_prune_protects_just_written_file(tmp_path: Path) -> None:
+    """prune 의 protect — 방금 쓴 파일은 mtime 이 가장 오래돼 보여도 지우지 않고, 나머지에서 keep-1 개만 남긴다.
+    같은 초 안에 여러 번 spill 할 때 이름 순서(-2, -3 접미)가 mtime 동률을 잘못 가르는 경우를 구조로 막는다."""
+    files = [tmp_path / ("%d.json" % i) for i in range(4)]
+    for i, p in enumerate(files):
+        p.write_text("{}")
+        os.utime(p, (1000 + i, 1000 + i))
+    os.utime(files[3], (900, 900))                       # 방금 쓴 파일인데 mtime 은 가장 오래됨
+    assert prune(tmp_path, keep=2, protect=files[3]) == 2
     assert sorted(p.name for p in tmp_path.glob("*.json")) == ["2.json", "3.json"]
 
 

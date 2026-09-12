@@ -299,25 +299,30 @@ def spill_root(env: Mapping[str, str] | None = None, cwd: Path | None = None) ->
 
 def spill(kind: str, payload: object, env: Mapping[str, str] | None = None,
           cwd: Path | None = None, keep: int = SPILL_KEEP) -> Path:
-    """원본 전체를 <spill_root>/<UTC시각>-<kind>.json 으로 떨어뜨리고 경로를 돌려준다. 최근 keep 개만 남긴다."""
+    """원본 전체를 <spill_root>/<UTC시각.마이크로초>-<kind>.json 으로 떨어뜨리고 경로를 돌려준다. 최근 keep 개만 남긴다.
+    이름은 재사용되지 않는다 — 한 번 안내한 raw_ref 는 그 응답만 가리킨다."""
     root = spill_root(env, cwd)
     root.mkdir(parents=True, exist_ok=True)
-    stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    # 마이크로초까지 — 같은 초 안의 spill 이 지워진 이름을 다시 받아, 앞서 안내한 raw_ref 가 다른 응답을 가리키는 일을 막는다
+    stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     path = root / ("%s-%s.json" % (stamp, kind))
     n = 1
     while path.exists():
         n += 1
         path = root / ("%s-%s-%d.json" % (stamp, kind, n))
     path.write_text(json.dumps(to_dict(payload), ensure_ascii=False, indent=1), encoding="utf-8")
-    prune(root, keep)
+    prune(root, keep, protect=path)
     return path
 
 
-def prune(root: Path, keep: int = SPILL_KEEP) -> int:
-    """오래된 spill 파일부터 지워 keep 개만 남긴다. 지운 수를 돌려준다."""
-    files = sorted(root.glob("*.json"), key=lambda p: (p.stat().st_mtime, p.name))
+def prune(root: Path, keep: int = SPILL_KEEP, protect: Path | None = None) -> int:
+    """오래된 spill 파일부터 지워 keep 개만 남긴다. 지운 수를 돌려준다.
+
+    `protect`(방금 쓴 파일)는 후보에서 뺀다 — mtime 이 같은 파일들 사이의 정렬 순서에 기대지 않고
+    "방금 쓴 원본은 지워지지 않는다" 를 구조로 보장한다."""
+    files = sorted((p for p in root.glob("*.json") if p != protect), key=lambda p: (p.stat().st_mtime, p.name))
     removed = 0
-    for old in files[: max(0, len(files) - keep)]:
+    for old in files[: max(0, len(files) - (keep - 1 if protect is not None else keep))]:
         try:
             old.unlink()
             removed += 1
