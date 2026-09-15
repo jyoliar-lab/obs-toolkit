@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 import urllib.request
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -195,6 +196,40 @@ def test_not_found_is_agent_fixable(make_client: ClientFactory) -> None:
     assert "사람에게" in msg.split("다시", 1)[1]   # 반복되는 404 만 사람에게 — 순서가 그렇다
 
 
+@pytest.mark.parametrize("status", [502, 503, 504])
+def test_gateway_errors_are_agent_fixable(make_client: ClientFactory, status: int) -> None:
+    """502·503·504 는 "제때 답하지 못했다" — 무거운 질의가 흔한 원인이라 "좁혀 다시" 가 먼저 오고, 가벼운 질의도 그럴 때만 사람에게.
+    재시험 보고(#93 코멘트)의 새 마찰 1: 7d 창의 Loki 집계가 502 로 "사람에게" 가 됐다. 그 밖의 5xx(500)는 그대로 사람의 것."""
+    client, _ = make_client({"loki/api/v1/query_range": (status, b"<html>bad gateway obs.mg.jyo-liar.com</html>")})
+    with pytest.raises(ObsError) as ei:
+        client.get("logs", "loki/api/v1/query_range")
+    msg = str(ei.value)
+    assert msg.startswith("logs 백엔드가 제때 답하지 못했다(%d)" % status) and "좁혀 다시" in msg
+    assert "사람에게" in msg.split("다시", 1)[1]
+    for word in PHYSICAL:
+        assert word not in msg
+
+
+def test_read_timeout_is_agent_fixable(make_client: ClientFactory) -> None:
+    """읽기 시간 초과 — 닿기는 했는데 답이 없는 것 — 도 같은 분류다: 제한 시간(초)을 말하고 "좁혀 다시" 로 먼저 보낸다.
+    연결 실패(fail=)와 달리 "닿지 못했다" 라고 하지 않는다."""
+    client, _ = make_client(hang=True)
+    with pytest.raises(ObsError) as ei:
+        client.get("logs", "loki/api/v1/query_range")
+    msg = str(ei.value)
+    assert msg.startswith("logs 백엔드가 30초 안에 답하지 않았다") and "좁혀 다시" in msg and "닿지 못했다" not in msg
+    assert "사람에게" in msg.split("다시", 1)[1]
+
+
+def test_urllib_read_timeout_maps_to_transport_timeout(base_env: dict[str, str], slow_server: LocalServer) -> None:
+    """실제 urllib 경로 — 연결은 받되 응답을 미루는 로컬 서버에 짧은 timeout 으로 닿으면 TransportError 가 아니라
+    TransportTimeout 이 난다(맨손 TimeoutError 를 구분해 올린다). 그래서 Client 가 "좁혀 다시" 로 분류할 수 있다."""
+    client = Client(config=load_config({**base_env, "OBS_GRAFANA_URL": slow_server.base}), token="t", timeout=0.3)
+    with pytest.raises(ObsError) as ei:
+        client.get("logs", "loki/api/v1/query_range", {"query": "{a=\"b\"}"})
+    assert "안에 답하지 않았다" in str(ei.value) and "닿지 못했다" not in str(ei.value)
+
+
 def test_transport_failure_is_logical(make_client: ClientFactory) -> None:
     """연결 실패(DNS·VPN) — 논리 이름으로 "닿지 못했다" 와 obs-doctor.py 안내만 말하고 호스트·uid 는 없다."""
     client, _ = make_client(fail="[Errno 8] nodename nor servname provided")
@@ -223,13 +258,14 @@ class LocalServer:
     seen: list[str] = field(default_factory=list[str])
 
 
-@pytest.fixture
-def local_server() -> Iterator[LocalServer]:
+def _serve(delay: float) -> Iterator[LocalServer]:
     seen: list[str] = []
 
     class H(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             seen.append(self.path)
+            if delay:
+                time.sleep(delay)
             body = b'{"status":"success","data":{}}'
             self.send_response(200); self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
@@ -243,6 +279,17 @@ def local_server() -> Iterator[LocalServer]:
         yield LocalServer(base="http://127.0.0.1:%d" % srv.server_port, seen=seen)
     finally:
         srv.shutdown(); srv.server_close()
+
+
+@pytest.fixture
+def local_server() -> Iterator[LocalServer]:
+    yield from _serve(0)
+
+
+@pytest.fixture
+def slow_server() -> Iterator[LocalServer]:
+    """연결은 받되 응답을 1초 미룬다 — 읽기 시간 초과를 만든다."""
+    yield from _serve(1.0)
 
 
 def test_transport_never_consults_system_proxy(monkeypatch: pytest.MonkeyPatch, base_env: dict[str, str], local_server: LocalServer) -> None:

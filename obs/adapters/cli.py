@@ -13,6 +13,7 @@ agent 인터페이스에 물리(URL · uid · 토큰)가 없다. `--uid` 같은 
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from dataclasses import dataclass, field
 from typing import Callable, Mapping, Sequence
@@ -195,6 +196,7 @@ class Span:
     start_ns: int
     end_ns: int
     status_code: str      # STATUS_CODE_ERROR / 2 / ""
+    status_message: str = ""   # OTLP status.message — 오류 span 의 원인(계측 라이브러리가 스택을 붙이기도 한다)
     attrs: dict[str, str] = field(default_factory=dict[str, str])
 
     @property
@@ -255,11 +257,13 @@ def parse_spans(body: dict[str, JSON]) -> list[Span]:
         for ss in _list(bo.get("scopeSpans") or bo.get("instrumentationLibrarySpans")):
             for s in _list(_obj(ss).get("spans")):
                 so = _obj(s)
+                st = _obj(so.get("status"))
                 spans.append(Span(
                     service=service, name=_str(so.get("name"), "?"), span_id=_str(so.get("spanId")),
                     parent_id=_str(so.get("parentSpanId")),
                     start_ns=_int(so.get("startTimeUnixNano")), end_ns=_int(so.get("endTimeUnixNano")),
-                    status_code=_str(_obj(so.get("status")).get("code")), attrs=_attrs(so.get("attributes")),
+                    status_code=_str(st.get("code")), status_message=_str(st.get("message")),
+                    attrs=_attrs(so.get("attributes")),
                 ))
     return spans
 
@@ -655,6 +659,13 @@ def search_lines(hits: Sequence[TraceHit]) -> list[str]:
     return lines or ["(결과 없음 — 트레이스는 드물다. 창을 넓혀 다시: --since 24h · 7d)"]
 
 
+def error_reason(s: Span) -> str:
+    """오류 span 의 원인 한 줄 — status.message 의 첫 줄(스택은 개행·탭 뒤에 붙는다), 없으면 예외·HTTP 속성.
+    원본은 어차피 파일로 떨어진다 — 여기서는 jq 왕복 없이 원인이 보이면 된다."""
+    first = re.split(r"[\n\t]", s.status_message, maxsplit=1)[0].strip()
+    return first or s.attrs.get("exception.message") or s.attrs.get("error.message") or s.attrs.get("http.status_code") or ""
+
+
 def trace_lines(trace_id: str, spans: Sequence[Span], top: int) -> list[str]:
     if not spans:
         return ["트레이스 %s — span 없음" % trace_id]
@@ -672,8 +683,7 @@ def trace_lines(trace_id: str, spans: Sequence[Span], top: int) -> list[str]:
         "오류 span: %d" % len(errors),
     ]
     for s in errors[:10]:
-        msg = s.attrs.get("exception.message") or s.attrs.get("error.message") or s.attrs.get("http.status_code") or ""
-        lines.append("  ✗ %s / %s  %.1fms  %s" % (s.service, s.name, s.duration_ms, clip(msg, 120)))
+        lines.append("  ✗ %s / %s  %.1fms  %s" % (s.service, s.name, s.duration_ms, clip(error_reason(s), 160)))
     lines.append("느린 span top %d:" % top)
     for s in sorted(spans, key=lambda s: -s.duration_ms)[:top]:
         offset = (s.start_ns - start) / 1e6

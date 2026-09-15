@@ -10,7 +10,7 @@ from typing import Callable, Iterator, Mapping, ParamSpec, Protocol, cast
 import pytest
 
 from obs.adapters import cli
-from obs.core import JSON, Client, Config, DoctorReport, TransportError, load_config
+from obs.core import JSON, Client, Config, DoctorReport, TransportError, TransportTimeout, load_config
 
 ROOT: Path = Path(__file__).resolve().parents[1]
 FIXTURES: Path = ROOT / "fixtures"
@@ -32,12 +32,15 @@ class FakeTransport:
     """(url, headers, timeout) → (status, body). 경로 조각으로 응답을 고른다. 부른 기록을 남긴다."""
     routes: dict[str, tuple[int, object]] = field(default_factory=dict[str, tuple[int, object]])
     calls: list[Call] = field(default_factory=list[Call])
-    fail: str | None = None   # TransportError 문구 — 있으면 항상 실패
+    fail: str | None = None   # TransportError 문구 — 있으면 항상 실패(연결 실패)
+    hang: bool = False        # True 면 읽기 시간 초과(TransportTimeout) — 닿았는데 답이 없는 모양
 
     def __call__(self, url: str, headers: Mapping[str, str], timeout: float) -> tuple[int, bytes]:
         self.calls.append(Call(url=url, headers=dict(headers), timeout=timeout))
         if self.fail is not None:
             raise TransportError(self.fail)
+        if self.hang:
+            raise TransportTimeout("The read operation timed out")
         for frag, (status, body) in self.routes.items():
             if frag in url:
                 raw = body if isinstance(body, (bytes, bytearray)) else json.dumps(body).encode("utf-8")
@@ -62,13 +65,13 @@ def config(base_env: dict[str, str], tmp_path: Path) -> Config:
 
 
 class ClientFactory(Protocol):
-    def __call__(self, routes: dict[str, tuple[int, object]] | None = None, fail: str | None = None) -> tuple[Client, FakeTransport]: ...
+    def __call__(self, routes: dict[str, tuple[int, object]] | None = None, fail: str | None = None, hang: bool = False) -> tuple[Client, FakeTransport]: ...
 
 
 @pytest.fixture
 def make_client(config: Config) -> ClientFactory:
-    def _make(routes: dict[str, tuple[int, object]] | None = None, fail: str | None = None) -> tuple[Client, FakeTransport]:
-        t = FakeTransport(routes=routes or {}, fail=fail)
+    def _make(routes: dict[str, tuple[int, object]] | None = None, fail: str | None = None, hang: bool = False) -> tuple[Client, FakeTransport]:
+        t = FakeTransport(routes=routes or {}, fail=fail, hang=hang)
         return Client(config=config, token="test-token-not-real", transport=t), t
     return _make
 

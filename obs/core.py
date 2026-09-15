@@ -72,7 +72,12 @@ class BudgetExceeded(ObsError):
 
 
 class TransportError(Exception):
-    """전송 실패(연결·TLS·시간 초과). 메시지에 호스트를 담지 않는다 — transport 가 지운다."""
+    """전송 실패(연결·TLS·연결 시간 초과). 메시지에 호스트를 담지 않는다 — transport 가 지운다."""
+
+
+class TransportTimeout(TransportError):
+    """닿기는 했는데 제한 시간 안에 답이 오지 않았다(읽기 시간 초과). 연결 실패와 다르다 —
+    무거운 질의가 흔한 원인이라 agent 가 범위를 좁혀 고칠 수 있는 것으로 분류한다."""
 
 
 # ── 직렬화 ──────────────────────────────────────────────────────────────────────
@@ -401,16 +406,21 @@ def _urllib_transport(url: str, headers: Mapping[str, str], timeout: float) -> t
     except urllib.error.HTTPError as e:
         return int(e.code), e.read()
     except urllib.error.URLError as e:
+        # 연결 단계 실패 — 연결 시간 초과도 reason=TimeoutError 로 여기 온다. 닿지 못한 것이라 사람의 것.
         host = urllib.parse.urlsplit(url).hostname or ""
         raise TransportError(_scrub(str(e.reason), (host,)))
-    except (TimeoutError, OSError) as e:
+    except TimeoutError as e:
+        # 연결은 됐고 응답을 기다리다 초과 — urllib 가 감싸지 않고 그대로 올린다. 무거운 질의의 모양.
+        host = urllib.parse.urlsplit(url).hostname or ""
+        raise TransportTimeout(_scrub(str(e) or "timed out", (host,)))
+    except OSError as e:
         host = urllib.parse.urlsplit(url).hostname or ""
         raise TransportError(_scrub(str(e) or e.__class__.__name__, (host,)))
 
 
 def http_error_message(backend: str, code: int, body: str) -> str:
-    """상태별로 논리 이름 · 상태 · 다음 행동만. agent 가 고칠 수 있는 것(400·422 질의 오류, 404 없는 자원)은
-    백엔드 메시지를 통과시키고 "다시" 로 끝난다. 사람의 것(401·403·405·5xx)은 obs-doctor.py 로 보낸다."""
+    """상태별로 논리 이름 · 상태 · 다음 행동만. agent 가 고칠 수 있는 것(400·422 질의 오류, 404 없는 자원,
+    502·503·504 제때 못 답함 — 무거운 질의)은 "다시" 로 끝난다. 사람의 것(401·403·405·그 밖의 5xx)은 obs-doctor.py 로 보낸다."""
     if code == 401:
         return "%s 백엔드 인증 실패(401). 사람에게: %s 확인(obs-doctor.py)." % (backend, ENV_TOKEN)
     if code == 404:
@@ -424,6 +434,9 @@ def http_error_message(backend: str, code: int, body: str) -> str:
         return "%s 백엔드가 질의를 거부했다(%d)%s — 질의를 고쳐 다시." % (backend, code, (": " + msg) if msg else "")
     if code == 429:
         return "%s 백엔드가 속도 제한을 걸었다(429). 잠시 후 다시, 범위를 좁혀서." % backend
+    if code in (502, 503, 504):
+        return ("%s 백엔드가 제때 답하지 못했다(%d) — 무거운 질의가 흔한 원인이다: 창(--since)·구간([1d])·선택자를 좁혀 다시. "
+                "가벼운 질의(--since 5m)도 그러면 사람에게(obs-doctor.py)." % (backend, code))
     return "%s 백엔드 오류(%d). 잠시 후 다시, 반복되면 사람에게(obs-doctor.py)." % (backend, code)
 
 
@@ -473,6 +486,9 @@ class Client:
         transport = self.transport or _urllib_transport
         try:
             status, raw = transport(url, headers, self.timeout)
+        except TransportTimeout:
+            raise ObsError("%s 백엔드가 %.0f초 안에 답하지 않았다 — 무거운 질의가 흔한 원인이다: 창(--since)·구간([1d])·선택자를 좁혀 다시. "
+                           "가벼운 질의(--since 5m)도 그러면 사람에게(obs-doctor.py)." % (backend, self.timeout))
         except TransportError as e:
             raise ObsError("%s 백엔드에 닿지 못했다(%s). 사람에게: 게이트웨이·VPN 확인(obs-doctor.py)." % (backend, e))
         self.budget.charge_bytes(len(raw))
