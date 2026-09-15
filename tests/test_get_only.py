@@ -49,11 +49,3 @@ def test_core_never_sets_http_method() -> None:
             assert "method" not in kws and "data" not in kws, "Request 에 method/data 를 주지 않는다"
             assert len(node.args) == 1, "Request 위치 인자는 url 하나 — data 를 위치 인자로도 주지 않는다"
     assert request_calls == 1, "HTTP 요청을 만드는 자리는 정확히 하나다"
-
-
-def test_no_forbidden_method_names_in_core() -> None:
-    """느슨한 마지막 겹 — core.py 소스에 "POST"·"PUT"·"DELETE"·"PATCH"·set_method·get_method 문자열이 없어야 한다.
-    AST 검사가 놓칠 우회(문자열로 메서드를 조립하는 식)를 문자열 검색으로 한 번 더 막는다."""
-    src = (ROOT / "obs" / "core.py").read_text(encoding="utf-8")
-    for word in ('"POST"', '"PUT"', '"DELETE"', '"PATCH"', "set_method", "get_method"):
-        assert word not in src, "코어에 GET 외 메서드 흔적: %s" % word

@@ -3,13 +3,18 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import urllib.request
+from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from typing import Iterator
 
 import pytest
 
 from obs.core import (
-    Budget, Config, Lines, BudgetExceeded, Evidence, ObsError, Response, Window, doctor, fmt_rfc3339, http_error_message,
-    parse_duration, parse_time, prune, spill, spill_ref, spill_root, to_dict, to_json,
+    Budget, Config, Lines, BudgetExceeded, Client, Evidence, ObsError, Response, Window, doctor, fmt_rfc3339,
+    http_error_message, load_config, parse_duration, parse_time, prune, spill, spill_ref, spill_root, to_dict, to_json,
 )
 from tests.conftest import ClientFactory, FakeTransport
 
@@ -158,9 +163,9 @@ def test_get_non_json_body(make_client: ClientFactory) -> None:
     assert client.get("traces", "api/echo").body == "echo"
 
 
-@pytest.mark.parametrize("status,needle", [(401, "인증 실패"), (403, "거부"), (404, "거부"), (500, "오류"), (429, "속도 제한")])
+@pytest.mark.parametrize("status,needle", [(401, "인증 실패"), (403, "거부"), (405, "거부"), (500, "오류"), (429, "속도 제한")])
 def test_http_errors_are_logical(make_client: ClientFactory, status: int, needle: str) -> None:
-    """오류 문구 규약 — 401·403·404·500·429 가 논리 이름으로 시작하고 상태별 다음 행동을 말하며, 백엔드가 본문에 호스트를 흘려도 문구에 물리 문자열이 없다."""
+    """오류 문구 규약 — 401·403·405·500·429 는 사람의 것: 논리 이름으로 시작하고 상태별 다음 행동을 말하며, 백엔드가 본문에 호스트를 흘려도 문구에 물리 문자열이 없다."""
     client, _ = make_client({"loki/api/v1/query_range": (status, {"message": "secret host obs.mg.jyo-liar.com"})})
     with pytest.raises(ObsError) as ei:
         client.get("logs", "loki/api/v1/query_range")
@@ -177,6 +182,17 @@ def test_query_error_passes_backend_message(make_client: ClientFactory) -> None:
         client.get("metrics", "api/v1/query", {"query": "up}"})
     assert 'parse error: unexpected "}"' in str(ei.value) and "질의를 고쳐" in str(ei.value)
     assert http_error_message("logs", 422, "plain text reason") == "logs 백엔드가 질의를 거부했다(422): plain text reason — 질의를 고쳐 다시."
+
+
+def test_not_found_is_agent_fixable(make_client: ClientFactory) -> None:
+    """404 는 agent 가 고칠 수 있는 것(만료·오타 traceID, 없는 레이블) — 403/405 와 묶지 않고 백엔드 메시지를 통과시켜
+    "다시" 로 끝낸다. 시험 보고(#93 코멘트)의 마찰 3: 없는 traceID 가 "사람에게" 로 가 오진을 유도했다."""
+    client, _ = make_client({"api/traces/": (404, {"error": "trace not found"})})
+    with pytest.raises(ObsError) as ei:
+        client.get("traces", "api/traces/deadbeef")
+    msg = str(ei.value)
+    assert msg.startswith("traces 백엔드에 그 자원이 없다(404): trace not found") and "다시" in msg
+    assert "사람에게" in msg.split("다시", 1)[1]   # 반복되는 404 만 사람에게 — 순서가 그렇다
 
 
 def test_transport_failure_is_logical(make_client: ClientFactory) -> None:
@@ -196,6 +212,64 @@ def test_error_messages_never_carry_token(make_client: ClientFactory) -> None:
     with pytest.raises(ObsError) as ei:
         client.get("metrics", "api/v1/query")
     assert "test-token-not-real" not in str(ei.value)
+
+
+# ── 실제 transport — 로컬 HTTP 서버로 프록시 행위를 본다 ─────────────────────────
+
+@dataclass
+class LocalServer:
+    """요청 경로를 `seen` 에 기록하고 200 JSON 을 돌려주는 로컬 HTTP 서버."""
+    base: str
+    seen: list[str] = field(default_factory=list[str])
+
+
+@pytest.fixture
+def local_server() -> Iterator[LocalServer]:
+    seen: list[str] = []
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            seen.append(self.path)
+            body = b'{"status":"success","data":{}}'
+            self.send_response(200); self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:   # noqa: A002 — BaseHTTPRequestHandler 시그니처
+            return
+
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        yield LocalServer(base="http://127.0.0.1:%d" % srv.server_port, seen=seen)
+    finally:
+        srv.shutdown(); srv.server_close()
+
+
+def test_transport_never_consults_system_proxy(monkeypatch: pytest.MonkeyPatch, base_env: dict[str, str], local_server: LocalServer) -> None:
+    """마찰 4 — urllib 기본 opener 는 시스템 프록시(macOS _scproxy)를 조회하고, 그 경로가 CoreFoundation 의 argv 파싱을 깨워
+    `--series '{a="b"}'` 를 plist 로 읽으려다 stderr 에 경고를 흘린다. 코어의 transport 는 getproxies()·macOS sysconf 를
+    부르지 않아야 한다 — 부르면 여기서 AssertionError. env 프록시가 없는 보통의 경우를 본다."""
+    def forbidden(*_: object, **__: object) -> dict[str, str]:
+        raise AssertionError("시스템 프록시를 조회했다 — env 프록시만 봐야 한다")
+    monkeypatch.setattr(urllib.request, "getproxies", forbidden)
+    monkeypatch.setattr(urllib.request, "getproxies_macosx_sysconf", forbidden, raising=False)
+    monkeypatch.setattr(urllib.request, "proxy_bypass_macosx_sysconf", forbidden, raising=False)
+    for k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+        monkeypatch.delenv(k, raising=False)
+    client = Client(config=load_config({**base_env, "OBS_GRAFANA_URL": local_server.base}), token="t")
+    r = client.get("metrics", "api/v1/query", {"query": "up"})
+    assert r.status == 200 and local_server.seen == ["/api/datasources/proxy/uid/prometheus/api/v1/query?query=up"]
+
+
+def test_transport_honors_env_proxy(monkeypatch: pytest.MonkeyPatch, base_env: dict[str, str], local_server: LocalServer) -> None:
+    """env 프록시(HTTP_PROXY)는 따른다 — 클러스터·사내망 소비자를 위해. 목적지는 해석 불가능한 호스트(example.invalid)이고
+    요청이 로컬 프록시에 절대 URI 로 닿으면 env 프록시를 쓴 것이다."""
+    monkeypatch.setenv("HTTP_PROXY", local_server.base)
+    monkeypatch.delenv("NO_PROXY", raising=False); monkeypatch.delenv("no_proxy", raising=False)
+    client = Client(config=load_config({**base_env, "OBS_GRAFANA_URL": "http://example.invalid"}), token="t")
+    r = client.get("metrics", "api/v1/query", {"query": "up"})
+    assert r.status == 200
+    assert local_server.seen == ["http://example.invalid/api/datasources/proxy/uid/prometheus/api/v1/query?query=up"]
 
 
 # ── doctor ──────────────────────────────────────────────────────────────────────

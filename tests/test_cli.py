@@ -88,7 +88,7 @@ def test_logql_streams(make_client: ClientFactory) -> None:
     parsed = cli.parse_logs(cli.check_json(load_fixture("logql-streams-careerhub-prod.json"), "logs"))
     expected = sum(len(st.values) for st in parsed.streams)
     assert len(parsed.streams) == 2 and expected >= 3 and len(lines) == 1 + expected
-    assert re.match(r"^\d\d-\d\d \d\d:\d\d:\d\d ", lines[1])
+    assert re.match(r"^\d\d-\d\d \d\d:\d\d:\d\dZ ", lines[1])   # 시각은 UTC 이고 Z 로 표기한다(마찰 2)
     # backward: 최신이 먼저
     assert lines[1][:14] >= lines[-1][:14]
     assert "limit=5" in t.calls[0].url and "direction=backward" in t.calls[0].url
@@ -128,6 +128,13 @@ def test_traceql_search_then_trace(make_client: ClientFactory) -> None:
     assert lines[1].startswith("루트: posting-service /") and lines[3] == "오류 span: 0"
     assert t.calls[1].url.endswith("api/traces/" + trace_id)
     _no_physical("\n".join(lines))
+
+
+def test_traceql_search_empty_hints_wider_window(make_client: ClientFactory) -> None:
+    """search 가 비면 창을 넓히라는 힌트를 낸다 — 시험 보고의 관찰: 기본 1시간 창에는 트레이스가 없는 것이 보통이다."""
+    client, _ = make_client({"api/search": (200, {"traces": []})})
+    ev, _, _ = cli.traceql_run(client, cli.TraceqlArgs(cmd="search"))
+    assert ev.value.lines == ["(결과 없음 — 트레이스는 드물다. 창을 넓혀 다시: --since 24h · 7d)"]
 
 
 def test_traceql_tags(make_client: ClientFactory) -> None:
@@ -211,14 +218,26 @@ def test_no_physical_flags(main: Callable[[list[str]], None], capsys: pytest.Cap
 
 # ── 플러그인 골격 ────────────────────────────────────────────────────────────────
 
+SHIMS: tuple[tuple[str, str], ...] = (("promql.py", "promql_main"), ("logql.py", "logql_main"),
+                                       ("traceql.py", "traceql_main"), ("obs-doctor.py", "doctor_main"))
+
+
 def test_scripts_are_thin_executable_shims() -> None:
-    """skills/obs-query/scripts 의 4개 파일은 실행 가능하고 20줄 미만의 shim 이며 본체 함수(obs.adapters.cli.*_main)를 부른다 — 로직이 스크립트로 새지 않는다."""
-    d = ROOT / "skills" / "obs-query" / "scripts"
-    for name, fn in (("promql.py", "promql_main"), ("logql.py", "logql_main"), ("traceql.py", "traceql_main"), ("obs-doctor.py", "doctor_main")):
-        p = d / name
+    """bin/(Claude Code 가 플러그인이 켜진 동안 자동으로 PATH 에 올리는 자리)의 4개 파일은 실행 가능하고 20줄 미만의 shim 이며
+    본체 함수(obs.adapters.cli.*_main)를 부른다 — 로직이 스크립트로 새지 않는다."""
+    for name, fn in SHIMS:
+        p = ROOT / "bin" / name
         assert p.stat().st_mode & stat.S_IXUSR, "%s 는 실행 가능해야 한다" % name
         src = p.read_text(encoding="utf-8")
         assert src.startswith("#!/usr/bin/env python3") and fn in src and len(src.splitlines()) < 20
+
+
+def test_shim_finds_plugin_root_from_any_cwd(tmp_path: Path) -> None:
+    """shim 은 cwd 와 무관하게 자기 위치에서 플러그인 루트를 찾는다 — 낯선 cwd 에서 --help 가 usage 를 낸다."""
+    import subprocess
+    import sys as _sys
+    out = subprocess.run([_sys.executable, str(ROOT / "bin" / "promql.py"), "--help"], capture_output=True, text=True, cwd=tmp_path)
+    assert out.returncode == 0 and out.stdout.startswith("usage: promql.py"), out.stderr[-300:]
 
 
 def test_plugin_manifests() -> None:

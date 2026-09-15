@@ -652,7 +652,7 @@ trace 는 원본이 항상 크므로 요약(서비스·span 수·오류·느린 
 def search_lines(hits: Sequence[TraceHit]) -> list[str]:
     lines = ["%s  %6sms  %s  %s / %s" % (h.trace_id, h.duration_ms, fmt_ts(h.start_ns / 1e9) if h.start_ns else "?",
                                          h.root_service, h.root_name) for h in hits]
-    return lines or ["(결과 없음)"]
+    return lines or ["(결과 없음 — 트레이스는 드물다. 창을 넓혀 다시: --since 24h · 7d)"]
 
 
 def trace_lines(trace_id: str, spans: Sequence[Span], top: int) -> list[str]:

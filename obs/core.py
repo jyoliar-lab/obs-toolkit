@@ -228,7 +228,8 @@ def now() -> float:
 
 
 def fmt_ts(unix_sec: float) -> str:
-    return _dt.datetime.fromtimestamp(unix_sec, _dt.timezone.utc).strftime("%m-%d %H:%M:%S")
+    """요약 줄의 시각 — UTC 이고 그렇다고 표기한다(Z). 사람이 코멘트에 옮길 때 tz 를 헷갈리지 않게."""
+    return _dt.datetime.fromtimestamp(unix_sec, _dt.timezone.utc).strftime("%m-%d %H:%M:%SZ")
 
 
 def fmt_rfc3339(unix_sec: float) -> str:
@@ -387,10 +388,15 @@ def _scrub(text: str, secrets: tuple[str, ...]) -> str:
 
 
 def _urllib_transport(url: str, headers: Mapping[str, str], timeout: float) -> tuple[int, bytes]:
-    """유일한 HTTP 코드. Request 에 method 를 주지 않는다 — urllib 기본 = GET."""
+    """유일한 HTTP 코드. Request 에 method 를 주지 않는다 — urllib 기본 = GET.
+
+    프록시는 env(HTTP_PROXY·HTTPS_PROXY·NO_PROXY)만 본다. urllib 기본은 macOS 시스템 설정까지 조회하는데(_scproxy),
+    그 경로가 CoreFoundation 의 argv "argument domain" 파싱을 깨워 `--series '{a="b"}'` 같은 인자를 plist 로 읽으려다
+    stderr 에 CFPropertyList 경고를 흘린다 — agent 출력에 섞인다."""
     req = urllib.request.Request(url, headers=dict(headers))
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler(urllib.request.getproxies_environment()))
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with opener.open(req, timeout=timeout) as resp:
             return int(resp.status), resp.read()
     except urllib.error.HTTPError as e:
         return int(e.code), e.read()
@@ -403,11 +409,16 @@ def _urllib_transport(url: str, headers: Mapping[str, str], timeout: float) -> t
 
 
 def http_error_message(backend: str, code: int, body: str) -> str:
-    """상태별로 논리 이름 · 상태 · 다음 행동만. 질의 오류(400·422)는 백엔드 메시지를 통과시킨다 — agent 가 고칠 수 있다."""
+    """상태별로 논리 이름 · 상태 · 다음 행동만. agent 가 고칠 수 있는 것(400·422 질의 오류, 404 없는 자원)은
+    백엔드 메시지를 통과시키고 "다시" 로 끝난다. 사람의 것(401·403·405·5xx)은 obs-doctor.py 로 보낸다."""
     if code == 401:
         return "%s 백엔드 인증 실패(401). 사람에게: %s 확인(obs-doctor.py)." % (backend, ENV_TOKEN)
-    if code in (403, 404, 405):
-        return "%s 백엔드가 요청을 거부했다(%d). 읽기 경로 밖이거나 백엔드가 없다 — 사람에게(obs-doctor.py)." % (backend, code)
+    if code == 404:
+        msg = _json_message(body)
+        return ("%s 백엔드에 그 자원이 없다(404)%s — traceID·이름을 확인하고 다시(만료됐거나 오타일 수 있다). "
+                "무엇을 물어도 404 면 사람에게(obs-doctor.py)." % (backend, (": " + msg) if msg else ""))
+    if code in (403, 405):
+        return "%s 백엔드가 요청을 거부했다(%d). 읽기 경로 밖이다 — 사람에게(obs-doctor.py)." % (backend, code)
     if code in (400, 422):
         msg = _json_message(body)
         return "%s 백엔드가 질의를 거부했다(%d)%s — 질의를 고쳐 다시." % (backend, code, (": " + msg) if msg else "")
