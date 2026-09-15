@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """logql.py — 얇은 shim. 본체는 obs/adapters/cli.py 의 logql_main 이다.
-플러그인 루트(obs/core.py 가 있는 조상)를 찾아 sys.path 에 올린다 — bin/ 과 skills/*/scripts/ 어디서 실행돼도 같다."""
+플러그인 루트(obs/core.py 가 있는 조상)를 찾아 sys.path 에 올린다 — 캐시·--plugin-dir 어디에 설치돼도 같다."""
 import os
 import sys
 

@@ -222,28 +222,22 @@ SHIMS: tuple[tuple[str, str], ...] = (("promql.py", "promql_main"), ("logql.py",
                                        ("traceql.py", "traceql_main"), ("obs-doctor.py", "doctor_main"))
 
 
-@pytest.mark.parametrize("where", ["bin", "skills/obs-query/scripts"])
-def test_scripts_are_thin_executable_shims(where: str) -> None:
-    """bin/(Claude Code 가 자동으로 PATH 에 올리는 자리 — 마찰 1)과 skills/obs-query/scripts/(스펙의 자리) 양쪽의 4개 파일은
-    실행 가능하고 20줄 미만의 shim 이며 본체 함수(obs.adapters.cli.*_main)를 부른다 — 로직이 스크립트로 새지 않는다.
-    두 곳의 내용은 docstring 아래가 같다."""
-    d = ROOT / where
+def test_scripts_are_thin_executable_shims() -> None:
+    """bin/(Claude Code 가 플러그인이 켜진 동안 자동으로 PATH 에 올리는 자리)의 4개 파일은 실행 가능하고 20줄 미만의 shim 이며
+    본체 함수(obs.adapters.cli.*_main)를 부른다 — 로직이 스크립트로 새지 않는다."""
     for name, fn in SHIMS:
-        p = d / name
+        p = ROOT / "bin" / name
         assert p.stat().st_mode & stat.S_IXUSR, "%s 는 실행 가능해야 한다" % name
         src = p.read_text(encoding="utf-8")
         assert src.startswith("#!/usr/bin/env python3") and fn in src and len(src.splitlines()) < 20
-        other = (ROOT / "bin" / name).read_text(encoding="utf-8")
-        assert src.split('"""')[2:] == other.split('"""')[2:], "%s 의 bin/·scripts/ shim 본문이 다르다" % name
 
 
-def test_shims_run_from_both_places(tmp_path: Path) -> None:
-    """shim 은 자기 위치와 무관하게 플러그인 루트를 찾는다 — bin/ 과 scripts/ 어디서 실행해도 --help 가 같은 usage 를 낸다."""
+def test_shim_finds_plugin_root_from_any_cwd(tmp_path: Path) -> None:
+    """shim 은 cwd 와 무관하게 자기 위치에서 플러그인 루트를 찾는다 — 낯선 cwd 에서 --help 가 usage 를 낸다."""
     import subprocess
     import sys as _sys
-    for where in ("bin", "skills/obs-query/scripts"):
-        out = subprocess.run([_sys.executable, str(ROOT / where / "promql.py"), "--help"], capture_output=True, text=True, cwd=tmp_path)
-        assert out.returncode == 0 and out.stdout.startswith("usage: promql.py"), (where, out.stderr[-300:])
+    out = subprocess.run([_sys.executable, str(ROOT / "bin" / "promql.py"), "--help"], capture_output=True, text=True, cwd=tmp_path)
+    assert out.returncode == 0 and out.stdout.startswith("usage: promql.py"), out.stderr[-300:]
 
 
 def test_plugin_manifests() -> None:
