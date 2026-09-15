@@ -31,9 +31,7 @@ agent 는 이 값을 읽지도 옮기지도 않는다 — 어디에도 적지 �
 
 ## 명령 — bare name 으로 실행한다
 
-명령 4개는 플러그인의 `bin/` 에 있고 Claude Code 가 플러그인이 켜져 있는 동안 그 디렉터리를 PATH 에 올린다.
-`promql.py` 가 not found 이면 세션 중 설치(`/reload-plugins`) 직후일 수 있다 — 세션을 재시작하거나,
-플러그인 캐시(`~/.claude/plugins/cache/obs-toolkit/obs-toolkit/<버전>/bin/`) 또는 `--plugin-dir` 로 준 디렉터리의 `bin/` 을 절대 경로로 부른다.
+`promql.py` 가 not found 이면 사람에게 — 경로를 찾아 우회하지 않는다.
 
 | 명령 | 백엔드 | 하는 일 |
 |---|---|---|
