@@ -1,0 +1,10 @@
+# 원본 spill 인박스 — 커밋하지 않는다
+tmp/
+# PC별 로컬 설정(토큰 env 등)
+settings.local.json
+.claude/settings.local.json
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/

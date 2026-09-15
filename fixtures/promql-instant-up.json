@@ -1,0 +1,86 @@
+{
+ "status": "success",
+ "data": {
+  "resultType": "vector",
+  "result": [
+   {
+    "metric": {
+     "__name__": "up",
+     "endpoint": "https-metrics",
+     "instance": "10.18.1.12:10250",
+     "job": "kubelet",
+     "metrics_path": "/metrics/cadvisor",
+     "namespace": "kube-system",
+     "node": "raspberrypi-2",
+     "service": "monitoring-kube-prometheus-kubelet"
+    },
+    "value": [
+     1788855752.983,
+     "1"
+    ]
+   },
+   {
+    "metric": {
+     "__name__": "up",
+     "endpoint": "https-metrics",
+     "instance": "10.18.2.11:10250",
+     "job": "kubelet",
+     "metrics_path": "/metrics/cadvisor",
+     "namespace": "kube-system",
+     "node": "raspberrypi-s1",
+     "service": "monitoring-kube-prometheus-kubelet"
+    },
+    "value": [
+     1788855752.983,
+     "1"
+    ]
+   },
+   {
+    "metric": {
+     "__name__": "up",
+     "container": "etcd",
+     "endpoint": "http-metrics",
+     "instance": "10.18.1.12:2381",
+     "job": "kube-etcd",
+     "namespace": "kube-system",
+     "pod": "etcd-raspberrypi-2",
+     "service": "monitoring-kube-prometheus-kube-etcd"
+    },
+    "value": [
+     1788855752.983,
+     "1"
+    ]
+   },
+   {
+    "metric": {
+     "__name__": "up",
+     "endpoint": "https-metrics",
+     "instance": "10.18.1.10:10250",
+     "job": "kubelet",
+     "metrics_path": "/metrics/cadvisor",
+     "namespace": "kube-system",
+     "node": "raspberrypi-0",
+     "service": "monitoring-kube-prometheus-kubelet"
+    },
+    "value": [
+     1788855752.983,
+     "1"
+    ]
+   },
+   {
+    "metric": {
+     "__name__": "up",
+     "endpoint": "https",
+     "instance": "10.18.1.12:6443",
+     "job": "apiserver",
+     "namespace": "default",
+     "service": "kubernetes"
+    },
+    "value": [
+     1788855752.983,
+     "1"
+    ]
+   }
+  ]
+ }
+}

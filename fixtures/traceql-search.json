@@ -1,0 +1,32 @@
+{
+ "traces": [
+  {
+   "traceID": "592568ed3ac243ef13c1740d1e6ad00",
+   "rootServiceName": "review-service",
+   "rootTraceName": "careerhub.review_service.crawler_grpc.ReviewGrpc/finishCrawlingTask",
+   "startTimeUnixNano": "1788809943986913766",
+   "durationMs": 1
+  },
+  {
+   "traceID": "2f48525fd0d5a83ecbfaea2977ab7fb",
+   "rootServiceName": "posting-service",
+   "rootTraceName": "careerhub.posting_service.provider_grpc.ProviderGrpc/RegisterJobPostingInfo",
+   "startTimeUnixNano": "1788808544796985296",
+   "durationMs": 5
+  },
+  {
+   "traceID": "3cdcda0f8fef83a4ba5c374a8ae15bd",
+   "rootServiceName": "posting-service",
+   "rootTraceName": "careerhub.posting_service.provider_grpc.ProviderGrpc/IsCompanyRegistered",
+   "startTimeUnixNano": "1788808400665396184",
+   "durationMs": 2
+  }
+ ],
+ "metrics": {
+  "inspectedBytes": "32639",
+  "totalBlocks": 1,
+  "completedJobs": 4,
+  "totalJobs": 4,
+  "totalBlockBytes": "82270"
+ }
+}
