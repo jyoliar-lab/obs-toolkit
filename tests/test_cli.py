@@ -188,28 +188,34 @@ def test_trace_error_reason_falls_back_to_attrs() -> None:
 # ── 출력 절제 ────────────────────────────────────────────────────────────────────
 
 def test_emit_truncates_and_spills(tmp_path: Path) -> None:
-    """출력 절제 — max_lines 를 넘으면 앞부분만 찍고 "N줄 더 있음" 과 spill 경로를 안내하며, 원본 전체가 그 경로에 JSON 으로 있다."""
+    """출력 절제 — max_lines 를 넘으면 앞부분만 찍고 "N줄 더 있음" 과 호출 디렉터리를 안내한다. 디렉터리 안 raw.json 이 원본 전체,
+    summary.txt 가 잘리지 않은 요약 전체다."""
     env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     out: list[str] = []
-    res = cli.emit(["l%d" % i for i in range(10)], {"full": True}, "k", max_lines=3, env=env, out=out.append)
-    assert res.lines == ["l0", "l1", "l2"] and res.cut == 7 and res.raw_ref and res.raw_ref.startswith("tmp/obs/")
-    assert out[-1] == "… 7줄 더 있음 (총 10줄). 원본 전체: %s" % res.raw_ref
-    assert json.loads((tmp_path / res.raw_ref).read_text()) == {"full": True}
+    lines = ["l%d" % i for i in range(10)]
+    res = cli.emit(lines, {"full": True}, "k", max_lines=3, env=env, out=out.append)
+    assert res.lines == ["l0", "l1", "l2"] and res.cut == 7 and res.ref.startswith("tmp/obs/") and res.ref.endswith("-k")
+    assert out[-1] == "… 7줄 더 있음 (총 10줄). 원본·요약: %s/ (raw.json · summary.txt)" % res.ref
+    assert json.loads((tmp_path / res.ref / "raw.json").read_text()) == {"full": True}
+    assert (tmp_path / res.ref / "summary.txt").read_text().splitlines() == lines
 
 
-def test_emit_force_spill(tmp_path: Path) -> None:
-    """force_spill — 잘리지 않아도 원본을 파일로 떨어뜨린다(trace 처럼 원본이 늘 큰 종류)."""
+def test_emit_quiet_writes_files_prints_only_path(tmp_path: Path) -> None:
+    """--json(quiet) — stdout 에 요약을 찍지 않고 경로만. 파일은 보통 때와 같다(요약 전체가 summary.txt 에)."""
     env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     out: list[str] = []
-    res = cli.emit(["a"], {"x": 1}, "k", max_lines=3, force_spill=True, env=env, out=out.append)
-    assert res.cut == 0 and res.raw_ref and out == ["a", "원본 전체: %s" % res.raw_ref]
+    res = cli.emit(["a", "b"], {"x": 1}, "k", max_lines=3, quiet=True, env=env, out=out.append)
+    assert res.lines == [] and out == ["원본·요약: %s/ (raw.json · summary.txt)" % res.ref]
+    assert (tmp_path / res.ref / "summary.txt").read_text() == "a\nb\n"
 
 
-def test_emit_no_spill_when_fits(tmp_path: Path) -> None:
-    """상한 안에 들어가면 spill 하지 않는다 — tmp/obs 디렉터리조차 만들지 않는다."""
+def test_emit_always_writes_even_when_fits(tmp_path: Path) -> None:
+    """상한 안에 들어가도 호출 디렉터리는 만든다 — 원본·요약은 기본으로 파일에 남고, stdout 은 요약 뒤에 경로 한 줄."""
     env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
-    res = cli.emit(["a", "b"], {}, "k", max_lines=3, env=env, out=lambda s: None)
-    assert res.raw_ref is None and not (tmp_path / "tmp" / "obs").exists()
+    out: list[str] = []
+    res = cli.emit(["a", "b"], {"x": 1}, "k", max_lines=3, env=env, out=out.append)
+    assert res.cut == 0 and out == ["a", "b", "원본·요약: %s/ (raw.json · summary.txt)" % res.ref]
+    assert sorted(q.name for q in (tmp_path / res.ref).iterdir()) == ["raw.json", "summary.txt"]
 
 
 # ── doctor 렌더링 — 물리가 보이는 유일한 출력 ─────────────────────────────────────

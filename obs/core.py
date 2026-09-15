@@ -24,6 +24,7 @@ import datetime as _dt
 import json
 import os
 import re
+import shutil
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -58,7 +59,7 @@ ENV_UIDS: dict[str, str] = {
 }
 
 TIMEOUT_SEC: float = 30.0
-SPILL_KEEP: int = 50          # tmp/obs 에 남기는 최대 파일 수 — 오래된 것부터 지운다
+SPILL_KEEP: int = 50          # tmp/obs 에 남기는 최대 호출 디렉터리 수 — 오래된 것부터 지운다
 MAX_QUERIES: int = 20         # 한 예산(조사) 안의 질의 횟수 상한
 MAX_RESPONSE_BYTES: int = 20_000_000   # 한 예산 안에서 받는 응답 총량 상한
 
@@ -303,34 +304,44 @@ def spill_root(env: Mapping[str, str] | None = None, cwd: Path | None = None) ->
     return base / "tmp" / "obs"
 
 
-def spill(kind: str, payload: object, env: Mapping[str, str] | None = None,
+SPILL_RAW: str = "raw.json"          # 호출 디렉터리 안 — 백엔드 응답 원본
+SPILL_SUMMARY: str = "summary.txt"   # 호출 디렉터리 안 — 잘리지 않은 요약 전체
+
+
+def spill(kind: str, payload: object, summary: Sequence[str] = (), env: Mapping[str, str] | None = None,
           cwd: Path | None = None, keep: int = SPILL_KEEP) -> Path:
-    """원본 전체를 <spill_root>/<UTC시각.마이크로초>-<kind>.json 으로 떨어뜨리고 경로를 돌려준다. 최근 keep 개만 남긴다.
-    이름은 재사용되지 않는다 — 한 번 안내한 raw_ref 는 그 응답만 가리킨다."""
+    """한 호출의 산출물을 <spill_root>/<UTC시각.마이크로초>-<kind>/ 디렉터리 하나에 떨어뜨리고 그 경로를 돌려준다 —
+    raw.json(응답 원본) · summary.txt(요약 전체, stdout 절단과 무관). 최근 keep 개 디렉터리만 남긴다.
+    이름은 재사용되지 않는다 — 한 번 안내한 경로는 그 호출만 가리킨다."""
     root = spill_root(env, cwd)
     root.mkdir(parents=True, exist_ok=True)
-    # 마이크로초까지 — 같은 초 안의 spill 이 지워진 이름을 다시 받아, 앞서 안내한 raw_ref 가 다른 응답을 가리키는 일을 막는다
+    # 마이크로초까지 — 같은 초 안의 spill 이 지워진 이름을 다시 받아, 앞서 안내한 경로가 다른 호출을 가리키는 일을 막는다
     stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
-    path = root / ("%s-%s.json" % (stamp, kind))
+    path = root / ("%s-%s" % (stamp, kind))
     n = 1
     while path.exists():
         n += 1
-        path = root / ("%s-%s-%d.json" % (stamp, kind, n))
-    path.write_text(json.dumps(to_dict(payload), ensure_ascii=False, indent=1), encoding="utf-8")
+        path = root / ("%s-%s-%d" % (stamp, kind, n))
+    path.mkdir()
+    (path / SPILL_RAW).write_text(json.dumps(to_dict(payload), ensure_ascii=False, indent=1), encoding="utf-8")
+    (path / SPILL_SUMMARY).write_text("".join(line + "\n" for line in summary), encoding="utf-8")
     prune(root, keep, protect=path)
     return path
 
 
 def prune(root: Path, keep: int = SPILL_KEEP, protect: Path | None = None) -> int:
-    """오래된 spill 파일부터 지워 keep 개만 남긴다. 지운 수를 돌려준다.
+    """오래된 항목(호출 디렉터리 — 예전 형식의 낱개 파일도)부터 지워 keep 개만 남긴다. 지운 수를 돌려준다.
 
-    `protect`(방금 쓴 파일)는 후보에서 뺀다 — mtime 이 같은 파일들 사이의 정렬 순서에 기대지 않고
-    "방금 쓴 원본은 지워지지 않는다" 를 구조로 보장한다."""
-    files = sorted((p for p in root.glob("*.json") if p != protect), key=lambda p: (p.stat().st_mtime, p.name))
+    `protect`(방금 쓴 것)는 후보에서 뺀다 — mtime 이 같은 항목들 사이의 정렬 순서에 기대지 않고
+    "방금 쓴 것은 지워지지 않는다" 를 구조로 보장한다."""
+    entries = sorted((p for p in root.iterdir() if p != protect), key=lambda p: (p.stat().st_mtime, p.name))
     removed = 0
-    for old in files[: max(0, len(files) - (keep - 1 if protect is not None else keep))]:
+    for old in entries[: max(0, len(entries) - (keep - 1 if protect is not None else keep))]:
         try:
-            old.unlink()
+            if old.is_dir():
+                shutil.rmtree(old)
+            else:
+                old.unlink()
             removed += 1
         except OSError:
             pass
@@ -338,7 +349,7 @@ def prune(root: Path, keep: int = SPILL_KEEP, protect: Path | None = None) -> in
 
 
 def spill_ref(path: Path, env: Mapping[str, str] | None = None, cwd: Path | None = None) -> str:
-    """spill 경로를 사람·agent 가 부를 상대 경로로."""
+    """spill 경로(호출 디렉터리)를 사람·agent 가 부를 상대 경로로."""
     env = os.environ if env is None else env
     proj = env.get("CLAUDE_PROJECT_DIR", "").strip()
     base = Path(proj) if proj else (cwd or Path.cwd())

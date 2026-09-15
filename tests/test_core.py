@@ -81,39 +81,44 @@ def test_spill_root_prefers_project_dir(tmp_path: Path) -> None:
 
 
 def test_spill_writes_and_prunes(tmp_path: Path) -> None:
-    """spill — 원본이 JSON 파일로 떨어지고(이름은 재사용되지 않는다), keep 개를 넘으면 오래된 것부터 지워 정확히 최근 keep 개(어느 파일인지 · 내용까지)만 남으며,
-    spill_ref 가 프로젝트 기준 상대 경로를 돌려준다."""
+    """spill — 한 호출이 디렉터리 하나(<시각>-<kind>/)를 만들고 그 안에 raw.json(원본)·summary.txt(요약 전체)를 둔다(이름은 재사용되지 않는다).
+    keep 개를 넘으면 오래된 디렉터리부터 지워 정확히 최근 keep 개(어느 것인지 · 내용까지)만 남으며, spill_ref 가 프로젝트 기준 상대 경로를 돌려준다."""
     env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
-    paths = [spill("k", {"i": i}, env, keep=3) for i in range(5)]
+    paths = [spill("k", {"i": i}, ["요약 %d" % i, "둘째 줄"], env, keep=3) for i in range(5)]
     root = spill_root(env)
-    assert all(p.parent == root for p in paths)
-    assert len(set(paths)) == 5                                                        # 이름 재사용 없음 — raw_ref 는 그 응답만 가리킨다
-    assert set(root.glob("*.json")) == set(paths[2:])                                  # 최근 3개만 남는다
+    assert all(p.parent == root and p.name.endswith("-k") for p in paths) and all(p.is_dir() for p in paths[2:])
+    assert len(set(paths)) == 5                                                        # 이름 재사용 없음 — 경로는 그 호출만 가리킨다
+    assert set(root.iterdir()) == set(paths[2:])                                       # 최근 3개만 남는다
     assert all(not p.exists() for p in paths[:2])                                     # 오래된 2개는 지워졌다
-    assert [json.loads(p.read_text()) for p in paths[2:]] == [{"i": 2}, {"i": 3}, {"i": 4}]   # 내용도 제자리
+    assert [json.loads((p / "raw.json").read_text()) for p in paths[2:]] == [{"i": 2}, {"i": 3}, {"i": 4}]   # 원본도 제자리
+    assert [(p / "summary.txt").read_text() for p in paths[2:]] == ["요약 %d\n둘째 줄\n" % i for i in (2, 3, 4)]  # 요약 전체
+    assert sorted(q.name for q in paths[-1].iterdir()) == ["raw.json", "summary.txt"]
     assert spill_ref(paths[-1], env) == "tmp/obs/" + paths[-1].name
 
 
 def test_prune_oldest_first(tmp_path: Path) -> None:
-    """prune 단독 — mtime 이 오래된 파일부터 지우고 지운 개수를 돌려준다."""
+    """prune 단독 — mtime 이 오래된 항목부터 지우고 지운 개수를 돌려준다. 호출 디렉터리(안의 파일까지)와 예전 형식의 낱개 파일을 같이 센다."""
     for i in range(4):
-        p = tmp_path / ("%d.json" % i)
-        p.write_text("{}")
+        p = tmp_path / ("%d" % i)
+        if i % 2:
+            p.mkdir(); (p / "raw.json").write_text("{}")
+        else:
+            p = p.with_suffix(".json"); p.write_text("{}")
         os.utime(p, (1000 + i, 1000 + i))
     assert prune(tmp_path, keep=2) == 2
-    assert sorted(p.name for p in tmp_path.glob("*.json")) == ["2.json", "3.json"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["2.json", "3"]
 
 
 def test_prune_protects_just_written_file(tmp_path: Path) -> None:
     """prune 의 protect — 방금 쓴 파일은 mtime 이 가장 오래돼 보여도 지우지 않고, 나머지에서 keep-1 개만 남긴다.
     같은 초 안에 여러 번 spill 할 때 이름 순서(-2, -3 접미)가 mtime 동률을 잘못 가르는 경우를 구조로 막는다."""
-    files = [tmp_path / ("%d.json" % i) for i in range(4)]
+    files = [tmp_path / ("%d" % i) for i in range(4)]
     for i, p in enumerate(files):
-        p.write_text("{}")
+        p.mkdir(); (p / "raw.json").write_text("{}")
         os.utime(p, (1000 + i, 1000 + i))
-    os.utime(files[3], (900, 900))                       # 방금 쓴 파일인데 mtime 은 가장 오래됨
+    os.utime(files[3], (900, 900))                       # 방금 쓴 디렉터리인데 mtime 은 가장 오래됨
     assert prune(tmp_path, keep=2, protect=files[3]) == 2
-    assert sorted(p.name for p in tmp_path.glob("*.json")) == ["2.json", "3.json"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["2", "3"]
 
 
 # ── 예산 ────────────────────────────────────────────────────────────────────────
