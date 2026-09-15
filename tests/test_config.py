@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from obs.core import (
-    DEFAULT_GRAFANA_URL, DEFAULT_UIDS, Client, Config, ObsError, config_file_candidates, load_config, to_dict, token_from_env,
+    DEFAULT_GRAFANA_URL, DEFAULT_UIDS, ENV_CONFIG, ENV_PROXY_PREFIX, ENV_TOKEN, ENV_UIDS, ENV_URL, Client, Config, ObsError, config_file_candidates, load_config, to_dict, token_from_env,
 )
 
 
@@ -106,3 +106,13 @@ def test_unknown_backend(config: Config) -> None:
     """논리 이름은 metrics·logs·traces 셋뿐 — 그 밖의 이름으로 uid 를 물으면 ObsError."""
     with pytest.raises(ObsError):
         config.uid("nope")
+
+
+def test_env_example_documents_every_env_the_core_reads() -> None:
+    """`.env.example` 은 코어가 읽는 env 이름을 빠짐없이 담고(새 env 를 코어에 더하면 여기서 걸린다), 실제 토큰 값이 없다."""
+    text = (Path(__file__).resolve().parents[1] / ".env.example").read_text(encoding="utf-8")
+    names = {ENV_TOKEN, ENV_URL, ENV_PROXY_PREFIX, ENV_CONFIG, *ENV_UIDS.values(), "CLAUDE_PROJECT_DIR", "CLAUDE_PLUGIN_DATA",
+             "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"}
+    missing = [n for n in names if n not in text]
+    assert not missing, ".env.example 에 없는 env: %s" % missing
+    assert "OBS_GRAFANA_TOKEN=glsa_replace_me" in text and text.count("glsa_") == 1

@@ -23,6 +23,7 @@ claude --plugin-dir .
 ```
 
 토큰은 env `OBS_GRAFANA_TOKEN` 으로만 받는다 — 프로젝트의 `.claude/settings.local.json`(gitignored)의 `env` 에 둔다.
+코어가 읽는 env 전부와 뜻은 `.env.example` 에 있다(셸에서 직접 부를 때는 복사해 `.env` 로).
 agent 인터페이스에는 URL · uid · 토큰이 없다. 물리는 `obs-doctor.py`(사람용)만 보여준다.
 
 ## 테스트
