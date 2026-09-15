@@ -13,13 +13,14 @@ agent 인터페이스에 물리(URL · uid · 토큰)가 없다. `--uid` 같은 
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from dataclasses import dataclass, field
 from typing import Callable, Mapping, Sequence
 
 from obs.core import (
     JSON, Client, DoctorReport, Evidence, Lines, ObsError, Params, Window, doctor, fmt_ts, load_config,
-    parse_duration, parse_time, now, spill, spill_ref, to_json, token_from_env,
+    SPILL_RAW, SPILL_SUMMARY, parse_duration, parse_time, now, spill, spill_ref, to_json, token_from_env,
 )
 
 DEFAULT_MAX_LINES: int = 40
@@ -195,6 +196,7 @@ class Span:
     start_ns: int
     end_ns: int
     status_code: str      # STATUS_CODE_ERROR / 2 / ""
+    status_message: str = ""   # OTLP status.message — 오류 span 의 원인(계측 라이브러리가 스택을 붙이기도 한다)
     attrs: dict[str, str] = field(default_factory=dict[str, str])
 
     @property
@@ -255,11 +257,13 @@ def parse_spans(body: dict[str, JSON]) -> list[Span]:
         for ss in _list(bo.get("scopeSpans") or bo.get("instrumentationLibrarySpans")):
             for s in _list(_obj(ss).get("spans")):
                 so = _obj(s)
+                st = _obj(so.get("status"))
                 spans.append(Span(
                     service=service, name=_str(so.get("name"), "?"), span_id=_str(so.get("spanId")),
                     parent_id=_str(so.get("parentSpanId")),
                     start_ns=_int(so.get("startTimeUnixNano")), end_ns=_int(so.get("endTimeUnixNano")),
-                    status_code=_str(_obj(so.get("status")).get("code")), attrs=_attrs(so.get("attributes")),
+                    status_code=_str(st.get("code")), status_message=_str(st.get("message")),
+                    attrs=_attrs(so.get("attributes")),
                 ))
     return spans
 
@@ -276,27 +280,27 @@ def parse_tag_values(body: dict[str, JSON]) -> list[str]:
 
 @dataclass
 class Emitted:
-    """stdout 에 찍은 것과 spill 결과 — 테스트가 검사한다."""
+    """stdout 에 찍은 것과 호출 디렉터리 — 테스트가 검사한다."""
     lines: list[str]
     cut: int
-    raw_ref: str | None
+    ref: str          # 호출 디렉터리(프로젝트 기준 상대 경로) — raw.json · summary.txt 가 그 안에
 
 
-def emit(lines: list[str], full: object, kind: str, max_lines: int, force_spill: bool = False,
+def emit(lines: list[str], full: object, kind: str, max_lines: int, quiet: bool = False,
          env: Mapping[str, str] | None = None, out: Callable[[str], None] = print) -> Emitted:
-    """앞 max_lines 줄만 stdout 에. 잘렸거나 force_spill 이면 원본을 파일로 떨어뜨리고 경로를 알린다."""
-    shown = lines[:max_lines]
+    """항상 호출 디렉터리를 만든다(원본 raw.json · 요약 전체 summary.txt). stdout 에는 앞 max_lines 줄만 —
+    quiet 면 요약을 찍지 않고 경로만. 잘렸으면 몇 줄이 더 있는지 알린다."""
+    ref = spill_ref(spill(kind, full, lines, env), env)
+    shown = [] if quiet else lines[:max_lines]
     for line in shown:
         out(line)
     cut = len(lines) - len(shown)
-    raw_ref: str | None = None
-    if cut > 0 or force_spill:
-        raw_ref = spill_ref(spill(kind, full, env), env)
-        if cut > 0:
-            out("… %d줄 더 있음 (총 %d줄). 원본 전체: %s" % (cut, len(lines), raw_ref))
-        else:
-            out("원본 전체: %s" % raw_ref)
-    return Emitted(lines=shown, cut=cut, raw_ref=raw_ref)
+    where = "%s/ (%s · %s)" % (ref, SPILL_RAW, SPILL_SUMMARY)
+    if cut > 0 and not quiet:
+        out("… %d줄 더 있음 (총 %d줄). 원본·요약: %s" % (cut, len(lines), where))
+    else:
+        out("원본·요약: %s" % where)
+    return Emitted(lines=shown, cut=cut, ref=ref)
 
 
 def clip(text: str, width: int) -> str:
@@ -321,18 +325,15 @@ def fmt_val(v: str | int | float) -> str:
     return "%.6g" % f
 
 
-def _finish(ev: Evidence[Lines], body: JSON, kind: str, max_lines: int, as_json: bool, force_spill: bool = False) -> None:
-    """Evidence 를 stdout 규약으로. as_json 은 원본만 파일로."""
-    if as_json:
-        print("원본 전체: %s" % spill_ref(spill(kind, body)))
-        return
-    emit(ev.value.lines or ["(결과 없음)"], body, kind, max_lines, force_spill=force_spill)
+def _finish(ev: Evidence[Lines], body: JSON, kind: str, max_lines: int, as_json: bool) -> None:
+    """Evidence 를 stdout 규약으로. as_json 은 stdout 에 요약을 찍지 않고 경로만(파일은 어느 쪽이든 같다)."""
+    emit(ev.value.lines or ["(결과 없음)"], body, kind, max_lines, quiet=as_json)
 
 
 def _common(ap: argparse.ArgumentParser) -> None:
     ap.add_argument("--max-lines", type=int, default=DEFAULT_MAX_LINES,
-                    help="stdout 줄 수 상한. 기본 %d — 넘치면 원본은 tmp/obs/ 파일로" % DEFAULT_MAX_LINES)
-    ap.add_argument("--json", action="store_true", help="요약 대신 원본을 파일로 떨어뜨리고 경로만 출력")
+                    help="stdout 줄 수 상한. 기본 %d — 나머지는 호출 디렉터리의 summary.txt 에" % DEFAULT_MAX_LINES)
+    ap.add_argument("--json", action="store_true", help="stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 항상 남는다)")
 
 
 def _client() -> Client:
@@ -368,11 +369,11 @@ PROMQL_DOC = """promql — 즉시 조회·구간 조회 (metrics 백엔드, GET 
   --end <시각>      기준 시각 (now · -10m · unix초 · RFC3339). 기본 now
   --range <기간>    구간 길이 (5m · 1h · 2d). 있으면 구간 조회
   --step <기간>     구간 해상도. 기본 range/60 에 가까운 값
-  --max-lines <n>   stdout 줄 수 상한. 기본 40 — 넘치면 원본은 tmp/obs/ 파일로
-  --json            요약 대신 원본을 파일로 떨어뜨리고 경로만 출력
+  --max-lines <n>   stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
+  --json            stdout 에 요약을 찍지 않고 경로만(파일은 항상 남는다)
 
 출력은 요약이다 — 즉시 조회는 `값  {레이블}` 한 줄씩, 구간 조회는 시계열마다
-`n=점수 min max first last {레이블}` 한 줄. 원본이 필요하면 --json.
+`n=점수 min max first last {레이블}` 한 줄. 원본은 호출 디렉터리의 raw.json.
 """
 
 
@@ -502,8 +503,8 @@ LOGQL_DOC = """logql — 로그 조회 (logs 백엔드, GET 만).
   --limit <n>        돌려받을 최대 줄 수. 기본 30 — 낮게 둔다. 더 필요하면 명시적으로 올린다
   --direction        backward(최신부터, 기본) · forward
   --width <n>        한 줄 표시 폭. 기본 200 — 넘치면 자른다
-  --max-lines <n>    stdout 줄 수 상한. 기본 40 — 넘치면 원본은 tmp/obs/ 파일로
-  --json             원본을 파일로 떨어뜨리고 경로만 출력
+  --max-lines <n>    stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
+  --json             stdout 에 요약을 찍지 않고 경로만(파일은 항상 남는다)
 
 테넌트는 서버가 얹는다 — 여기서 다루지 않는다.
 출력은 `시각  {스트림 레이블 차이}  줄` — 모든 스트림에 공통인 레이블은 머리에 한 번만 찍는다.
@@ -642,10 +643,10 @@ TRACEQL_DOC = """traceql — 트레이스 검색·조회 (traces 백엔드, GET 
   --limit <n>        search 결과 상한. 기본 20
   --min-duration     예: 500ms · 2s (search)
   --top <n>          trace 요약에서 보이는 느린 span 수. 기본 15
-  --max-lines <n>    stdout 줄 수 상한. 기본 40 — 넘치면 원본은 tmp/obs/ 파일로
-  --json             원본을 파일로 떨어뜨리고 경로만 출력
+  --max-lines <n>    stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
+  --json             stdout 에 요약을 찍지 않고 경로만(파일은 항상 남는다)
 
-trace 는 원본이 항상 크므로 요약(서비스·span 수·오류·느린 span)만 찍고 원본은 늘 파일로 떨어진다.
+trace 는 원본이 크다 — stdout 은 요약(서비스·span 수·오류·느린 span)이고 원본은 호출 디렉터리의 raw.json.
 """
 
 
@@ -653,6 +654,13 @@ def search_lines(hits: Sequence[TraceHit]) -> list[str]:
     lines = ["%s  %6sms  %s  %s / %s" % (h.trace_id, h.duration_ms, fmt_ts(h.start_ns / 1e9) if h.start_ns else "?",
                                          h.root_service, h.root_name) for h in hits]
     return lines or ["(결과 없음 — 트레이스는 드물다. 창을 넓혀 다시: --since 24h · 7d)"]
+
+
+def error_reason(s: Span) -> str:
+    """오류 span 의 원인 한 줄 — status.message 의 첫 줄(스택은 개행·탭 뒤에 붙는다), 없으면 예외·HTTP 속성.
+    원본은 어차피 파일로 떨어진다 — 여기서는 jq 왕복 없이 원인이 보이면 된다."""
+    first = re.split(r"[\n\t]", s.status_message, maxsplit=1)[0].strip()
+    return first or s.attrs.get("exception.message") or s.attrs.get("error.message") or s.attrs.get("http.status_code") or ""
 
 
 def trace_lines(trace_id: str, spans: Sequence[Span], top: int) -> list[str]:
@@ -672,8 +680,7 @@ def trace_lines(trace_id: str, spans: Sequence[Span], top: int) -> list[str]:
         "오류 span: %d" % len(errors),
     ]
     for s in errors[:10]:
-        msg = s.attrs.get("exception.message") or s.attrs.get("error.message") or s.attrs.get("http.status_code") or ""
-        lines.append("  ✗ %s / %s  %.1fms  %s" % (s.service, s.name, s.duration_ms, clip(msg, 120)))
+        lines.append("  ✗ %s / %s  %.1fms  %s" % (s.service, s.name, s.duration_ms, clip(error_reason(s), 160)))
     lines.append("느린 span top %d:" % top)
     for s in sorted(spans, key=lambda s: -s.duration_ms)[:top]:
         offset = (s.start_ns - start) / 1e6
@@ -746,7 +753,7 @@ def traceql_main(argv: Sequence[str] | None = None) -> None:
     args = TraceqlArgs(cmd=a.cmd, arg=a.arg, q=a.q, since=a.since, end=a.end, limit=a.limit,
                        min_duration=a.min_duration, scope=a.scope, top=a.top)
     ev, body, kind = traceql_run(_client(), args)
-    _finish(ev, body, kind, a.max_lines, a.json, force_spill=(a.cmd == "trace"))
+    _finish(ev, body, kind, a.max_lines, a.json)
 
 
 # ── obs-doctor.py — 사람용. 물리가 보이는 유일한 출력 ───────────────────────────────

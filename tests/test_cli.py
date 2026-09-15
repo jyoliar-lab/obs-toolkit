@@ -161,31 +161,61 @@ def test_parse_spans_error_detection() -> None:
     assert lines[3] == "오류 span: 1" and lines[4].startswith("  ✗ posting-service /")
 
 
+def test_trace_error_span_shows_status_message() -> None:
+    """재시험 보고(#93 코멘트)의 새 마찰 2 — ✗ 줄 뒤가 비어 원인을 보려면 jq 왕복이 필요했다. 녹화한 실제 오류 트레이스(posting-service
+    GetAllHiring, mongodb EOF)에서 status.message 의 첫 줄(탭 뒤 StackTrace 제외)이 ✗ 줄에 실린다. 원인이 여러 번 반복된 긴 문구라 잘리되 EOF 원인은 남는다."""
+    spans = cli.parse_spans(cli.check_json(load_fixture("traceql-trace-error.json"), "traces"))
+    assert len(spans) == 1 and spans[0].is_error and spans[0].status_message.lstrip().startswith("connection(")
+    lines = cli.trace_lines("d47871cc20408ed84a7506ccf306200d", spans, top=5)
+    assert lines[3] == "오류 span: 1"
+    err = lines[4]
+    assert err.startswith("  ✗ posting-service / ") and "incomplete read of message header" in err
+    assert "StackTrace" not in err and "\t" not in err and "\n" not in err
+
+
+def test_trace_error_reason_falls_back_to_attrs() -> None:
+    """status.message 가 비면 예전처럼 exception.message → error.message → http.status_code 순으로 속성에서 찾는다.
+    스택만 있고 첫 줄이 비는 message 도 빈 것으로 본다."""
+    base = cli.parse_spans(cli.check_json(load_fixture("traceql-trace.json"), "traces"))[0]
+    s = dataclasses.replace(base, status_code="STATUS_CODE_ERROR", status_message="", attrs={**base.attrs, "exception.message": "boom"})
+    assert cli.error_reason(s) == "boom"
+    s = dataclasses.replace(s, status_message="\n\tStackTrace: a.go:1")
+    assert cli.error_reason(s) == "boom"
+    s = dataclasses.replace(s, status_message="  EOF\tStackTrace: a.go:1")
+    assert cli.error_reason(s) == "EOF"
+
+
 # ── 출력 절제 ────────────────────────────────────────────────────────────────────
 
 def test_emit_truncates_and_spills(tmp_path: Path) -> None:
-    """출력 절제 — max_lines 를 넘으면 앞부분만 찍고 "N줄 더 있음" 과 spill 경로를 안내하며, 원본 전체가 그 경로에 JSON 으로 있다."""
+    """출력 절제 — max_lines 를 넘으면 앞부분만 찍고 "N줄 더 있음" 과 호출 디렉터리를 안내한다. 디렉터리 안 raw.json 이 원본 전체,
+    summary.txt 가 잘리지 않은 요약 전체다."""
     env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     out: list[str] = []
-    res = cli.emit(["l%d" % i for i in range(10)], {"full": True}, "k", max_lines=3, env=env, out=out.append)
-    assert res.lines == ["l0", "l1", "l2"] and res.cut == 7 and res.raw_ref and res.raw_ref.startswith("tmp/obs/")
-    assert out[-1] == "… 7줄 더 있음 (총 10줄). 원본 전체: %s" % res.raw_ref
-    assert json.loads((tmp_path / res.raw_ref).read_text()) == {"full": True}
+    lines = ["l%d" % i for i in range(10)]
+    res = cli.emit(lines, {"full": True}, "k", max_lines=3, env=env, out=out.append)
+    assert res.lines == ["l0", "l1", "l2"] and res.cut == 7 and res.ref.startswith("tmp/obs/") and res.ref.endswith("-k")
+    assert out[-1] == "… 7줄 더 있음 (총 10줄). 원본·요약: %s/ (raw.json · summary.txt)" % res.ref
+    assert json.loads((tmp_path / res.ref / "raw.json").read_text()) == {"full": True}
+    assert (tmp_path / res.ref / "summary.txt").read_text().splitlines() == lines
 
 
-def test_emit_force_spill(tmp_path: Path) -> None:
-    """force_spill — 잘리지 않아도 원본을 파일로 떨어뜨린다(trace 처럼 원본이 늘 큰 종류)."""
+def test_emit_quiet_writes_files_prints_only_path(tmp_path: Path) -> None:
+    """--json(quiet) — stdout 에 요약을 찍지 않고 경로만. 파일은 보통 때와 같다(요약 전체가 summary.txt 에)."""
     env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     out: list[str] = []
-    res = cli.emit(["a"], {"x": 1}, "k", max_lines=3, force_spill=True, env=env, out=out.append)
-    assert res.cut == 0 and res.raw_ref and out == ["a", "원본 전체: %s" % res.raw_ref]
+    res = cli.emit(["a", "b"], {"x": 1}, "k", max_lines=3, quiet=True, env=env, out=out.append)
+    assert res.lines == [] and out == ["원본·요약: %s/ (raw.json · summary.txt)" % res.ref]
+    assert (tmp_path / res.ref / "summary.txt").read_text() == "a\nb\n"
 
 
-def test_emit_no_spill_when_fits(tmp_path: Path) -> None:
-    """상한 안에 들어가면 spill 하지 않는다 — tmp/obs 디렉터리조차 만들지 않는다."""
+def test_emit_always_writes_even_when_fits(tmp_path: Path) -> None:
+    """상한 안에 들어가도 호출 디렉터리는 만든다 — 원본·요약은 기본으로 파일에 남고, stdout 은 요약 뒤에 경로 한 줄."""
     env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
-    res = cli.emit(["a", "b"], {}, "k", max_lines=3, env=env, out=lambda s: None)
-    assert res.raw_ref is None and not (tmp_path / "tmp" / "obs").exists()
+    out: list[str] = []
+    res = cli.emit(["a", "b"], {"x": 1}, "k", max_lines=3, env=env, out=out.append)
+    assert res.cut == 0 and out == ["a", "b", "원본·요약: %s/ (raw.json · summary.txt)" % res.ref]
+    assert sorted(q.name for q in (tmp_path / res.ref).iterdir()) == ["raw.json", "summary.txt"]
 
 
 # ── doctor 렌더링 — 물리가 보이는 유일한 출력 ─────────────────────────────────────

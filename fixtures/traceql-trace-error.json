@@ -1,0 +1,172 @@
+{
+ "batches": [
+  {
+   "resource": {
+    "attributes": [
+     {
+      "key": "deployment.environment",
+      "value": {
+       "stringValue": "careerhub-prod"
+      }
+     },
+     {
+      "key": "k8s.deployment.name",
+      "value": {
+       "stringValue": "posting-service"
+      }
+     },
+     {
+      "key": "process.command_args",
+      "value": {
+       "arrayValue": {
+        "values": [
+         {
+          "stringValue": "/myapp"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "key": "process.executable.name",
+      "value": {
+       "stringValue": "myapp"
+      }
+     },
+     {
+      "key": "process.executable.path",
+      "value": {
+       "stringValue": "/myapp"
+      }
+     },
+     {
+      "key": "process.owner",
+      "value": {
+       "stringValue": "nonroot"
+      }
+     },
+     {
+      "key": "process.pid",
+      "value": {
+       "intValue": "1"
+      }
+     },
+     {
+      "key": "process.runtime.description",
+      "value": {
+       "stringValue": "go version go1.25.13 linux/arm64"
+      }
+     },
+     {
+      "key": "process.runtime.name",
+      "value": {
+       "stringValue": "go"
+      }
+     },
+     {
+      "key": "process.runtime.version",
+      "value": {
+       "stringValue": "go1.25.13"
+      }
+     },
+     {
+      "key": "telemetry.sdk.language",
+      "value": {
+       "stringValue": "go"
+      }
+     },
+     {
+      "key": "telemetry.sdk.name",
+      "value": {
+       "stringValue": "opentelemetry"
+      }
+     },
+     {
+      "key": "telemetry.sdk.version",
+      "value": {
+       "stringValue": "1.43.0"
+      }
+     },
+     {
+      "key": "service.name",
+      "value": {
+       "stringValue": "posting-service"
+      }
+     },
+     {
+      "key": "k8s.namespace.name",
+      "value": {
+       "stringValue": "careerhub-prod"
+      }
+     },
+     {
+      "key": "k8s.pod.name",
+      "value": {
+       "stringValue": "posting-service-697c7c9468-2b45b"
+      }
+     },
+     {
+      "key": "k8s.container.name",
+      "value": {
+       "stringValue": "posting-service"
+      }
+     }
+    ]
+   },
+   "scopeSpans": [
+    {
+     "scope": {
+      "name": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
+      "version": "0.68.0"
+     },
+     "spans": [
+      {
+       "traceId": "1HhxzCBAjthKdQbM8wYgDQ==",
+       "spanId": "EHtoNxmLm9o=",
+       "name": "careerhub.posting_service.provider_grpc.ProviderGrpc/GetAllHiring",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1789326889335431870",
+       "endTimeUnixNano": "1789326889408763369",
+       "attributes": [
+        {
+         "key": "rpc.method",
+         "value": {
+          "stringValue": "careerhub.posting_service.provider_grpc.ProviderGrpc/GetAllHiring"
+         }
+        },
+        {
+         "key": "rpc.system.name",
+         "value": {
+          "stringValue": "grpc"
+         }
+        },
+        {
+         "key": "server.port",
+         "value": {
+          "intValue": "50051"
+         }
+        },
+        {
+         "key": "rpc.response.status_code",
+         "value": {
+          "stringValue": "UNKNOWN"
+         }
+        },
+        {
+         "key": "server.address",
+         "value": {
+          "stringValue": "10.244.7.188"
+         }
+        }
+       ],
+       "status": {
+        "message": " connection(careerhub-mongodb-1.careerhub-mongodb-svc.careerhub-prod.svc.cluster.local:27017[-787333]) incomplete read of message header: connection closed unexpectedly by the other side: EOF: connection(careerhub-mongodb-1.careerhub-mongodb-svc.careerhub-prod.svc.cluster.local:27017[-787333]) incomplete read of message header: connection closed unexpectedly by the other side: EOF\tStackTrace: jobposting_repo.go:59 -> jobPostingService.go:23 -> gServer.go:31 -> grpc_grpc.pb.go:184 -> grpc_mw.go:32 -> server.go:1243 -> grpc_interceptor.go:35 -> server.go:1234 -> grpc_grpc.pb.go:186 -> server.go:1430 -> server.go:1856 -> server.go:1065 -> asm_arm64.s:1268",
+        "code": "STATUS_CODE_ERROR"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

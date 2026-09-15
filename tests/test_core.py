@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 import urllib.request
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -80,39 +81,44 @@ def test_spill_root_prefers_project_dir(tmp_path: Path) -> None:
 
 
 def test_spill_writes_and_prunes(tmp_path: Path) -> None:
-    """spill — 원본이 JSON 파일로 떨어지고(이름은 재사용되지 않는다), keep 개를 넘으면 오래된 것부터 지워 정확히 최근 keep 개(어느 파일인지 · 내용까지)만 남으며,
-    spill_ref 가 프로젝트 기준 상대 경로를 돌려준다."""
+    """spill — 한 호출이 디렉터리 하나(<시각>-<kind>/)를 만들고 그 안에 raw.json(원본)·summary.txt(요약 전체)를 둔다(이름은 재사용되지 않는다).
+    keep 개를 넘으면 오래된 디렉터리부터 지워 정확히 최근 keep 개(어느 것인지 · 내용까지)만 남으며, spill_ref 가 프로젝트 기준 상대 경로를 돌려준다."""
     env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
-    paths = [spill("k", {"i": i}, env, keep=3) for i in range(5)]
+    paths = [spill("k", {"i": i}, ["요약 %d" % i, "둘째 줄"], env, keep=3) for i in range(5)]
     root = spill_root(env)
-    assert all(p.parent == root for p in paths)
-    assert len(set(paths)) == 5                                                        # 이름 재사용 없음 — raw_ref 는 그 응답만 가리킨다
-    assert set(root.glob("*.json")) == set(paths[2:])                                  # 최근 3개만 남는다
+    assert all(p.parent == root and p.name.endswith("-k") for p in paths) and all(p.is_dir() for p in paths[2:])
+    assert len(set(paths)) == 5                                                        # 이름 재사용 없음 — 경로는 그 호출만 가리킨다
+    assert set(root.iterdir()) == set(paths[2:])                                       # 최근 3개만 남는다
     assert all(not p.exists() for p in paths[:2])                                     # 오래된 2개는 지워졌다
-    assert [json.loads(p.read_text()) for p in paths[2:]] == [{"i": 2}, {"i": 3}, {"i": 4}]   # 내용도 제자리
+    assert [json.loads((p / "raw.json").read_text()) for p in paths[2:]] == [{"i": 2}, {"i": 3}, {"i": 4}]   # 원본도 제자리
+    assert [(p / "summary.txt").read_text() for p in paths[2:]] == ["요약 %d\n둘째 줄\n" % i for i in (2, 3, 4)]  # 요약 전체
+    assert sorted(q.name for q in paths[-1].iterdir()) == ["raw.json", "summary.txt"]
     assert spill_ref(paths[-1], env) == "tmp/obs/" + paths[-1].name
 
 
 def test_prune_oldest_first(tmp_path: Path) -> None:
-    """prune 단독 — mtime 이 오래된 파일부터 지우고 지운 개수를 돌려준다."""
+    """prune 단독 — mtime 이 오래된 항목부터 지우고 지운 개수를 돌려준다. 호출 디렉터리(안의 파일까지)와 예전 형식의 낱개 파일을 같이 센다."""
     for i in range(4):
-        p = tmp_path / ("%d.json" % i)
-        p.write_text("{}")
+        p = tmp_path / ("%d" % i)
+        if i % 2:
+            p.mkdir(); (p / "raw.json").write_text("{}")
+        else:
+            p = p.with_suffix(".json"); p.write_text("{}")
         os.utime(p, (1000 + i, 1000 + i))
     assert prune(tmp_path, keep=2) == 2
-    assert sorted(p.name for p in tmp_path.glob("*.json")) == ["2.json", "3.json"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["2.json", "3"]
 
 
 def test_prune_protects_just_written_file(tmp_path: Path) -> None:
     """prune 의 protect — 방금 쓴 파일은 mtime 이 가장 오래돼 보여도 지우지 않고, 나머지에서 keep-1 개만 남긴다.
     같은 초 안에 여러 번 spill 할 때 이름 순서(-2, -3 접미)가 mtime 동률을 잘못 가르는 경우를 구조로 막는다."""
-    files = [tmp_path / ("%d.json" % i) for i in range(4)]
+    files = [tmp_path / ("%d" % i) for i in range(4)]
     for i, p in enumerate(files):
-        p.write_text("{}")
+        p.mkdir(); (p / "raw.json").write_text("{}")
         os.utime(p, (1000 + i, 1000 + i))
-    os.utime(files[3], (900, 900))                       # 방금 쓴 파일인데 mtime 은 가장 오래됨
+    os.utime(files[3], (900, 900))                       # 방금 쓴 디렉터리인데 mtime 은 가장 오래됨
     assert prune(tmp_path, keep=2, protect=files[3]) == 2
-    assert sorted(p.name for p in tmp_path.glob("*.json")) == ["2.json", "3.json"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["2", "3"]
 
 
 # ── 예산 ────────────────────────────────────────────────────────────────────────
@@ -195,6 +201,40 @@ def test_not_found_is_agent_fixable(make_client: ClientFactory) -> None:
     assert "사람에게" in msg.split("다시", 1)[1]   # 반복되는 404 만 사람에게 — 순서가 그렇다
 
 
+@pytest.mark.parametrize("status", [502, 503, 504])
+def test_gateway_errors_are_agent_fixable(make_client: ClientFactory, status: int) -> None:
+    """502·503·504 는 "제때 답하지 못했다" — 무거운 질의가 흔한 원인이라 "좁혀 다시" 가 먼저 오고, 가벼운 질의도 그럴 때만 사람에게.
+    재시험 보고(#93 코멘트)의 새 마찰 1: 7d 창의 Loki 집계가 502 로 "사람에게" 가 됐다. 그 밖의 5xx(500)는 그대로 사람의 것."""
+    client, _ = make_client({"loki/api/v1/query_range": (status, b"<html>bad gateway obs.mg.jyo-liar.com</html>")})
+    with pytest.raises(ObsError) as ei:
+        client.get("logs", "loki/api/v1/query_range")
+    msg = str(ei.value)
+    assert msg.startswith("logs 백엔드가 제때 답하지 못했다(%d)" % status) and "좁혀 다시" in msg
+    assert "사람에게" in msg.split("다시", 1)[1]
+    for word in PHYSICAL:
+        assert word not in msg
+
+
+def test_read_timeout_is_agent_fixable(make_client: ClientFactory) -> None:
+    """읽기 시간 초과 — 닿기는 했는데 답이 없는 것 — 도 같은 분류다: 제한 시간(초)을 말하고 "좁혀 다시" 로 먼저 보낸다.
+    연결 실패(fail=)와 달리 "닿지 못했다" 라고 하지 않는다."""
+    client, _ = make_client(hang=True)
+    with pytest.raises(ObsError) as ei:
+        client.get("logs", "loki/api/v1/query_range")
+    msg = str(ei.value)
+    assert msg.startswith("logs 백엔드가 30초 안에 답하지 않았다") and "좁혀 다시" in msg and "닿지 못했다" not in msg
+    assert "사람에게" in msg.split("다시", 1)[1]
+
+
+def test_urllib_read_timeout_maps_to_transport_timeout(base_env: dict[str, str], slow_server: LocalServer) -> None:
+    """실제 urllib 경로 — 연결은 받되 응답을 미루는 로컬 서버에 짧은 timeout 으로 닿으면 TransportError 가 아니라
+    TransportTimeout 이 난다(맨손 TimeoutError 를 구분해 올린다). 그래서 Client 가 "좁혀 다시" 로 분류할 수 있다."""
+    client = Client(config=load_config({**base_env, "OBS_GRAFANA_URL": slow_server.base}), token="t", timeout=0.3)
+    with pytest.raises(ObsError) as ei:
+        client.get("logs", "loki/api/v1/query_range", {"query": "{a=\"b\"}"})
+    assert "안에 답하지 않았다" in str(ei.value) and "닿지 못했다" not in str(ei.value)
+
+
 def test_transport_failure_is_logical(make_client: ClientFactory) -> None:
     """연결 실패(DNS·VPN) — 논리 이름으로 "닿지 못했다" 와 obs-doctor.py 안내만 말하고 호스트·uid 는 없다."""
     client, _ = make_client(fail="[Errno 8] nodename nor servname provided")
@@ -223,13 +263,14 @@ class LocalServer:
     seen: list[str] = field(default_factory=list[str])
 
 
-@pytest.fixture
-def local_server() -> Iterator[LocalServer]:
+def _serve(delay: float) -> Iterator[LocalServer]:
     seen: list[str] = []
 
     class H(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             seen.append(self.path)
+            if delay:
+                time.sleep(delay)
             body = b'{"status":"success","data":{}}'
             self.send_response(200); self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
@@ -243,6 +284,17 @@ def local_server() -> Iterator[LocalServer]:
         yield LocalServer(base="http://127.0.0.1:%d" % srv.server_port, seen=seen)
     finally:
         srv.shutdown(); srv.server_close()
+
+
+@pytest.fixture
+def local_server() -> Iterator[LocalServer]:
+    yield from _serve(0)
+
+
+@pytest.fixture
+def slow_server() -> Iterator[LocalServer]:
+    """연결은 받되 응답을 1초 미룬다 — 읽기 시간 초과를 만든다."""
+    yield from _serve(1.0)
 
 
 def test_transport_never_consults_system_proxy(monkeypatch: pytest.MonkeyPatch, base_env: dict[str, str], local_server: LocalServer) -> None:
