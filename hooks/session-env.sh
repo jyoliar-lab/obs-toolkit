@@ -5,7 +5,7 @@
 # 미확인이라, 값은 여기서 파일로 넘긴다(스크립트 자체는 자기 위치로 루트를 찾으므로 PATH 만 있어도 돈다).
 [ -n "$CLAUDE_ENV_FILE" ] || exit 0
 root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-dirs=$(find "$root/skills" -type d -name scripts 2>/dev/null | paste -sd: -)
+dirs=$( { echo "$root/bin"; find "$root/skills" -type d -name scripts 2>/dev/null; } | paste -sd: -)
 [ -n "$dirs" ] && printf 'export PATH="%s:$PATH"\n' "$dirs" >> "$CLAUDE_ENV_FILE"
 printf 'export PYTHONPATH="%s${PYTHONPATH:+:$PYTHONPATH}"\n' "$root" >> "$CLAUDE_ENV_FILE"
 exit 0

@@ -158,9 +158,9 @@ def test_get_non_json_body(make_client: ClientFactory) -> None:
     assert client.get("traces", "api/echo").body == "echo"
 
 
-@pytest.mark.parametrize("status,needle", [(401, "인증 실패"), (403, "거부"), (404, "거부"), (500, "오류"), (429, "속도 제한")])
+@pytest.mark.parametrize("status,needle", [(401, "인증 실패"), (403, "거부"), (405, "거부"), (500, "오류"), (429, "속도 제한")])
 def test_http_errors_are_logical(make_client: ClientFactory, status: int, needle: str) -> None:
-    """오류 문구 규약 — 401·403·404·500·429 가 논리 이름으로 시작하고 상태별 다음 행동을 말하며, 백엔드가 본문에 호스트를 흘려도 문구에 물리 문자열이 없다."""
+    """오류 문구 규약 — 401·403·405·500·429 는 사람의 것: 논리 이름으로 시작하고 상태별 다음 행동을 말하며, 백엔드가 본문에 호스트를 흘려도 문구에 물리 문자열이 없다."""
     client, _ = make_client({"loki/api/v1/query_range": (status, {"message": "secret host obs.mg.jyo-liar.com"})})
     with pytest.raises(ObsError) as ei:
         client.get("logs", "loki/api/v1/query_range")
@@ -177,6 +177,17 @@ def test_query_error_passes_backend_message(make_client: ClientFactory) -> None:
         client.get("metrics", "api/v1/query", {"query": "up}"})
     assert 'parse error: unexpected "}"' in str(ei.value) and "질의를 고쳐" in str(ei.value)
     assert http_error_message("logs", 422, "plain text reason") == "logs 백엔드가 질의를 거부했다(422): plain text reason — 질의를 고쳐 다시."
+
+
+def test_not_found_is_agent_fixable(make_client: ClientFactory) -> None:
+    """404 는 agent 가 고칠 수 있는 것(만료·오타 traceID, 없는 레이블) — 403/405 와 묶지 않고 백엔드 메시지를 통과시켜
+    "다시" 로 끝낸다. 시험 보고(#93 코멘트)의 마찰 3: 없는 traceID 가 "사람에게" 로 가 오진을 유도했다."""
+    client, _ = make_client({"api/traces/": (404, {"error": "trace not found"})})
+    with pytest.raises(ObsError) as ei:
+        client.get("traces", "api/traces/deadbeef")
+    msg = str(ei.value)
+    assert msg.startswith("traces 백엔드에 그 자원이 없다(404): trace not found") and "다시" in msg
+    assert "사람에게" in msg.split("다시", 1)[1]   # 반복되는 404 만 사람에게 — 순서가 그렇다
 
 
 def test_transport_failure_is_logical(make_client: ClientFactory) -> None:
