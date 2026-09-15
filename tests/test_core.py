@@ -3,13 +3,18 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import urllib.request
+from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from typing import Iterator
 
 import pytest
 
 from obs.core import (
-    Budget, Config, Lines, BudgetExceeded, Evidence, ObsError, Response, Window, doctor, fmt_rfc3339, http_error_message,
-    parse_duration, parse_time, prune, spill, spill_ref, spill_root, to_dict, to_json,
+    Budget, Config, Lines, BudgetExceeded, Client, Evidence, ObsError, Response, Window, doctor, fmt_rfc3339,
+    http_error_message, load_config, parse_duration, parse_time, prune, spill, spill_ref, spill_root, to_dict, to_json,
 )
 from tests.conftest import ClientFactory, FakeTransport
 
@@ -207,6 +212,64 @@ def test_error_messages_never_carry_token(make_client: ClientFactory) -> None:
     with pytest.raises(ObsError) as ei:
         client.get("metrics", "api/v1/query")
     assert "test-token-not-real" not in str(ei.value)
+
+
+# ── 실제 transport — 로컬 HTTP 서버로 프록시 행위를 본다 ─────────────────────────
+
+@dataclass
+class LocalServer:
+    """요청 경로를 `seen` 에 기록하고 200 JSON 을 돌려주는 로컬 HTTP 서버."""
+    base: str
+    seen: list[str] = field(default_factory=list[str])
+
+
+@pytest.fixture
+def local_server() -> Iterator[LocalServer]:
+    seen: list[str] = []
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            seen.append(self.path)
+            body = b'{"status":"success","data":{}}'
+            self.send_response(200); self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:   # noqa: A002 — BaseHTTPRequestHandler 시그니처
+            return
+
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        yield LocalServer(base="http://127.0.0.1:%d" % srv.server_port, seen=seen)
+    finally:
+        srv.shutdown(); srv.server_close()
+
+
+def test_transport_never_consults_system_proxy(monkeypatch: pytest.MonkeyPatch, base_env: dict[str, str], local_server: LocalServer) -> None:
+    """마찰 4 — urllib 기본 opener 는 시스템 프록시(macOS _scproxy)를 조회하고, 그 경로가 CoreFoundation 의 argv 파싱을 깨워
+    `--series '{a="b"}'` 를 plist 로 읽으려다 stderr 에 경고를 흘린다. 코어의 transport 는 getproxies()·macOS sysconf 를
+    부르지 않아야 한다 — 부르면 여기서 AssertionError. env 프록시가 없는 보통의 경우를 본다."""
+    def forbidden(*_: object, **__: object) -> dict[str, str]:
+        raise AssertionError("시스템 프록시를 조회했다 — env 프록시만 봐야 한다")
+    monkeypatch.setattr(urllib.request, "getproxies", forbidden)
+    monkeypatch.setattr(urllib.request, "getproxies_macosx_sysconf", forbidden, raising=False)
+    monkeypatch.setattr(urllib.request, "proxy_bypass_macosx_sysconf", forbidden, raising=False)
+    for k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+        monkeypatch.delenv(k, raising=False)
+    client = Client(config=load_config({**base_env, "OBS_GRAFANA_URL": local_server.base}), token="t")
+    r = client.get("metrics", "api/v1/query", {"query": "up"})
+    assert r.status == 200 and local_server.seen == ["/api/datasources/proxy/uid/prometheus/api/v1/query?query=up"]
+
+
+def test_transport_honors_env_proxy(monkeypatch: pytest.MonkeyPatch, base_env: dict[str, str], local_server: LocalServer) -> None:
+    """env 프록시(HTTP_PROXY)는 따른다 — 클러스터·사내망 소비자를 위해. 목적지는 해석 불가능한 호스트(example.invalid)이고
+    요청이 로컬 프록시에 절대 URI 로 닿으면 env 프록시를 쓴 것이다."""
+    monkeypatch.setenv("HTTP_PROXY", local_server.base)
+    monkeypatch.delenv("NO_PROXY", raising=False); monkeypatch.delenv("no_proxy", raising=False)
+    client = Client(config=load_config({**base_env, "OBS_GRAFANA_URL": "http://example.invalid"}), token="t")
+    r = client.get("metrics", "api/v1/query", {"query": "up"})
+    assert r.status == 200
+    assert local_server.seen == ["http://example.invalid/api/datasources/proxy/uid/prometheus/api/v1/query?query=up"]
 
 
 # ── doctor ──────────────────────────────────────────────────────────────────────

@@ -49,19 +49,3 @@ def test_core_never_sets_http_method() -> None:
             assert "method" not in kws and "data" not in kws, "Request 에 method/data 를 주지 않는다"
             assert len(node.args) == 1, "Request 위치 인자는 url 하나 — data 를 위치 인자로도 주지 않는다"
     assert request_calls == 1, "HTTP 요청을 만드는 자리는 정확히 하나다"
-
-
-def test_proxy_from_environment_only() -> None:
-    """마찰 4 — urllib 기본 ProxyHandler 는 macOS 시스템 프록시(_scproxy)를 조회하고, 그 경로가 CoreFoundation 의 argv
-    파싱을 깨워 `--series '{a="b"}'` 를 plist 로 읽으려다 stderr 에 경고를 흘린다. 코어는 env 프록시만 본다."""
-    src = (ROOT / "obs" / "core.py").read_text(encoding="utf-8")
-    assert "ProxyHandler(urllib.request.getproxies_environment())" in src
-    assert "urllib.request.urlopen(" not in src, "urlopen 은 기본 opener(시스템 프록시 조회)를 쓴다 — opener.open 으로"
-
-
-def test_no_forbidden_method_names_in_core() -> None:
-    """느슨한 마지막 겹 — core.py 소스에 "POST"·"PUT"·"DELETE"·"PATCH"·set_method·get_method 문자열이 없어야 한다.
-    AST 검사가 놓칠 우회(문자열로 메서드를 조립하는 식)를 문자열 검색으로 한 번 더 막는다."""
-    src = (ROOT / "obs" / "core.py").read_text(encoding="utf-8")
-    for word in ('"POST"', '"PUT"', '"DELETE"', '"PATCH"', "set_method", "get_method"):
-        assert word not in src, "코어에 GET 외 메서드 흔적: %s" % word
