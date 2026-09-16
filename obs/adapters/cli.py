@@ -5,7 +5,11 @@
 셸 없는 소비자(MCP)는 `*_run` 만 다시 쓴다.
 
 외부 경계 규약: 백엔드 응답(JSON)은 `parse_*` 가 받는 즉시 dataclass 로 옮기고, 포맷 함수는 그 타입만 받는다.
-`Any` 는 쓰지 않는다.
+`Any` 는 쓰지 않는다. 접근자(`json_obj` …)는 obs.core 에, Prometheus 형 파서(`parse_metric` · `check_status`)는
+obs.metrics 에 있다 — 환원 연산이 코어에서 같은 파서를 쓴다.
+
+환원 연산(summarize · compare · top — obs.metrics)은 promql.py 의 서브커맨드다: `promql.py compare '<PromQL>' --since 1h`.
+`metrics_run` 이 Evidence[…] 를 받아 줄로 렌더링한다 — 계산은 코어, 표는 여기.
 
 agent 인터페이스에 물리(URL · uid · 토큰)가 없다. `--uid` 같은 인자를 두지 않는다 — 논리 이름은 명령 자체가 정한다
 (promql → metrics · logql → logs · traceql → traces). 물리는 `obs-doctor.py` 만 사람에게 보인다.
@@ -20,7 +24,12 @@ from typing import Callable, Mapping, Sequence
 
 from obs.core import (
     JSON, Client, DoctorReport, Evidence, Lines, ObsError, Params, Window, doctor, fmt_ts, load_config,
-    SPILL_RAW, SPILL_SUMMARY, parse_duration, parse_time, now, spill, spill_ref, to_json, token_from_env,
+    SPILL_RAW, SPILL_SUMMARY, json_int, json_labels, json_list, json_obj, json_pair, json_str, json_strs,
+    parse_duration, parse_time, now, spill, spill_ref, to_json, token_from_env,
+)
+from obs.metrics import (
+    DEFAULT_BASELINE, DEFAULT_TOP_AGG, DEFAULT_TOP_K, TOP_AGGS, Comparison, MetricResult, Series, Summary, Top,
+    auto_step, check_status, compare, parse_metric, series_items, summarize, top,
 )
 
 DEFAULT_MAX_LINES: int = 40
@@ -30,67 +39,7 @@ RunResult = tuple[Evidence[Lines], JSON, str]
 """(근거, 원본 body, spill 종류 이름)"""
 
 
-# ── JSON 접근자 — 외부 경계에서 dataclass 로 옮길 때만 쓴다 ─────────────────────
-
-def _obj(v: JSON) -> dict[str, JSON]:
-    return v if isinstance(v, dict) else {}
-
-
-def _list(v: JSON) -> list[JSON]:
-    return v if isinstance(v, list) else []
-
-
-def _str(v: JSON, default: str = "") -> str:
-    if v is None:
-        return default
-    return v if isinstance(v, str) else str(v)
-
-
-def _int(v: JSON) -> int:
-    if isinstance(v, bool) or v is None:
-        return 0
-    if isinstance(v, (int, float)):
-        return int(v)
-    if isinstance(v, str):
-        try:
-            return int(float(v))
-        except ValueError:
-            return 0
-    return 0
-
-
-def _labels(v: JSON) -> dict[str, str]:
-    return {k: _str(x) for k, x in _obj(v).items()}
-
-
-def _strs(v: JSON) -> list[str]:
-    return [_str(x) for x in _list(v)]
-
-
-def _pair(v: JSON) -> tuple[str, str] | None:
-    """[ts, value] 쌍. 둘 다 문자열로 — 해석(초·나노초·수치)은 받는 쪽이 한다."""
-    items = _list(v)
-    if len(items) < 2:
-        return None
-    return _str(items[0]), _str(items[1])
-
-
-# ── 응답 dataclass + 파서 — Prometheus · Loki ────────────────────────────────────
-
-@dataclass(frozen=True)
-class Series:
-    """시계열 하나 — Prometheus·Loki 메트릭 응답의 vector/matrix 항목."""
-    labels: dict[str, str]
-    values: list[tuple[float, str]]   # (unix 초, 값 문자열)
-
-
-@dataclass(frozen=True)
-class MetricResult:
-    """`{status, data: {resultType, result}}` 형 응답."""
-    result_type: str            # vector · matrix · scalar · string
-    scalar: str | None          # scalar/string 일 때 값
-    series: list[Series]
-
+# ── 응답 dataclass + 파서 — Loki (Prometheus 형 파서는 obs.metrics) ────────────────
 
 @dataclass(frozen=True)
 class Stream:
@@ -106,73 +55,30 @@ class LogResult:
     series: list[Series]
 
 
-def check_status(body: JSON, backend: str) -> dict[str, JSON]:
-    """Prometheus·Loki 형 응답의 `status: error` 를 논리 이름의 오류로. 통과하면 객체를 돌려준다."""
-    if not isinstance(body, dict):
-        raise ObsError("%s 백엔드가 JSON 이 아닌 응답을 냈다: %s" % (backend, clip(_str(body), 300)))
-    if body.get("status") == "error":
-        raise ObsError("%s 백엔드 질의 오류(%s): %s" % (backend, _str(body.get("errorType")), _str(body.get("error"))))
-    for w in _strs(body.get("warnings")):
-        print("warning: %s" % w, file=sys.stderr)
-    return body
-
-
-def _series_items(result: JSON) -> list[Series]:
-    out: list[Series] = []
-    for item in _list(result):
-        o = _obj(item)
-        pairs: list[tuple[str, str]] = []
-        single = _pair(o.get("value"))
-        if single is not None:
-            pairs.append(single)
-        for v in _list(o.get("values")):
-            pr = _pair(v)
-            if pr is not None:
-                pairs.append(pr)
-        values: list[tuple[float, str]] = []
-        for ts, val in pairs:
-            try:
-                values.append((float(ts), val))
-            except ValueError:
-                continue
-        out.append(Series(labels=_labels(o.get("metric")), values=values))
-    return out
-
-
-def parse_metric(body: dict[str, JSON]) -> MetricResult:
-    data = _obj(body.get("data"))
-    rtype = _str(data.get("resultType"))
-    result = data.get("result")
-    if rtype in ("scalar", "string"):
-        pr = _pair(result)
-        return MetricResult(result_type=rtype, scalar=pr[1] if pr else None, series=[])
-    return MetricResult(result_type=rtype, scalar=None, series=_series_items(result))
-
-
 def parse_strings(body: dict[str, JSON]) -> list[str]:
     """labels · label values 응답 — `data: [str]`."""
-    return _strs(body.get("data"))
+    return json_strs(body.get("data"))
 
 
 def parse_label_sets(body: dict[str, JSON]) -> list[dict[str, str]]:
     """series 응답 — `data: [{label: value}]`."""
-    return [_labels(m) for m in _list(body.get("data"))]
+    return [json_labels(m) for m in json_list(body.get("data"))]
 
 
 def parse_logs(body: dict[str, JSON]) -> LogResult:
-    data = _obj(body.get("data"))
-    rtype = _str(data.get("resultType"))
+    data = json_obj(body.get("data"))
+    rtype = json_str(data.get("resultType"))
     if rtype == "matrix":
-        return LogResult(result_type=rtype, streams=[], series=_series_items(data.get("result")))
+        return LogResult(result_type=rtype, streams=[], series=series_items(data.get("result")))
     streams: list[Stream] = []
-    for item in _list(data.get("result")):
-        o = _obj(item)
+    for item in json_list(data.get("result")):
+        o = json_obj(item)
         values: list[tuple[int, str]] = []
-        for v in _list(o.get("values")):
-            pr = _pair(v)
+        for v in json_list(o.get("values")):
+            pr = json_pair(v)
             if pr is not None:
-                values.append((_int(pr[0]), pr[1]))
-        streams.append(Stream(labels=_labels(o.get("stream")), values=values))
+                values.append((json_int(pr[0]), pr[1]))
+        streams.append(Stream(labels=json_labels(o.get("stream")), values=values))
     return LogResult(result_type=rtype, streams=streams, series=[])
 
 
@@ -216,64 +122,64 @@ class TagScope:
 
 def check_json(body: JSON, backend: str) -> dict[str, JSON]:
     if not isinstance(body, dict):
-        raise ObsError("%s 백엔드가 JSON 이 아닌 응답을 냈다: %s" % (backend, clip(_str(body), 300)))
+        raise ObsError("%s 백엔드가 JSON 이 아닌 응답을 냈다: %s" % (backend, clip(json_str(body), 300)))
     return body
 
 
 def parse_search(body: dict[str, JSON]) -> list[TraceHit]:
     hits: list[TraceHit] = []
-    for t in _list(body.get("traces")):
-        o = _obj(t)
+    for t in json_list(body.get("traces")):
+        o = json_obj(t)
         hits.append(TraceHit(
-            trace_id=_str(o.get("traceID"), "?"), duration_ms=_str(o.get("durationMs"), "?"),
-            start_ns=_int(o.get("startTimeUnixNano")),
-            root_service=_str(o.get("rootServiceName"), "?"), root_name=_str(o.get("rootTraceName"), "?")))
+            trace_id=json_str(o.get("traceID"), "?"), duration_ms=json_str(o.get("durationMs"), "?"),
+            start_ns=json_int(o.get("startTimeUnixNano")),
+            root_service=json_str(o.get("rootServiceName"), "?"), root_name=json_str(o.get("rootTraceName"), "?")))
     return hits
 
 
 def _attr_value(v: JSON) -> str:
-    o = _obj(v)
+    o = json_obj(v)
     for k in ("stringValue", "intValue", "doubleValue", "boolValue"):
         if k in o:
-            return _str(o[k])
-    return _str(v)
+            return json_str(o[k])
+    return json_str(v)
 
 
 def _attrs(items: JSON) -> dict[str, str]:
     out: dict[str, str] = {}
-    for a in _list(items):
-        o = _obj(a)
-        out[_str(o.get("key"), "?")] = _attr_value(o.get("value"))
+    for a in json_list(items):
+        o = json_obj(a)
+        out[json_str(o.get("key"), "?")] = _attr_value(o.get("value"))
     return out
 
 
 def parse_spans(body: dict[str, JSON]) -> list[Span]:
     """OTLP JSON — Tempo 는 `batches`(v1) 또는 `resourceSpans`(v2) 로 준다."""
-    batches = body.get("batches") or body.get("resourceSpans") or _obj(body.get("trace")).get("resourceSpans")
+    batches = body.get("batches") or body.get("resourceSpans") or json_obj(body.get("trace")).get("resourceSpans")
     spans: list[Span] = []
-    for b in _list(batches):
-        bo = _obj(b)
-        service = _attrs(_obj(bo.get("resource")).get("attributes")).get("service.name", "?")
-        for ss in _list(bo.get("scopeSpans") or bo.get("instrumentationLibrarySpans")):
-            for s in _list(_obj(ss).get("spans")):
-                so = _obj(s)
-                st = _obj(so.get("status"))
+    for b in json_list(batches):
+        bo = json_obj(b)
+        service = _attrs(json_obj(bo.get("resource")).get("attributes")).get("service.name", "?")
+        for ss in json_list(bo.get("scopeSpans") or bo.get("instrumentationLibrarySpans")):
+            for s in json_list(json_obj(ss).get("spans")):
+                so = json_obj(s)
+                st = json_obj(so.get("status"))
                 spans.append(Span(
-                    service=service, name=_str(so.get("name"), "?"), span_id=_str(so.get("spanId")),
-                    parent_id=_str(so.get("parentSpanId")),
-                    start_ns=_int(so.get("startTimeUnixNano")), end_ns=_int(so.get("endTimeUnixNano")),
-                    status_code=_str(st.get("code")), status_message=_str(st.get("message")),
+                    service=service, name=json_str(so.get("name"), "?"), span_id=json_str(so.get("spanId")),
+                    parent_id=json_str(so.get("parentSpanId")),
+                    start_ns=json_int(so.get("startTimeUnixNano")), end_ns=json_int(so.get("endTimeUnixNano")),
+                    status_code=json_str(st.get("code")), status_message=json_str(st.get("message")),
                     attrs=_attrs(so.get("attributes")),
                 ))
     return spans
 
 
 def parse_tags(body: dict[str, JSON]) -> list[TagScope]:
-    return [TagScope(name=_str(_obj(sc).get("name")), tags=_strs(_obj(sc).get("tags"))) for sc in _list(body.get("scopes"))]
+    return [TagScope(name=json_str(json_obj(sc).get("name")), tags=json_strs(json_obj(sc).get("tags"))) for sc in json_list(body.get("scopes"))]
 
 
 def parse_tag_values(body: dict[str, JSON]) -> list[str]:
-    return [_str(_obj(v).get("value")) for v in _list(body.get("tagValues"))]
+    return [json_str(json_obj(v).get("value")) for v in json_list(body.get("tagValues"))]
 
 
 # ── 출력 절제 ────────────────────────────────────────────────────────────────────
@@ -365,6 +271,13 @@ PROMQL_DOC = """promql — 즉시 조회·구간 조회 (metrics 백엔드, GET 
   promql.py --label-values <name> [<selector>]           레이블 값 목록
   promql.py --series '<selector>' [--range 1h]           시계열 목록
 
+환원 연산 — 원본 대신 계산 결과만(시계열 두 벌이 컨텍스트에 실리지 않는다):
+  promql.py summarize '<PromQL>' --since 1h              시계열별 n · min · p50 · p95 · max · last · 기울기
+  promql.py compare '<PromQL>' --since 1h [--baseline 1d]  지금 창 vs 기준선 창 — 시계열별 p95 차이(비율 · 절대)만
+                                                         --baseline: 1d(기본 — 1일 전 같은 시각) · 1w · prev(직전 창)
+  promql.py top '<PromQL>' --by pod [--k 10] [--agg sum]  레이블 축 상위 k — topk 로 감싸 서버가 k 개만 돌려준다
+  서브커맨드의 시간은 --since/--end (logql 과 같다). `promql.py compare --help` 에 옵션 전부.
+
 옵션:
   --end <시각>      기준 시각 (now · -10m · unix초 · RFC3339). 기본 now
   --range <기간>    구간 길이 (5m · 1h · 2d). 있으면 구간 조회
@@ -411,10 +324,6 @@ def range_lines(res: MetricResult, points: bool) -> list[str]:
         lines.append("n=%d  min=%s  max=%s  first=%s  last=%s  %s" % (
             len(nums), fmt_val(min(nums)), fmt_val(max(nums)), fmt_val(nums[0]), fmt_val(nums[-1]), labels))
     return lines or ["(결과 없음)"]
-
-
-def auto_step(range_sec: float) -> str:
-    return "%ds" % max(15, int(range_sec / 60))
 
 
 @dataclass
@@ -468,6 +377,10 @@ def promql_run(client: Client, a: PromqlArgs, at: float | None = None) -> RunRes
 
 
 def promql_main(argv: Sequence[str] | None = None) -> None:
+    args_list = list(sys.argv[1:] if argv is None else argv)
+    if args_list and args_list[0] in METRICS_SUBCOMMANDS:
+        metrics_main(args_list)
+        return
     ap = argparse.ArgumentParser(prog="promql.py", description=PROMQL_DOC,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("query", nargs="?", help="PromQL (또는 --labels/--label-values/--series 의 selector)")
@@ -483,6 +396,136 @@ def promql_main(argv: Sequence[str] | None = None) -> None:
     args = PromqlArgs(query=a.query, end=a.end, range_=a.range_, step=a.step, points=a.points,
                       labels=a.labels, label_values=a.label_values, series=a.series)
     ev, body, kind = promql_run(_client(), args)
+    _finish(ev, body, kind, a.max_lines, a.json)
+
+
+# ── 환원 연산 — promql.py 의 서브커맨드 (계산은 obs.metrics, 표는 여기) ─────────────────
+
+METRICS_SUBCOMMANDS: tuple[str, ...] = ("summarize", "compare", "top")
+
+METRICS_DOC = """promql.py <summarize|compare|top> — 메트릭 환원 연산 (metrics 백엔드, GET 만).
+
+  summarize '<PromQL>' --since 1h [--step 60s]
+      시계열마다 `n min p50 p95 max last slope` 한 줄. 시계열이 없으면 "데이터 없음"(0 과 다르다).
+  compare '<PromQL>' --since 1h [--baseline 1d] [--step 60s]
+      같은 질의를 지금 창과 기준선 창에 같은 step 으로 던져 시계열별 차이만:
+      `×비율  Δ절대  now p95  base p95  n=지금/기준  {레이블}` — 비율 내림차순.
+      --baseline: 1d(기본 — 1일 전 같은 시각, 주기성 있는 지표용) · 1w(1주 전) · prev(직전 창 — 급변 감지용)
+      기준선 창에 시계열이 없으면 "기준선 없음" — 0 으로 나누지 않는다.
+  top '<PromQL>' --by pod [--k 10] [--agg sum]
+      레이블 축 상위 k — `topk(k, agg by (by) (query))` 로 감싸 --end 시각에 즉시 조회. 출력은 k 줄 이하.
+      --by 는 쉼표로 여러 축(namespace,pod). --agg: sum(기본) · max · min · avg · count
+
+공통: --since <기간>(기본 1h) · --end <시각>(기본 now) · --max-lines · --json
+"""
+
+
+def fmt_ratio(r: float) -> str:
+    return "%.3g" % r
+
+
+def fmt_signed(v: float) -> str:
+    return ("+" if v >= 0 else "") + fmt_val(v)
+
+
+def summary_lines(value: Summary, window: Window) -> list[str]:
+    if not value.series:
+        return ["(데이터 없음 — %s 에 시계열이 없다. step=%s)" % (window.label(), value.step)]
+    return ["n=%d  min=%s  p50=%s  p95=%s  max=%s  last=%s  slope=%s/s  %s" % (
+        s.n, fmt_val(s.min), fmt_val(s.p50), fmt_val(s.p95), fmt_val(s.max), fmt_val(s.last), fmt_signed(s.slope),
+        labels_str(s.labels)) for s in value.series]
+
+
+def compare_lines(value: Comparison, window: Window) -> list[str]:
+    base = window.baseline
+    base_label = base.label() if base is not None else "?"
+    if value.now_empty and value.baseline_empty:
+        return ["(데이터 없음 — 지금 %s · 기준선 %s 모두 시계열이 없다. step=%s)" % (window.label(), base_label, value.step)]
+    lines = ["지금 %s  기준선 %s  step=%s  (p95 비교)" % (window.label(), base_label, value.step)]
+    if value.baseline_empty:
+        lines.append("기준선 없음 — %s 에 시계열이 없다. 비율을 내지 않는다(0 으로 나누지 않는다)" % base_label)
+    for d in value.deltas:
+        labels = labels_str(d.labels)
+        if d.now is not None and d.base is not None:
+            n = "n=%d/%d" % (d.now.n, d.base.n)
+            if d.ratio is not None and d.delta is not None:
+                lines.append("×%s  Δ%s  now p95=%s  base p95=%s  %s  %s" % (
+                    fmt_ratio(d.ratio), fmt_signed(d.delta), fmt_val(d.now.p95), fmt_val(d.base.p95), n, labels))
+            else:
+                lines.append("×—  Δ%s  now p95=%s  base p95=0  (기준선 0)  %s  %s" % (
+                    fmt_signed(d.delta if d.delta is not None else d.now.p95), fmt_val(d.now.p95), n, labels))
+        elif d.now is not None:
+            lines.append("기준선 없음  now p95=%s  n=%d/-  %s" % (fmt_val(d.now.p95), d.now.n, labels))
+        elif d.base is not None:
+            lines.append("지금 없음  base p95=%s  n=-/%d  %s" % (fmt_val(d.base.p95), d.base.n, labels))
+    return lines
+
+
+def top_lines(value: Top, window: Window) -> list[str]:
+    if not value.entries:
+        return ["(데이터 없음 — %s 시각에 %s 축의 시계열이 없다)" % (fmt_ts(window.end), ",".join(value.by))]
+    return ["%s  %s" % (fmt_val(e.value), labels_str(e.labels)) for e in value.entries[: value.k]]
+
+
+@dataclass
+class MetricsArgs:
+    cmd: str                    # summarize · compare · top
+    query: str
+    since: str = "1h"
+    end: str | None = None
+    step: str | None = None
+    baseline: str = DEFAULT_BASELINE
+    k: int = DEFAULT_TOP_K
+    by: str = "pod"
+    agg: str = DEFAULT_TOP_AGG
+
+
+def metrics_run(client: Client, a: MetricsArgs, at: float | None = None) -> RunResult:
+    """→ (Evidence[Lines], 원본, kind). 계산은 obs.metrics 가, 표는 *_lines 가. stdout 을 만지지 않는다."""
+    window = Window.last(a.since, a.end, at)
+    if a.cmd == "summarize":
+        ev, raw = summarize(client, a.query, window, a.step)
+        return _evidence("metrics", ev.query, ev.window or window, summary_lines(ev.value, ev.window or window)), raw, "promql-summarize"
+    if a.cmd == "compare":
+        ev_c, raw = compare(client, a.query, window.with_baseline(a.baseline), a.step)
+        w = ev_c.window or window
+        return _evidence("metrics", ev_c.query, w, compare_lines(ev_c.value, w)), raw, "promql-compare"
+    if a.cmd == "top":
+        ev_t, raw = top(client, a.query, window, k=a.k, by=a.by.split(","), agg=a.agg)
+        w = ev_t.window or window
+        return _evidence("metrics", ev_t.query, w, top_lines(ev_t.value, w)), raw, "promql-top"
+    raise ObsError("알 수 없는 명령 %r — %s" % (a.cmd, " · ".join(METRICS_SUBCOMMANDS)))
+
+
+def metrics_main(argv: Sequence[str]) -> None:
+    ap = argparse.ArgumentParser(prog="promql.py", description=METRICS_DOC,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True, metavar="<summarize|compare|top>")
+
+    def common(sp: argparse.ArgumentParser) -> None:
+        sp.add_argument("query", help="PromQL")
+        sp.add_argument("--since", default="1h", help="창 길이. 기본 1h")
+        sp.add_argument("--end", default=None, help="창 끝 (now · -10m · unix초 · RFC3339). 기본 now")
+        _common(sp)
+
+    sp_sum = sub.add_parser("summarize", help="시계열별 n·min·p50·p95·max·last·기울기")
+    common(sp_sum)
+    sp_sum.add_argument("--step", default=None, help="구간 해상도. 기본 창 길이/60 (최소 15s)")
+    sp_cmp = sub.add_parser("compare", help="지금 창 vs 기준선 창 — 시계열별 p95 차이만")
+    common(sp_cmp)
+    sp_cmp.add_argument("--baseline", default=DEFAULT_BASELINE,
+                        help="기준선 창: 1d(기본 — 1일 전 같은 시각) · 1w · prev(직전 창)")
+    sp_cmp.add_argument("--step", default=None, help="두 질의에 같은 값. 기본 창 길이/60 (최소 15s)")
+    sp_top = sub.add_parser("top", help="레이블 축 상위 k")
+    common(sp_top)
+    sp_top.add_argument("--by", default="pod", help="레이블 축. 쉼표로 여러 개. 기본 pod")
+    sp_top.add_argument("--k", type=int, default=DEFAULT_TOP_K, help="상위 k. 기본 %d" % DEFAULT_TOP_K)
+    sp_top.add_argument("--agg", choices=TOP_AGGS, default=DEFAULT_TOP_AGG, help="축으로 접는 집계. 기본 sum")
+    a = ap.parse_args(argv)
+    args = MetricsArgs(cmd=a.cmd, query=a.query, since=a.since, end=a.end, step=getattr(a, "step", None),
+                       baseline=getattr(a, "baseline", DEFAULT_BASELINE), k=getattr(a, "k", DEFAULT_TOP_K),
+                       by=getattr(a, "by", "pod"), agg=getattr(a, "agg", DEFAULT_TOP_AGG))
+    ev, body, kind = metrics_run(_client(), args)
     _finish(ev, body, kind, a.max_lines, a.json)
 
 

@@ -9,7 +9,8 @@
     논리 이름 · 상태 · 다음 행동만 말한다. 호스트·uid 는 `doctor` 가 사람에게만 보여준다.
   - 토큰은 env(OBS_GRAFANA_TOKEN)에서만 읽는다 — 설정 파일·인자로 받지 않고, 어느 dataclass 에도 싣지 않는다.
   - 모든 dataclass 는 `to_dict` 로 JSON 직렬화된다 — 나중에 MCP outputSchema · structuredContent 로 그대로 쓴다.
-  - `Any` 를 쓰지 않는다. 외부 경계(HTTP 응답 · 설정 파일)는 `JSON` 으로 받고, 어댑터가 즉시 dataclass 로 옮긴다.
+  - `Any` 를 쓰지 않는다. 외부 경계(HTTP 응답 · 설정 파일)는 `JSON` 으로 받고, 파서가 즉시 dataclass 로 옮긴다 —
+    그때만 쓰는 접근자(`json_obj` …)가 여기 있다. 환원 연산(obs/metrics.py …)은 파싱된 dataclass 만 본다.
 
 설정 해석 순서(Config): env → 설정 파일(JSON) → 내장 기본값.
   env:  OBS_GRAFANA_URL · OBS_PROXY_PREFIX · OBS_UID_METRICS · OBS_UID_LOGS · OBS_UID_TRACES
@@ -79,6 +80,51 @@ class TransportError(Exception):
 class TransportTimeout(TransportError):
     """닿기는 했는데 제한 시간 안에 답이 오지 않았다(읽기 시간 초과). 연결 실패와 다르다 —
     무거운 질의가 흔한 원인이라 agent 가 범위를 좁혀 고칠 수 있는 것으로 분류한다."""
+
+
+# ── 외부 경계 접근자 — 파싱된 JSON 을 dataclass 로 옮길 때만 쓴다 ─────────────────
+
+def json_obj(v: JSON) -> dict[str, JSON]:
+    return v if isinstance(v, dict) else {}
+
+
+def json_list(v: JSON) -> list[JSON]:
+    return v if isinstance(v, list) else []
+
+
+def json_str(v: JSON, default: str = "") -> str:
+    if v is None:
+        return default
+    return v if isinstance(v, str) else str(v)
+
+
+def json_int(v: JSON) -> int:
+    if isinstance(v, bool) or v is None:
+        return 0
+    if isinstance(v, (int, float)):
+        return int(v)
+    if isinstance(v, str):
+        try:
+            return int(float(v))
+        except ValueError:
+            return 0
+    return 0
+
+
+def json_labels(v: JSON) -> dict[str, str]:
+    return {k: json_str(x) for k, x in json_obj(v).items()}
+
+
+def json_strs(v: JSON) -> list[str]:
+    return [json_str(x) for x in json_list(v)]
+
+
+def json_pair(v: JSON) -> tuple[str, str] | None:
+    """[ts, value] 쌍. 둘 다 문자열로 — 해석(초·나노초·수치)은 받는 쪽이 한다."""
+    items = json_list(v)
+    if len(items) < 2:
+        return None
+    return json_str(items[0]), json_str(items[1])
 
 
 # ── 직렬화 ──────────────────────────────────────────────────────────────────────
@@ -242,9 +288,16 @@ def fmt_rfc3339(unix_sec: float) -> str:
     return _dt.datetime.fromtimestamp(unix_sec, _dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+BASELINE_PREV: str = "prev"   # with_baseline 의 spec — 직전 창(같은 길이로 바로 앞). 급변 감지용
+
+
 @dataclass(frozen=True)
 class Window:
-    """시작·끝(unix 초)과 선택적 기준선. "언제" 가 근거에 자동으로 붙는다."""
+    """시작·끝(unix 초)과 선택적 기준선. "언제" 가 근거에 자동으로 붙는다.
+
+    기준선 창의 규약(메트릭 환원 연산 `compare` · `red` 가 같이 쓴다): `baseline` 은 **같은 길이** 의 창이고
+    `with_baseline(spec)` 으로 단다 — spec 은 기간(`1d` = 1일 전 같은 시각 · `1w` = 1주 전) 또는 `prev`(직전 창).
+    기본값은 obs.metrics.DEFAULT_BASELINE(`1d`)이 정한다."""
     start: float
     end: float
     baseline: Window | None = None
@@ -263,9 +316,11 @@ class Window:
     def shifted(self, seconds: float) -> Window:
         return Window(start=self.start + seconds, end=self.end + seconds)
 
-    def with_baseline(self, offset: str) -> Window:
-        """같은 길이의 창을 `offset`(예: '1d') 만큼 앞으로 옮겨 기준선으로 단다."""
-        return Window(start=self.start, end=self.end, baseline=self.shifted(-parse_duration(offset)))
+    def with_baseline(self, spec: str) -> Window:
+        """같은 길이의 창을 앞으로 옮겨 기준선으로 단다. `spec` 은 기간('1d' · '1w' — 그만큼 앞의 같은 시각) 또는
+        'prev'(직전 창 — 창 길이만큼 앞). 표기가 아니면 ObsError."""
+        offset = self.seconds if spec.strip() == BASELINE_PREV else parse_duration(spec)
+        return Window(start=self.start, end=self.end, baseline=self.shifted(-offset))
 
     def label(self) -> str:
         return "%s ~ %s" % (fmt_rfc3339(self.start), fmt_rfc3339(self.end))
