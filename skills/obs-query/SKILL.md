@@ -36,8 +36,8 @@ agent 는 이 값을 읽지도 옮기지도 않는다 — 어디에도 적지 �
 | 명령 | 백엔드 | 하는 일 |
 |---|---|---|
 | `promql.py '<PromQL>'` | metrics | 즉시 조회. `--range 1h [--step]` 구간 조회(시계열별 요약). `--labels` · `--label-values <name>` · `--series` 로 탐색 |
-| `promql.py summarize '<PromQL>' --since 1h` | metrics | **환원** — 시계열별 n · min · p50 · p95 · max · last · 기울기 |
-| `promql.py compare '<PromQL>' --since 1h [--baseline 1d]` | metrics | **환원** — 같은 질의를 지금 창과 기준선 창에 던져 시계열별 p95 차이(×비율 · Δ)만. 기준선 `1d`(기본 — 1일 전 같은 시각) · `1w` · `prev`(직전 창). 기준선에 없으면 "기준선 없음" |
+| `promql.py summarize '<PromQL>' --since 1h` | metrics | **환원** — 시계열별 n · min · p50 · p95 · max · last · 기울기. 계산은 백엔드(서브쿼리 위 `*_over_time` · `deriv`), 질의 1회 |
+| `promql.py compare '<PromQL>' --since 1h [--baseline 1d]` | metrics | **환원** — 같은 식의 p95 를 지금 창과 `offset` 기준선 창에서 한 질의로 받아 시계열별 차이(×비율 · Δ)만. 기준선 `1d`(기본 — 1일 전 같은 시각) · `1w` · `prev`(직전 창). 기준선에 없으면 "기준선 없음" |
 | `promql.py top '<PromQL>' --by pod [--k 10]` | metrics | **환원** — 레이블 축 상위 k. `topk` 로 감싸 서버가 k 개만 돌려준다(카디널리티 폭발 없음) |
 | `logql.py '<LogQL>'` | logs | 로그 줄. `--since 1h` `--limit 30`(기본 — 낮다). 메트릭 질의면 시계열 요약. `--labels` · `--label-values` · `--series` |
 | `traceql.py search [--q '<TraceQL>']` | traces | 최근 트레이스 목록. `--min-duration 500ms` |

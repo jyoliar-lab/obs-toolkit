@@ -1,20 +1,25 @@
 """obs.metrics — 메트릭 환원 연산: summarize · compare · top (metrics 백엔드, GET 만).
 
-원본(시계열)은 여기서 환원되고, 부른 쪽은 요약 dataclass 만 받는다 — "이 값이 높은가" 를 판단하는 데
-시계열 두 벌이 컨텍스트에 실리지 않는다: "now p95=0.42, base p95=0.05, ×8.4".
+계산은 백엔드(PromQL)가 한다 — 코어는 질의를 조립하고 응답을 계약(dataclass)에 담으며 "데이터 없음" · "기준선 없음" · 0 을
+가른다. 원본(시계열)은 서버를 떠나지 않고, 부른 쪽은 시계열당 값 몇 개만 받는다: "now p95=0.42, base p95=0.05, ×8.4".
 
 구조로 거는 것:
-  - 순수 함수다 — HTTP 는 `Client` 주입(`Client.get` 만 부른다), fixture 만으로 테스트된다.
+  - 순수 함수다 — HTTP 는 `Client` 주입(`Client.get` 만 부른다), fixture(서버 환원 응답)만으로 테스트된다.
   - 모든 연산은 `Window` 를 받고 `(Evidence[V], 원본)` 을 돌려준다. 원본은 어댑터가 spill 한다(CLI → raw.json).
-  - "데이터 없음" 과 "0" 을 구분한다 — 시계열이 없으면 목록이 비고(`series == []` · `entries == []`),
-    값이 0 이면 0 이 실린다. 기준선 시계열이 없으면 `Delta.base is None`("기준선 없음"), 0 이면 `ratio is None`
-    이되 `base` 는 있다 — 어느 쪽도 0 으로 나누지 않는다.
+  - 통계는 **한 질의**로 묶는다 — `label_replace(<stat>, "stat", "<이름>", "", "") or …` 를 `/api/v1/query` 한 번에.
+    통계마다 질의를 따로 던지면 예산(`core.MAX_QUERIES`)이 연산 한 번에 바닥난다. 연산당 GET 은 1 회다.
+  - `summarize` 의 일곱 값은 서브쿼리 `(Q)[<창 길이>:<step>]` 위의 `count_over_time` · `min_over_time` ·
+    `quantile_over_time(0.5 / 0.95)` · `max_over_time` · `last_over_time` · `deriv`(단순 선형 회귀 = 최소제곱 기울기, 값/초).
+    step 은 창 길이에서 자동(`auto_step`) — 서브쿼리 해상도다.
+  - `compare` 의 기준선은 **같은 식의 `offset`** 이다 — 두 창은 정의상 같은 길이 · 같은 해상도라 "같은 step 정렬" 이
+    따로 필요 없다. `offset` 이 보존 기간 밖이면 기준선 시계열이 부재로 온다 — "기준선 없음" 이 서버 응답만으로 선다.
+  - "데이터 없음" 과 "0" 을 구분한다 — 시계열이 없으면 목록이 비고(`series == []` · `entries == []`), 값이 0 이면 0 이
+    실린다. 기준선 시계열이 없으면 `Delta.base is None`("기준선 없음"), 0 이면 `ratio is None` 이되 `base` 는 있다 —
+    어느 쪽도 0 으로 나누지 않는다. NaN 은 값이 아니라 부재다.
   - 기준선 창의 규약(#102 의 `red` 가 그대로 쓴다): 기준선은 `Window.baseline` 필드이고 `Window.with_baseline(spec)`
     으로 단다. spec 은 `1d`(1일 전 같은 시각) · `1w`(1주 전) 같은 기간 또는 `prev`(직전 창). 기본값 `DEFAULT_BASELINE`
-    = `1d` — 주기성이 있는 서비스 지표에 맞다. 직전 창은 급변 감지용.
-  - `compare` 의 두 질의는 같은 step 이다 — 창 길이가 같고 step 이 같아야 점 수가 같다. 길이가 다른 기준선은 거부한다.
+    = `1d` — 주기성이 있는 서비스 지표에 맞다. 직전 창은 급변 감지용. 기준선 창은 `offset` 으로 옮겨진다(창 끝의 차이).
   - `top` 은 카디널리티 폭발을 서버에서 막는다 — `topk(k, <agg> by (<by>) (<query>))` 로 감싸 k 개만 받는다.
-    원본이 이미 k 줄이라 stdout 도 파일도 작다.
 
 Prometheus 형 응답(`{status, data: {resultType, result}}`)의 파서(`parse_metric` · `check_status`)도 여기 산다 —
 Loki 의 메트릭 질의 응답이 같은 형상이라 로그 어댑터도 이것을 쓴다.
@@ -27,10 +32,12 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from obs.core import (
-    JSON, Client, Evidence, ObsError, Params, Window, json_labels, json_list, json_obj, json_pair, json_str, json_strs,
+    JSON, Client, Evidence, ObsError, Window, json_labels, json_list, json_obj, json_pair, json_str, json_strs,
 )
 
 DEFAULT_BASELINE: str = "1d"   # 기준선 창 기본값 — 1일 전 같은 시각. `prev` 는 직전 창, `1w` 는 1주 전
+STAT_LABEL: str = "stat"       # 한 질의로 묶은 통계를 가르는 레이블 — label_replace 가 붙이고 파서가 뗀다
+SUMMARY_STATS: tuple[str, ...] = ("n", "min", "p50", "p95", "max", "last", "slope")
 DEFAULT_TOP_K: int = 10
 DEFAULT_TOP_AGG: str = "sum"
 TOP_AGGS: tuple[str, ...] = ("sum", "max", "min", "avg", "count")
@@ -102,40 +109,40 @@ def parse_metric(body: dict[str, JSON]) -> MetricResult:
 
 @dataclass(frozen=True)
 class SeriesSummary:
-    """시계열 하나의 요약 — 값 목록 대신 이것이 컨텍스트에 실린다."""
+    """시계열 하나의 요약 — 서버가 계산한 일곱 값. 값 목록 대신 이것이 컨텍스트에 실린다. 서버가 못 낸 통계는 NaN(부재)."""
     labels: dict[str, str]
-    n: int          # 유한한 값의 수 — NaN · ±Inf 는 세지 않는다(값이 아니라 부재)
+    n: int          # count_over_time — 서브쿼리 점 수
     min: float
-    p50: float
-    p95: float
+    p50: float      # quantile_over_time(0.5)
+    p95: float      # quantile_over_time(0.95)
     max: float
-    last: float     # 창 안 마지막 유한값
-    slope: float    # 최소제곱 기울기(값/초) — 창 안의 추세. 점이 하나면 0
+    last: float     # last_over_time
+    slope: float    # deriv — 단순 선형 회귀 기울기(값/초). 창 안의 추세
 
 
 @dataclass(frozen=True)
 class Summary:
-    """`summarize` 의 값 — 시계열별 요약. `series` 가 비면 데이터 없음(0 이 아니다)."""
+    """`summarize` 의 값 — 시계열별 요약(레이블 순). `series` 가 비면 데이터 없음(0 이 아니다)."""
     step: str
     series: list[SeriesSummary]
 
 
 @dataclass(frozen=True)
 class Delta:
-    """시계열 하나의 지금 창 vs 기준선 창. 비교 통계는 p95 다.
+    """시계열 하나의 지금 창 vs 기준선 창 — 서버가 낸 두 p95 의 차이만.
 
-    - `base is None` → 기준선 창에 이 시계열이 없다("기준선 없음"). `now is None` → 지금 창에 없다("지금 없음").
-    - `ratio` = now.p95 / base.p95 — 둘 다 있고 base.p95 가 0 이 아닐 때만. 0 으로 나누지 않는다.
-    - `delta` = now.p95 - base.p95 — 둘 다 있을 때."""
+    - `base is None` → 기준선 창(offset)에 이 시계열이 없다("기준선 없음"). `now is None` → 지금 창에 없다("지금 없음").
+    - `ratio` = now / base — 둘 다 있고 base 가 0 이 아닐 때만. 0 으로 나누지 않는다.
+    - `delta` = now - base — 둘 다 있을 때."""
     labels: dict[str, str]
-    now: SeriesSummary | None
-    base: SeriesSummary | None
+    now: float | None
+    base: float | None
     ratio: float | None
     delta: float | None
 
     @property
     def base_is_zero(self) -> bool:
-        return self.now is not None and self.base is not None and self.base.p95 == 0
+        return self.now is not None and self.base is not None and self.base == 0
 
 
 @dataclass(frozen=True)
@@ -143,6 +150,7 @@ class Comparison:
     """`compare` 의 값. `deltas` 는 비율 내림차순, 그 뒤에 기준선 0 · 기준선 없음 · 지금 없음 순.
     `now_empty` / `baseline_empty` 는 창 전체에 시계열이 하나도 없었다는 뜻(0 이 아니라 부재)."""
     step: str
+    offset: str        # 기준선 offset(PromQL 기간 표기, 예: 86400s)
     deltas: list[Delta]
     now_empty: bool
     baseline_empty: bool
@@ -163,93 +171,123 @@ class Top:
     entries: list[TopEntry]
 
 
-# ── 계산 — 순수 ──────────────────────────────────────────────────────────────────
+# ── 질의 조립 — 계산은 여기서 문자열로 서버에 넘어간다 ────────────────────────────
 
 def auto_step(range_sec: float) -> str:
-    """창 길이에서 step 을 정한다 — range/60 에 가까운 정수 초, 최소 15s. 창당 점 수가 ~60 으로 일정하다."""
+    """창 길이에서 step 을 정한다 — range/60 에 가까운 정수 초, 최소 15s. 서브쿼리 해상도(창당 점 ~60)로 쓰인다."""
     return "%ds" % max(MIN_STEP_SEC, int(range_sec / 60))
 
 
-def percentile(sorted_vals: Sequence[float], p: float) -> float:
-    """정렬된 값의 p(0~1) 분위수 — 이웃 두 값을 선형 보간한다(numpy 기본과 같다). 빈 입력은 호출자가 막는다."""
-    if not sorted_vals:
-        raise ValueError("빈 목록의 분위수")
-    pos = p * (len(sorted_vals) - 1)
-    lo = int(math.floor(pos))
-    hi = min(lo + 1, len(sorted_vals) - 1)
-    frac = pos - lo
-    return sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * frac
+def duration_literal(seconds: float) -> str:
+    """PromQL 기간 표기 — 정수 초로. (Window 의 길이 · offset 을 질의에 넣을 때)"""
+    return "%ds" % int(round(seconds))
 
 
-def slope(points: Sequence[tuple[float, float]]) -> float:
-    """(t, v) 점들의 최소제곱 기울기(값/초). 점이 둘 미만이거나 t 가 전부 같으면 0."""
-    n = len(points)
-    if n < 2:
-        return 0.0
-    t0 = points[0][0]
-    ts = [t - t0 for t, _ in points]
-    vs = [v for _, v in points]
-    mt = sum(ts) / n
-    mv = sum(vs) / n
-    sxx = sum((t - mt) ** 2 for t in ts)
-    if sxx == 0:
-        return 0.0
-    sxy = sum((t - mt) * (v - mv) for t, v in zip(ts, vs))
-    return sxy / sxx
+def subquery(query: str, window: Window, step: str) -> str:
+    """`(Q)[<창 길이>:<step>]` — 창 끝(time=)에서 평가하면 창 전체의 range vector 가 된다."""
+    return "(%s)[%s:%s]" % (query, duration_literal(window.seconds), step)
 
 
-def finite_points(s: Series) -> list[tuple[float, float]]:
-    """(unix 초, 값) 중 유한한 값만 — NaN · ±Inf · 숫자 아님은 부재로 본다."""
-    out: list[tuple[float, float]] = []
-    for ts, raw in s.values:
-        try:
-            v = float(raw)
-        except ValueError:
-            continue
-        if math.isfinite(v):
-            out.append((ts, v))
-    return out
+def tagged(expr: str, stat: str) -> str:
+    """`label_replace(expr, "stat", "<이름>", "", "")` — 한 질의로 묶은 통계를 이름표로 가른다."""
+    return 'label_replace(%s, "%s", "%s", "", "")' % (expr, STAT_LABEL, stat)
 
 
-def summarize_series(s: Series) -> SeriesSummary | None:
-    """시계열 하나 → 요약. 유한한 값이 하나도 없으면 None(데이터 없음)."""
-    pts = finite_points(s)
-    if not pts:
-        return None
-    vals = sorted(v for _, v in pts)
-    return SeriesSummary(
-        labels=dict(s.labels), n=len(vals), min=vals[0], p50=percentile(vals, 0.5), p95=percentile(vals, 0.95),
-        max=vals[-1], last=pts[-1][1], slope=slope(pts),
-    )
+def summarize_query(query: str, window: Window, step: str) -> str:
+    """일곱 통계를 `or` 로 이어 한 질의로. deriv 는 Prometheus 문서상 단순 선형 회귀 — 최소제곱 기울기다."""
+    sq = subquery(query, window, step)
+    parts = [
+        tagged("count_over_time(%s)" % sq, "n"),
+        tagged("min_over_time(%s)" % sq, "min"),
+        tagged("quantile_over_time(0.5, %s)" % sq, "p50"),
+        tagged("quantile_over_time(0.95, %s)" % sq, "p95"),
+        tagged("max_over_time(%s)" % sq, "max"),
+        tagged("last_over_time(%s)" % sq, "last"),
+        tagged("deriv(%s)" % sq, "slope"),
+    ]
+    return " or ".join(parts)
 
 
-def summarize_result(res: MetricResult) -> list[SeriesSummary]:
-    """응답의 시계열 전부를 요약한다 — 유한값이 없는 시계열은 빠진다(데이터 없음은 목록에 실리지 않는다)."""
-    out: list[SeriesSummary] = []
-    for s in res.series:
-        summary = summarize_series(s)
-        if summary is not None:
-            out.append(summary)
-    return out
+def compare_query(query: str, window: Window, step: str, offset: str) -> str:
+    """지금 창의 p95 와 같은 식 `offset <기준선>` 의 p95 를 한 질의로."""
+    sq = subquery(query, window, step)
+    return " or ".join([
+        tagged("quantile_over_time(0.95, %s)" % sq, "now"),
+        tagged("quantile_over_time(0.95, %s offset %s)" % (sq, offset), "base"),
+    ])
 
 
-def series_key(labels: dict[str, str]) -> tuple[tuple[str, str], ...]:
+def top_query(query: str, k: int, by: Sequence[str], agg: str) -> str:
+    """`topk(k, <agg> by (<by>) (<query>))` — 서버가 k 개만 돌려준다. 카디널리티는 여기서 막힌다."""
+    if k < 1:
+        raise ObsError("k 는 1 이상이어야 한다: %d" % k)
+    if agg not in TOP_AGGS:
+        raise ObsError("알 수 없는 집계 %r — %s 중 하나" % (agg, " · ".join(TOP_AGGS)))
+    axes = [a.strip() for a in by if a.strip()]
+    if not axes:
+        raise ObsError("레이블 축(--by)이 필요하다 — 예: pod · namespace,pod")
+    return "topk(%d, %s by (%s) (%s))" % (k, agg, ", ".join(axes), query)
+
+
+# ── 응답 → 계약 — 계산 없이 판정만 ────────────────────────────────────────────────
+
+SeriesKey = tuple[tuple[str, str], ...]
+
+
+def series_key(labels: dict[str, str]) -> SeriesKey:
     return tuple(sorted(labels.items()))
 
 
-def diff_summaries(now: Sequence[SeriesSummary], base: Sequence[SeriesSummary]) -> list[Delta]:
-    """레이블 집합이 같은 시계열끼리 짝지어 차이만 낸다. 순서: 비율 내림차순 → 기준선 0 → 기준선 없음 → 지금 없음."""
-    now_by = {series_key(s.labels): s for s in now}
-    base_by = {series_key(s.labels): s for s in base}
+def finite_value(s: Series) -> float | None:
+    """즉시 조회 시계열의 값 — 유한하면 float, NaN · ±Inf · 숫자 아님 · 없음은 None(부재)."""
+    if not s.values:
+        return None
+    try:
+        v = float(s.values[-1][1])
+    except ValueError:
+        return None
+    return v if math.isfinite(v) else None
+
+
+def split_stats(res: MetricResult) -> dict[SeriesKey, dict[str, float]]:
+    """`stat` 이름표로 묶인 vector 응답을 시계열(그 밖의 레이블)별 {통계: 값} 으로. 부재(NaN 등)는 빠진다."""
+    out: dict[SeriesKey, dict[str, float]] = {}
+    for s in res.series:
+        stat = s.labels.get(STAT_LABEL)
+        v = finite_value(s)
+        if stat is None or v is None:
+            continue
+        key = series_key({k: x for k, x in s.labels.items() if k != STAT_LABEL})
+        out.setdefault(key, {})[stat] = v
+    return out
+
+
+def summaries_of(res: MetricResult) -> list[SeriesSummary]:
+    """응답 → 시계열별 요약(레이블 순). `n` 이 없는 시계열은 부재로 보고 뺀다 — 데이터 없음은 목록에 실리지 않는다."""
+    out: list[SeriesSummary] = []
+    for key, stats in sorted(split_stats(res).items()):
+        if "n" not in stats:
+            continue
+
+        def g(name: str) -> float:
+            return stats.get(name, math.nan)   # 서버가 못 낸 통계는 NaN(부재)
+
+        out.append(SeriesSummary(labels=dict(key), n=int(stats["n"]), min=g("min"), p50=g("p50"), p95=g("p95"),
+                                 max=g("max"), last=g("last"), slope=g("slope")))
+    return out
+
+
+def deltas_of(res: MetricResult) -> list[Delta]:
+    """`now` · `base` 이름표의 p95 를 시계열별로 짝지어 차이만. 순서: 비율 내림차순 → 기준선 0 → 기준선 없음 → 지금 없음."""
     deltas: list[Delta] = []
-    for key in list(now_by) + [k for k in base_by if k not in now_by]:
-        n, b = now_by.get(key), base_by.get(key)
+    for key, stats in sorted(split_stats(res).items()):
+        n, b = stats.get("now"), stats.get("base")
         ratio: float | None = None
         delta: float | None = None
         if n is not None and b is not None:
-            delta = n.p95 - b.p95
-            if b.p95 != 0:
-                ratio = n.p95 / b.p95
+            delta = n - b
+            if b != 0:
+                ratio = n / b
         deltas.append(Delta(labels=dict(key), now=n, base=b, ratio=ratio, delta=delta))
 
     def order(d: Delta) -> tuple[int, float]:
@@ -265,56 +303,52 @@ def diff_summaries(now: Sequence[SeriesSummary], base: Sequence[SeriesSummary]) 
     return deltas
 
 
-def top_query(query: str, k: int, by: Sequence[str], agg: str) -> str:
-    """`topk(k, <agg> by (<by>) (<query>))` — 서버가 k 개만 돌려준다. 카디널리티는 여기서 막힌다."""
-    if k < 1:
-        raise ObsError("k 는 1 이상이어야 한다: %d" % k)
-    if agg not in TOP_AGGS:
-        raise ObsError("알 수 없는 집계 %r — %s 중 하나" % (agg, " · ".join(TOP_AGGS)))
-    axes = [a.strip() for a in by if a.strip()]
-    if not axes:
-        raise ObsError("레이블 축(--by)이 필요하다 — 예: pod · namespace,pod")
-    return "topk(%d, %s by (%s) (%s))" % (k, agg, ", ".join(axes), query)
+# ── 연산 — Client 주입, Window 를 받고 Evidence 를 돌려준다. 연산당 GET 1 회 ─────────
 
-
-# ── 연산 — Client 주입, Window 를 받고 Evidence 를 돌려준다 ─────────────────────────
-
-def _range(client: Client, query: str, window: Window, step: str) -> dict[str, JSON]:
-    params: Params = {"query": query, "start": window.start, "end": window.end, "step": step}
-    return check_status(client.get("metrics", "api/v1/query_range", params).body, "metrics")
+def _instant(client: Client, query: str, at: float) -> dict[str, JSON]:
+    return check_status(client.get("metrics", "api/v1/query", {"query": query, "time": at}).body, "metrics")
 
 
 def summarize(client: Client, query: str, window: Window, step: str | None = None) -> tuple[Evidence[Summary], JSON]:
-    """창 안의 구간 조회를 시계열별 요약(n · min · p50 · p95 · max · last · 기울기)으로."""
+    """창 안의 시계열별 n · min · p50 · p95 · max · last · 기울기 — 전부 서버가 서브쿼리 위에서 계산한다. GET 1 회.
+    Evidence.query 는 조립된 질의(그대로 재실행 가능), window 는 받은 창."""
     if not query.strip():
         raise ObsError("PromQL 이 필요하다")
     step = step or auto_step(window.seconds)
-    body = _range(client, query, window, step)
-    value = Summary(step=step, series=summarize_result(parse_metric(body)))
-    return Evidence(backend="metrics", query=query, window=window, value=value), body
+    q = summarize_query(query, window, step)
+    body = _instant(client, q, window.end)
+    value = Summary(step=step, series=summaries_of(parse_metric(body)))
+    return Evidence(backend="metrics", query=q, window=window, value=value), body
 
 
-def compare(client: Client, query: str, window: Window, step: str | None = None) -> tuple[Evidence[Comparison], JSON]:
-    """같은 질의를 지금 창과 기준선 창(`window.baseline` — 없으면 DEFAULT_BASELINE 으로 단다)에 **같은 step** 으로
-    던져 시계열별 차이만 낸다. 원본은 {"now": …, "baseline": …}."""
-    if not query.strip():
-        raise ObsError("PromQL 이 필요하다")
+def baseline_offset(window: Window) -> tuple[Window, str]:
+    """기준선이 달린 창과 그 offset(PromQL 기간). 기준선이 없으면 DEFAULT_BASELINE 으로 단다.
+    offset 은 창 끝의 차이다 — 길이가 다르거나 뒤에 있는 기준선은 offset 으로 표현할 수 없어 거부한다."""
     w = window if window.baseline is not None else window.with_baseline(DEFAULT_BASELINE)
     base = w.baseline
     assert base is not None
-    if abs(base.seconds - w.seconds) > 1e-6:
-        raise ObsError("기준선 창 길이(%.0fs)가 지금 창(%.0fs)과 다르다 — 같은 step 으로 정렬할 수 없어 비교가 틀린다. "
-                       "Window.with_baseline 으로 단다." % (base.seconds, w.seconds))
+    if abs(base.seconds - w.seconds) > 1e-6 or base.end > w.end:
+        raise ObsError("기준선 창은 같은 길이로 앞에 있어야 한다(offset) — Window.with_baseline 으로 단다. "
+                       "받은 것: 지금 %.0fs · 기준선 %.0fs" % (w.seconds, base.seconds))
+    return w, duration_literal(w.end - base.end)
+
+
+def compare(client: Client, query: str, window: Window, step: str | None = None) -> tuple[Evidence[Comparison], JSON]:
+    """같은 질의의 p95 를 지금 창과 기준선 창(같은 식의 `offset`)에서 한 질의로 받아 시계열별 차이만. GET 1 회.
+    기준선 시계열이 부재면 "기준선 없음" — 서버 응답만으로 선다."""
+    if not query.strip():
+        raise ObsError("PromQL 이 필요하다")
+    w, offset = baseline_offset(window)
     step = step or auto_step(w.seconds)
-    now_body = _range(client, query, w, step)
-    base_body = _range(client, query, base, step)
-    now_res, base_res = parse_metric(now_body), parse_metric(base_body)
+    q = compare_query(query, w, step, offset)
+    body = _instant(client, q, w.end)
+    stats = split_stats(parse_metric(body))
     value = Comparison(
-        step=step, deltas=diff_summaries(summarize_result(now_res), summarize_result(base_res)),
-        now_empty=not now_res.series, baseline_empty=not base_res.series,
+        step=step, offset=offset, deltas=deltas_of(parse_metric(body)),
+        now_empty=not any("now" in st for st in stats.values()),
+        baseline_empty=not any("base" in st for st in stats.values()),
     )
-    raw: JSON = {"now": now_body, "baseline": base_body}
-    return Evidence(backend="metrics", query=query, window=w, value=value), raw
+    return Evidence(backend="metrics", query=q, window=w, value=value), body
 
 
 def top(client: Client, query: str, window: Window, k: int = DEFAULT_TOP_K, by: Sequence[str] = ("pod",),
@@ -324,12 +358,12 @@ def top(client: Client, query: str, window: Window, k: int = DEFAULT_TOP_K, by: 
     if not query.strip():
         raise ObsError("PromQL 이 필요하다")
     wrapped = top_query(query, k, by, agg)
-    body = check_status(client.get("metrics", "api/v1/query", {"query": wrapped, "time": window.end}).body, "metrics")
+    body = _instant(client, wrapped, window.end)
     entries: list[TopEntry] = []
     for s in parse_metric(body).series:
-        pts = finite_points(s)
-        if pts:
-            entries.append(TopEntry(labels=dict(s.labels), value=pts[-1][1]))
+        v = finite_value(s)
+        if v is not None:
+            entries.append(TopEntry(labels=dict(s.labels), value=v))
     entries.sort(key=lambda e: -e.value)
     value = Top(k=k, by=[a.strip() for a in by if a.strip()], agg=agg, entries=entries[:k])
     return Evidence(backend="metrics", query=wrapped, window=Window(start=window.end, end=window.end), value=value), body

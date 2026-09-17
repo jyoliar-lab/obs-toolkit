@@ -271,12 +271,12 @@ PROMQL_DOC = """promql — 즉시 조회·구간 조회 (metrics 백엔드, GET 
   promql.py --label-values <name> [<selector>]           레이블 값 목록
   promql.py --series '<selector>' [--range 1h]           시계열 목록
 
-환원 연산 — 원본 대신 계산 결과만(시계열 두 벌이 컨텍스트에 실리지 않는다):
-  promql.py summarize '<PromQL>' --since 1h              시계열별 n · min · p50 · p95 · max · last · 기울기
-  promql.py compare '<PromQL>' --since 1h [--baseline 1d]  지금 창 vs 기준선 창 — 시계열별 p95 차이(비율 · 절대)만
+환원 연산 — 계산은 백엔드(PromQL)가 하고 결과만 온다(시계열이 컨텍스트에 실리지 않는다):
+  promql.py summarize '<PromQL>' --since 1h              시계열별 n · min · p50 · p95 · max · last · 기울기 (*_over_time · deriv)
+  promql.py compare '<PromQL>' --since 1h [--baseline 1d]  지금 창 vs 기준선 창(같은 식의 offset) — 시계열별 p95 차이(비율 · 절대)만
                                                          --baseline: 1d(기본 — 1일 전 같은 시각) · 1w · prev(직전 창)
   promql.py top '<PromQL>' --by pod [--k 10] [--agg sum]  레이블 축 상위 k — topk 로 감싸 서버가 k 개만 돌려준다
-  서브커맨드의 시간은 --since/--end (logql 과 같다). `promql.py compare --help` 에 옵션 전부.
+  서브커맨드의 시간은 --since/--end (logql 과 같다). 연산당 질의 1회. `promql.py compare --help` 에 옵션 전부.
 
 옵션:
   --end <시각>      기준 시각 (now · -10m · unix초 · RFC3339). 기본 now
@@ -405,13 +405,15 @@ METRICS_SUBCOMMANDS: tuple[str, ...] = ("summarize", "compare", "top")
 
 METRICS_DOC = """promql.py <summarize|compare|top> — 메트릭 환원 연산 (metrics 백엔드, GET 만).
 
+계산은 백엔드가 한다 — 서브쿼리 `(Q)[<창>:<step>]` 위의 *_over_time · deriv · offset 을 한 질의로 묶어 결과만 받는다.
+
   summarize '<PromQL>' --since 1h [--step 60s]
-      시계열마다 `n min p50 p95 max last slope` 한 줄. 시계열이 없으면 "데이터 없음"(0 과 다르다).
+      시계열마다 `n min p50 p95 max last slope` 한 줄(slope 는 deriv — 값/초). 시계열이 없으면 "데이터 없음"(0 과 다르다).
   compare '<PromQL>' --since 1h [--baseline 1d] [--step 60s]
-      같은 질의를 지금 창과 기준선 창에 같은 step 으로 던져 시계열별 차이만:
-      `×비율  Δ절대  now p95  base p95  n=지금/기준  {레이블}` — 비율 내림차순.
+      같은 식의 p95 를 지금 창과 `offset <기준선>` 에서 한 질의로 받아 시계열별 차이만:
+      `×비율  Δ절대  now p95  base p95  {레이블}` — 비율 내림차순.
       --baseline: 1d(기본 — 1일 전 같은 시각, 주기성 있는 지표용) · 1w(1주 전) · prev(직전 창 — 급변 감지용)
-      기준선 창에 시계열이 없으면 "기준선 없음" — 0 으로 나누지 않는다.
+      기준선 창에 시계열이 없으면(보존 밖 · 그때 없던 pod) "기준선 없음" — 0 으로 나누지 않는다.
   top '<PromQL>' --by pod [--k 10] [--agg sum]
       레이블 축 상위 k — `topk(k, agg by (by) (query))` 로 감싸 --end 시각에 즉시 조회. 출력은 k 줄 이하.
       --by 는 쉼표로 여러 축(namespace,pod). --agg: sum(기본) · max · min · avg · count
@@ -441,23 +443,22 @@ def compare_lines(value: Comparison, window: Window) -> list[str]:
     base_label = base.label() if base is not None else "?"
     if value.now_empty and value.baseline_empty:
         return ["(데이터 없음 — 지금 %s · 기준선 %s 모두 시계열이 없다. step=%s)" % (window.label(), base_label, value.step)]
-    lines = ["지금 %s  기준선 %s  step=%s  (p95 비교)" % (window.label(), base_label, value.step)]
+    lines = ["지금 %s  기준선 %s (offset %s)  step=%s  (p95 비교)" % (window.label(), base_label, value.offset, value.step)]
     if value.baseline_empty:
         lines.append("기준선 없음 — %s 에 시계열이 없다. 비율을 내지 않는다(0 으로 나누지 않는다)" % base_label)
     for d in value.deltas:
         labels = labels_str(d.labels)
         if d.now is not None and d.base is not None:
-            n = "n=%d/%d" % (d.now.n, d.base.n)
             if d.ratio is not None and d.delta is not None:
-                lines.append("×%s  Δ%s  now p95=%s  base p95=%s  %s  %s" % (
-                    fmt_ratio(d.ratio), fmt_signed(d.delta), fmt_val(d.now.p95), fmt_val(d.base.p95), n, labels))
+                lines.append("×%s  Δ%s  now p95=%s  base p95=%s  %s" % (
+                    fmt_ratio(d.ratio), fmt_signed(d.delta), fmt_val(d.now), fmt_val(d.base), labels))
             else:
-                lines.append("×—  Δ%s  now p95=%s  base p95=0  (기준선 0)  %s  %s" % (
-                    fmt_signed(d.delta if d.delta is not None else d.now.p95), fmt_val(d.now.p95), n, labels))
+                lines.append("×—  Δ%s  now p95=%s  base p95=0  (기준선 0)  %s" % (
+                    fmt_signed(d.delta if d.delta is not None else d.now), fmt_val(d.now), labels))
         elif d.now is not None:
-            lines.append("기준선 없음  now p95=%s  n=%d/-  %s" % (fmt_val(d.now.p95), d.now.n, labels))
+            lines.append("기준선 없음  now p95=%s  %s" % (fmt_val(d.now), labels))
         elif d.base is not None:
-            lines.append("지금 없음  base p95=%s  n=-/%d  %s" % (fmt_val(d.base.p95), d.base.n, labels))
+            lines.append("지금 없음  base p95=%s  %s" % (fmt_val(d.base), labels))
     return lines
 
 
@@ -510,12 +511,12 @@ def metrics_main(argv: Sequence[str]) -> None:
 
     sp_sum = sub.add_parser("summarize", help="시계열별 n·min·p50·p95·max·last·기울기")
     common(sp_sum)
-    sp_sum.add_argument("--step", default=None, help="구간 해상도. 기본 창 길이/60 (최소 15s)")
+    sp_sum.add_argument("--step", default=None, help="서브쿼리 해상도. 기본 창 길이/60 (최소 15s)")
     sp_cmp = sub.add_parser("compare", help="지금 창 vs 기준선 창 — 시계열별 p95 차이만")
     common(sp_cmp)
     sp_cmp.add_argument("--baseline", default=DEFAULT_BASELINE,
-                        help="기준선 창: 1d(기본 — 1일 전 같은 시각) · 1w · prev(직전 창)")
-    sp_cmp.add_argument("--step", default=None, help="두 질의에 같은 값. 기본 창 길이/60 (최소 15s)")
+                        help="기준선 창 — 같은 식의 offset: 1d(기본 — 1일 전 같은 시각) · 1w · prev(직전 창)")
+    sp_cmp.add_argument("--step", default=None, help="서브쿼리 해상도(두 창에 같다). 기본 창 길이/60 (최소 15s)")
     sp_top = sub.add_parser("top", help="레이블 축 상위 k")
     common(sp_top)
     sp_top.add_argument("--by", default="pod", help="레이블 축. 쉼표로 여러 개. 기본 pod")
