@@ -193,10 +193,12 @@ class Emitted:
 
 
 def emit(lines: list[str], full: object, kind: str, max_lines: int, quiet: bool = False,
-         env: Mapping[str, str] | None = None, out: Callable[[str], None] = print) -> Emitted:
+         env: Mapping[str, str] | None = None, out: Callable[[str], None] = print,
+         preamble: Sequence[str] = ()) -> Emitted:
     """항상 호출 디렉터리를 만든다(원본 raw.json · 요약 전체 summary.txt). stdout 에는 앞 max_lines 줄만 —
-    quiet 면 요약을 찍지 않고 경로만. 잘렸으면 몇 줄이 더 있는지 알린다."""
-    ref = spill_ref(spill(kind, full, lines, env), env)
+    quiet 면 요약을 찍지 않고 경로만. 잘렸으면 몇 줄이 더 있는지 알린다.
+    `preamble` 은 summary.txt 의 머리에만 쓴다(재실행에 필요한 질의·창 — stdout 에는 찍지 않는다)."""
+    ref = spill_ref(spill(kind, full, [*preamble, *lines] if preamble else lines, env), env)
     shown = [] if quiet else lines[:max_lines]
     for line in shown:
         out(line)
@@ -231,9 +233,24 @@ def fmt_val(v: str | int | float) -> str:
     return "%.6g" % f
 
 
+def evidence_preamble(ev: Evidence[Lines]) -> list[str]:
+    """summary.txt 머리 — 재실행에 필요한 것: 백엔드에 실제로 보낸 질의(환원 연산은 조립된 식 그대로) · 창(RFC3339 + unix 초) ·
+    기준선. stdout 에는 찍지 않는다 — 조립된 질의는 길다."""
+    lines = ["# 질의  %s" % ev.query]
+    w = ev.window
+    if w is not None:
+        lines.append("# 창  %s  (start=%.3f end=%.3f)" % (w.label(), w.start, w.end))
+        if w.baseline is not None:
+            b = w.baseline
+            lines.append("# 기준선  %s  (start=%.3f end=%.3f)" % (b.label(), b.start, b.end))
+    lines.append("")
+    return lines
+
+
 def _finish(ev: Evidence[Lines], body: JSON, kind: str, max_lines: int, as_json: bool) -> None:
-    """Evidence 를 stdout 규약으로. as_json 은 stdout 에 요약을 찍지 않고 경로만(파일은 어느 쪽이든 같다)."""
-    emit(ev.value.lines or ["(결과 없음)"], body, kind, max_lines, quiet=as_json)
+    """Evidence 를 stdout 규약으로. as_json 은 stdout 에 요약을 찍지 않고 경로만(파일은 어느 쪽이든 같다).
+    summary.txt 는 머리(질의·창) + 요약 전체다."""
+    emit(ev.value.lines or ["(결과 없음)"], body, kind, max_lines, quiet=as_json, preamble=evidence_preamble(ev))
 
 
 def _common(ap: argparse.ArgumentParser) -> None:
@@ -275,8 +292,10 @@ PROMQL_DOC = """promql — 즉시 조회·구간 조회 (metrics 백엔드, GET 
   promql.py summarize '<PromQL>' --since 1h              시계열별 n · min · p50 · p95 · max · last · 기울기 (*_over_time · deriv)
   promql.py compare '<PromQL>' --since 1h [--baseline 1d]  지금 창 vs 기준선 창(같은 식의 offset) — 시계열별 p95 차이(비율 · 절대)만
                                                          --baseline: 1d(기본 — 1일 전 같은 시각) · 1w · prev(직전 창)
-  promql.py top '<PromQL>' --by pod [--k 10] [--agg sum]  레이블 축 상위 k — topk 로 감싸 서버가 k 개만 돌려준다
-  서브커맨드의 시간은 --since/--end (logql 과 같다). 연산당 질의 1회. `promql.py compare --help` 에 옵션 전부.
+  promql.py top '<PromQL>' --by pod [--k 10] [--agg sum]  레이블 축 상위 k — topk 로 감싸 서버가 k 개만 돌려준다.
+                                                         --end 시각의 즉시 조회(창이 없다 — --since 를 받지 않는다)
+  summarize · compare 의 시간은 --since/--end (logql 과 같다). 연산당 질의 1회. 조립된 질의는 호출 디렉터리의
+  summary.txt 머리에 남는다. 각 서브커맨드의 설명·옵션 전부는 `promql.py <서브커맨드> --help`.
 
 옵션:
   --end <시각>      기준 시각 (now · -10m · unix초 · RFC3339). 기본 now
@@ -403,23 +422,33 @@ def promql_main(argv: Sequence[str] | None = None) -> None:
 
 METRICS_SUBCOMMANDS: tuple[str, ...] = ("summarize", "compare", "top")
 
-METRICS_DOC = """promql.py <summarize|compare|top> — 메트릭 환원 연산 (metrics 백엔드, GET 만).
+METRICS_COMMON_DOC = """계산은 백엔드가 한다 — 코어는 질의를 조립해 결과만 받는다(연산당 질의 1회). 조립된 질의와 창은 호출 디렉터리의
+summary.txt 머리에 남는다(그대로 재실행 가능). stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만."""
 
-계산은 백엔드가 한다 — 서브쿼리 `(Q)[<창>:<step>]` 위의 *_over_time · deriv · offset 을 한 질의로 묶어 결과만 받는다.
+SUMMARIZE_DOC = """promql.py summarize '<PromQL>' --since 1h [--end <시각>] [--step 60s]
 
-  summarize '<PromQL>' --since 1h [--step 60s]
-      시계열마다 `n min p50 p95 max last slope` 한 줄(slope 는 deriv — 값/초). 시계열이 없으면 "데이터 없음"(0 과 다르다).
-  compare '<PromQL>' --since 1h [--baseline 1d] [--step 60s]
-      같은 식의 p95 를 지금 창과 `offset <기준선>` 에서 한 질의로 받아 시계열별 차이만:
-      `×비율  Δ절대  now p95  base p95  {레이블}` — 비율 내림차순.
-      --baseline: 1d(기본 — 1일 전 같은 시각, 주기성 있는 지표용) · 1w(1주 전) · prev(직전 창 — 급변 감지용)
-      기준선 창에 시계열이 없으면(보존 밖 · 그때 없던 pod) "기준선 없음" — 0 으로 나누지 않는다.
-  top '<PromQL>' --by pod [--k 10] [--agg sum]
-      레이블 축 상위 k — `topk(k, agg by (by) (query))` 로 감싸 --end 시각에 즉시 조회. 출력은 k 줄 이하.
-      --by 는 쉼표로 여러 축(namespace,pod). --agg: sum(기본) · max · min · avg · count
+시계열마다 `n min p50 p95 max last slope` 한 줄 — 서브쿼리 `(Q)[<창>:<step>]` 위의 count/min/quantile(0.5·0.95)/
+max/last_over_time · deriv(slope, 값/초)를 한 질의로. 첫 줄은 창·step 헤더. 시계열이 없으면 "데이터 없음"(0 과 다르다).
+step 은 창 길이/60(최소 15s) — 긴 창(--since 7d)이면 해상도가 거칠어지므로 헤더의 step 을 같이 읽는다.
 
-공통: --since <기간>(기본 1h) · --end <시각>(기본 now) · --max-lines · --json
-"""
+""" + METRICS_COMMON_DOC
+
+COMPARE_DOC = """promql.py compare '<PromQL>' --since 1h [--end <시각>] [--baseline 1d] [--step 60s]
+
+같은 식의 p95 를 지금 창과 `offset <기준선>` 에서 한 질의로 받아 시계열별 차이만:
+`×비율  Δ절대  now p95  base p95  {레이블}` — 비율 내림차순, 그 뒤에 기준선 0 · 기준선 없음 · 지금 없음.
+--baseline: 1d(기본 — 1일 전 같은 시각, 주기성 있는 지표용) · 1w(1주 전) · prev(직전 창 — 급변 감지용).
+기준선 창에 시계열이 없으면(보존 밖 · 그때 없던 pod) "기준선 없음" — 0 으로 나누지 않는다.
+
+""" + METRICS_COMMON_DOC
+
+TOP_DOC = """promql.py top '<PromQL>' --by pod [--k 10] [--agg sum] [--end <시각>]
+
+레이블 축 상위 k — `topk(k, agg by (by) (query))` 로 감싸 --end 시각에 즉시 조회한다. 창이 없다(--since 를 받지 않는다).
+서버가 k 개만 돌려주므로 카디널리티 폭발이 없고, 출력은 k 줄 이하(헤더 없음).
+--by 는 쉼표로 여러 축(namespace,pod). --agg: sum(기본) · max · min · avg · count — 축으로 접는 집계.
+
+""" + METRICS_COMMON_DOC
 
 
 def fmt_ratio(r: float) -> str:
@@ -430,20 +459,27 @@ def fmt_signed(v: float) -> str:
     return ("+" if v >= 0 else "") + fmt_val(v)
 
 
+def window_str(w: Window) -> str:
+    """요약 줄의 창 표기 — 스킬이 약속한 `MM-DD HH:MM:SSZ`(fmt_ts) 로. RFC3339 전체는 summary.txt 머리에."""
+    return "%s ~ %s" % (fmt_ts(w.start), fmt_ts(w.end))
+
+
 def summary_lines(value: Summary, window: Window) -> list[str]:
     if not value.series:
-        return ["(데이터 없음 — %s 에 시계열이 없다. step=%s)" % (window.label(), value.step)]
-    return ["n=%d  min=%s  p50=%s  p95=%s  max=%s  last=%s  slope=%s/s  %s" % (
+        return ["(데이터 없음 — %s 에 시계열이 없다. step=%s)" % (window_str(window), value.step)]
+    lines = ["창 %s  step=%s  (n=서브쿼리 점 수 · p50/p95=quantile_over_time · slope=deriv 값/초)" % (window_str(window), value.step)]
+    lines += ["n=%d  min=%s  p50=%s  p95=%s  max=%s  last=%s  slope=%s/s  %s" % (
         s.n, fmt_val(s.min), fmt_val(s.p50), fmt_val(s.p95), fmt_val(s.max), fmt_val(s.last), fmt_signed(s.slope),
         labels_str(s.labels)) for s in value.series]
+    return lines
 
 
 def compare_lines(value: Comparison, window: Window) -> list[str]:
     base = window.baseline
-    base_label = base.label() if base is not None else "?"
+    base_label = window_str(base) if base is not None else "?"
     if value.now_empty and value.baseline_empty:
-        return ["(데이터 없음 — 지금 %s · 기준선 %s 모두 시계열이 없다. step=%s)" % (window.label(), base_label, value.step)]
-    lines = ["지금 %s  기준선 %s (offset %s)  step=%s  (p95 비교)" % (window.label(), base_label, value.offset, value.step)]
+        return ["(데이터 없음 — 지금 %s · 기준선 %s 모두 시계열이 없다. step=%s)" % (window_str(window), base_label, value.step)]
+    lines = ["지금 %s  기준선 %s (offset %s)  step=%s  (p95 비교)" % (window_str(window), base_label, value.offset, value.step)]
     if value.baseline_empty:
         lines.append("기준선 없음 — %s 에 시계열이 없다. 비율을 내지 않는다(0 으로 나누지 않는다)" % base_label)
     for d in value.deltas:
@@ -482,8 +518,10 @@ class MetricsArgs:
 
 
 def metrics_run(client: Client, a: MetricsArgs, at: float | None = None) -> RunResult:
-    """→ (Evidence[Lines], 원본, kind). 계산은 obs.metrics 가, 표는 *_lines 가. stdout 을 만지지 않는다."""
-    window = Window.last(a.since, a.end, at)
+    """→ (Evidence[Lines], 원본, kind). 계산은 obs.metrics 가, 표는 *_lines 가. stdout 을 만지지 않는다.
+    top 은 창이 없다 — --end 시각 하나(since 는 쓰이지 않는다)."""
+    base_ts = now() if at is None else at
+    window = Window.last(a.since, a.end, at) if a.cmd != "top" else Window(parse_time(a.end, base_ts), parse_time(a.end, base_ts))
     if a.cmd == "summarize":
         ev, raw = summarize(client, a.query, window, a.step)
         return _evidence("metrics", ev.query, ev.window or window, summary_lines(ev.value, ev.window or window)), raw, "promql-summarize"
@@ -499,31 +537,33 @@ def metrics_run(client: Client, a: MetricsArgs, at: float | None = None) -> RunR
 
 
 def metrics_main(argv: Sequence[str]) -> None:
-    ap = argparse.ArgumentParser(prog="promql.py", description=METRICS_DOC,
+    ap = argparse.ArgumentParser(prog="promql.py", description="메트릭 환원 연산 — summarize · compare · top. 각 서브커맨드의 --help 에 설명 전부.",
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True, metavar="<summarize|compare|top>")
+    fmt = argparse.RawDescriptionHelpFormatter
 
-    def common(sp: argparse.ArgumentParser) -> None:
+    def common(sp: argparse.ArgumentParser, end_help: str) -> None:
         sp.add_argument("query", help="PromQL")
-        sp.add_argument("--since", default="1h", help="창 길이. 기본 1h")
-        sp.add_argument("--end", default=None, help="창 끝 (now · -10m · unix초 · RFC3339). 기본 now")
+        sp.add_argument("--end", default=None, help=end_help)
         _common(sp)
 
-    sp_sum = sub.add_parser("summarize", help="시계열별 n·min·p50·p95·max·last·기울기")
-    common(sp_sum)
+    sp_sum = sub.add_parser("summarize", help="시계열별 n·min·p50·p95·max·last·기울기", description=SUMMARIZE_DOC, formatter_class=fmt)
+    sp_sum.add_argument("--since", default="1h", help="창 길이. 기본 1h")
+    common(sp_sum, "창 끝 (now · -10m · unix초 · RFC3339). 기본 now")
     sp_sum.add_argument("--step", default=None, help="서브쿼리 해상도. 기본 창 길이/60 (최소 15s)")
-    sp_cmp = sub.add_parser("compare", help="지금 창 vs 기준선 창 — 시계열별 p95 차이만")
-    common(sp_cmp)
+    sp_cmp = sub.add_parser("compare", help="지금 창 vs 기준선 창 — 시계열별 p95 차이만", description=COMPARE_DOC, formatter_class=fmt)
+    sp_cmp.add_argument("--since", default="1h", help="창 길이. 기본 1h")
+    common(sp_cmp, "창 끝 (now · -10m · unix초 · RFC3339). 기본 now")
     sp_cmp.add_argument("--baseline", default=DEFAULT_BASELINE,
                         help="기준선 창 — 같은 식의 offset: 1d(기본 — 1일 전 같은 시각) · 1w · prev(직전 창)")
     sp_cmp.add_argument("--step", default=None, help="서브쿼리 해상도(두 창에 같다). 기본 창 길이/60 (최소 15s)")
-    sp_top = sub.add_parser("top", help="레이블 축 상위 k")
-    common(sp_top)
+    sp_top = sub.add_parser("top", help="레이블 축 상위 k (--end 시각의 즉시 조회)", description=TOP_DOC, formatter_class=fmt)
+    common(sp_top, "평가 시각 (now · -10m · unix초 · RFC3339). 기본 now — top 은 창이 없다")
     sp_top.add_argument("--by", default="pod", help="레이블 축. 쉼표로 여러 개. 기본 pod")
     sp_top.add_argument("--k", type=int, default=DEFAULT_TOP_K, help="상위 k. 기본 %d" % DEFAULT_TOP_K)
     sp_top.add_argument("--agg", choices=TOP_AGGS, default=DEFAULT_TOP_AGG, help="축으로 접는 집계. 기본 sum")
     a = ap.parse_args(argv)
-    args = MetricsArgs(cmd=a.cmd, query=a.query, since=a.since, end=a.end, step=getattr(a, "step", None),
+    args = MetricsArgs(cmd=a.cmd, query=a.query, since=getattr(a, "since", "1h"), end=a.end, step=getattr(a, "step", None),
                        baseline=getattr(a, "baseline", DEFAULT_BASELINE), k=getattr(a, "k", DEFAULT_TOP_K),
                        by=getattr(a, "by", "pod"), agg=getattr(a, "agg", DEFAULT_TOP_AGG))
     ev, body, kind = metrics_run(_client(), args)
