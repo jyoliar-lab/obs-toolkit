@@ -1,7 +1,29 @@
 {
- "status": "success",
- "data": {
-  "resultType": "vector",
-  "result": []
- }
+ "format": "obs-fixture/1",
+ "recorded": "tests/record.py",
+ "calls": [
+  {
+   "request": {
+    "at": 1790071906.50452,
+    "at_rfc3339": "2026-09-22T10:11:46Z",
+    "backend": "metrics",
+    "path": "api/v1/query",
+    "query_string": "query=label_replace%28count_over_time%28%28sum+by+%28pod%29+%28rate%28container_cpu_usage_seconds_total%7Bnamespace%3D%22no-such-namespace%22%7D%5B5m%5D%29%29%29%5B3600s%3A60s%5D%29%2C+%22stat%22%2C+%22n%22%2C+%22%22%2C+%22%22%29+or+label_replace%28min_over_time%28%28sum+by+%28pod%29+%28rate%28container_cpu_usage_seconds_total%7Bnamespace%3D%22no-such-namespace%22%7D%5B5m%5D%29%29%29%5B3600s%3A60s%5D%29%2C+%22stat%22%2C+%22min%22%2C+%22%22%2C+%22%22%29+or+label_replace%28quantile_over_time%280.5%2C+%28sum+by+%28pod%29+%28rate%28container_cpu_usage_seconds_total%7Bnamespace%3D%22no-such-namespace%22%7D%5B5m%5D%29%29%29%5B3600s%3A60s%5D%29%2C+%22stat%22%2C+%22p50%22%2C+%22%22%2C+%22%22%29+or+label_replace%28quantile_over_time%280.95%2C+%28sum+by+%28pod%29+%28rate%28container_cpu_usage_seconds_total%7Bnamespace%3D%22no-such-namespace%22%7D%5B5m%5D%29%29%29%5B3600s%3A60s%5D%29%2C+%22stat%22%2C+%22p95%22%2C+%22%22%2C+%22%22%29+or+label_replace%28max_over_time%28%28sum+by+%28pod%29+%28rate%28container_cpu_usage_seconds_total%7Bnamespace%3D%22no-such-namespace%22%7D%5B5m%5D%29%29%29%5B3600s%3A60s%5D%29%2C+%22stat%22%2C+%22max%22%2C+%22%22%2C+%22%22%29+or+label_replace%28last_over_time%28%28sum+by+%28pod%29+%28rate%28container_cpu_usage_seconds_total%7Bnamespace%3D%22no-such-namespace%22%7D%5B5m%5D%29%29%29%5B3600s%3A60s%5D%29%2C+%22stat%22%2C+%22last%22%2C+%22%22%2C+%22%22%29+or+label_replace%28deriv%28%28sum+by+%28pod%29+%28rate%28container_cpu_usage_seconds_total%7Bnamespace%3D%22no-such-namespace%22%7D%5B5m%5D%29%29%29%5B3600s%3A60s%5D%29%2C+%22stat%22%2C+%22slope%22%2C+%22%22%2C+%22%22%29&time=1790071906.50452",
+    "params": {
+     "query": "label_replace(count_over_time((sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"no-such-namespace\"}[5m])))[3600s:60s]), \"stat\", \"n\", \"\", \"\") or label_replace(min_over_time((sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"no-such-namespace\"}[5m])))[3600s:60s]), \"stat\", \"min\", \"\", \"\") or label_replace(quantile_over_time(0.5, (sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"no-such-namespace\"}[5m])))[3600s:60s]), \"stat\", \"p50\", \"\", \"\") or label_replace(quantile_over_time(0.95, (sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"no-such-namespace\"}[5m])))[3600s:60s]), \"stat\", \"p95\", \"\", \"\") or label_replace(max_over_time((sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"no-such-namespace\"}[5m])))[3600s:60s]), \"stat\", \"max\", \"\", \"\") or label_replace(last_over_time((sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"no-such-namespace\"}[5m])))[3600s:60s]), \"stat\", \"last\", \"\", \"\") or label_replace(deriv((sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"no-such-namespace\"}[5m])))[3600s:60s]), \"stat\", \"slope\", \"\", \"\")",
+     "time": "1790071906.50452"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "status": "success",
+     "data": {
+      "resultType": "vector",
+      "result": []
+     }
+    }
+   }
+  }
+ ]
 }

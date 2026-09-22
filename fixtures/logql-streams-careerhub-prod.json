@@ -1,56 +1,252 @@
 {
- "status": "success",
- "data": {
-  "resultType": "streams",
-  "result": [
-   {
-    "stream": {
-     "container": "zitadel",
-     "detected_level": "warn",
-     "env": "prod",
-     "instance": "careerhub-prod/zitadel-f65b884bd-jm9zg:zitadel",
-     "job": "loki.source.kubernetes.pod_logs",
-     "namespace": "careerhub-prod",
-     "pod": "zitadel-f65b884bd-jm9zg",
-     "service_name": "zitadel"
-    },
-    "values": [
-     [
-      "1788855749699618965",
-      "time=\"2026-09-08T08:22:29Z\" level=warning msg=\"authz: verify access token\" caller=\"/home/runner/work/zitadel/zitadel/internal/api/authz/context.go:114\" error=\"I"
-     ],
-     [
-      "1788855749699596614",
-      "time=\"2026-09-08T08:22:29Z\" level=warning msg=\"token verifier repo: verify JWT access token\" caller=\"/home/runner/work/zitadel/zitadel/internal/authz/repository"
-     ],
-     [
-      "1788855749699499281",
-      "time=\"2026-09-08T08:22:29Z\" level=warning msg=\"token verifier repo: decrypt access token\" caller=\"/home/runner/work/zitadel/zitadel/internal/authz/repository/ev"
-     ]
-    ]
+ "format": "obs-fixture/1",
+ "recorded": "tests/record.py",
+ "calls": [
+  {
+   "request": {
+    "at": 1790071906.50452,
+    "at_rfc3339": "2026-09-22T10:11:46Z",
+    "backend": "logs",
+    "path": "loki/api/v1/query_range",
+    "query_string": "start=1790068306504519936&end=1790071906504519936&query=%7Bnamespace%3D%22careerhub-prod%22%7D&limit=5&direction=backward",
+    "params": {
+     "start": "1790068306504519936",
+     "end": "1790071906504519936",
+     "query": "{namespace=\"careerhub-prod\"}",
+     "limit": "5",
+     "direction": "backward"
+    }
    },
-   {
-    "stream": {
-     "container": "zitadel",
-     "detected_level": "info",
-     "env": "prod",
-     "instance": "careerhub-prod/zitadel-f65b884bd-jm9zg:zitadel",
-     "job": "loki.source.kubernetes.pod_logs",
-     "namespace": "careerhub-prod",
-     "pod": "zitadel-f65b884bd-jm9zg",
-     "service_name": "zitadel"
-    },
-    "values": [
-     [
-      "1788855749702179990",
-      "time=2026-09-08T08:22:29.702Z level=INFO msg=\"request served\" request.id=dafsbh9cm36s73cni4m0 request.instance_host=id.careerhub.jyo-liar.com request.public_hos"
-     ],
-     [
-      "1788855749701978232",
-      "time=\"2026-09-08T08:22:29Z\" level=info msg=activity caller=\"/home/runner/work/zitadel/zitadel/internal/activity/activity.go:105\" domain=\"https://id.careerhub.jy"
-     ]
-    ]
+   "response": {
+    "status": 200,
+    "body": {
+     "status": "success",
+     "data": {
+      "resultType": "streams",
+      "result": [
+       {
+        "stream": {
+         "app": "careerhub-mongodb-svc",
+         "container": "mongod",
+         "detected_level": "unknown",
+         "env": "prod",
+         "instance": "careerhub-prod/careerhub-mongodb-0:mongod",
+         "job": "loki.source.kubernetes.pod_logs",
+         "namespace": "careerhub-prod",
+         "pod": "careerhub-mongodb-0",
+         "service_name": "careerhub-mongodb-svc"
+        },
+        "values": [
+         [
+          "1790071905892712846",
+          "{\"t\":{\"$date\":\"2026-09-22T10:11:45.892+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22944,   \"ctx\":\"conn284012\",\"msg\":\"Connection ended\",\"attr\":{\"remote\":\"10.244.5.211:57006\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"ddf9eaa2-82b8-4ca9-a0eb-ac7ec6363b70\"}},\"connectionId\":284012,\"connectionCount\":53}}\n"
+         ],
+         [
+          "1790071905891301360",
+          "{\"t\":{\"$date\":\"2026-09-22T10:11:45.890+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22944,   \"ctx\":\"conn284013\",\"msg\":\"Connection ended\",\"attr\":{\"remote\":\"10.244.5.211:57028\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"1d1983ff-1e1a-4468-9118-0f1a45424e3f\"}},\"connectionId\":284013,\"connectionCount\":54}}\n"
+         ],
+         [
+          "1790071905890964396",
+          "{\"t\":{\"$date\":\"2026-09-22T10:11:45.890+00:00\"},\"s\":\"I\",  \"c\":\"-\",        \"id\":20883,   \"ctx\":\"conn284012\",\"msg\":\"Interrupted operation as its client disconnected\",\"attr\":{\"opId\":308217857}}\n"
+         ],
+         [
+          "1790071905890529210",
+          "{\"t\":{\"$date\":\"2026-09-22T10:11:45.890+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22944,   \"ctx\":\"conn284011\",\"msg\":\"Connection ended\",\"attr\":{\"remote\":\"10.244.5.211:57004\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"20ceb342-a880-406a-b521-0c34fd8bdc48\"}},\"connectionId\":284011,\"connectionCount\":55}}\n"
+         ],
+         [
+          "1790071905889969282",
+          "{\"t\":{\"$date\":\"2026-09-22T10:11:45.889+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":6788700, \"ctx\":\"conn284013\",\"msg\":\"Received first command on ingress connection since session start or auth handshake\",\"attr\":{\"elapsedMillis\":0}}\n"
+         ]
+        ]
+       }
+      ],
+      "stats": {
+       "summary": {
+        "bytesProcessedPerSecond": 77514853,
+        "linesProcessedPerSecond": 208948,
+        "totalBytesProcessed": 683337,
+        "totalLinesProcessed": 1842,
+        "execTime": 0.008816,
+        "queueTime": 0.000123,
+        "subqueries": 0,
+        "totalEntriesReturned": 5,
+        "splits": 1,
+        "shards": 1,
+        "totalPostFilterLines": 1842,
+        "totalStructuredMetadataBytesProcessed": 14736
+       },
+       "querier": {
+        "store": {
+         "totalChunksRef": 0,
+         "totalChunksDownloaded": 0,
+         "chunksDownloadTime": 0,
+         "queryReferencedStructuredMetadata": false,
+         "queryUsedV2Engine": false,
+         "chunk": {
+          "headChunkBytes": 0,
+          "headChunkLines": 0,
+          "decompressedBytes": 0,
+          "decompressedLines": 0,
+          "compressedBytes": 0,
+          "totalDuplicates": 0,
+          "postFilterLines": 0,
+          "headChunkStructuredMetadataBytes": 0,
+          "decompressedStructuredMetadataBytes": 0
+         },
+         "chunkRefsFetchTime": 0,
+         "congestionControlLatency": 0,
+         "pipelineWrapperFilteredLines": 0,
+         "dataobj": {
+          "prePredicateDecompressedRows": 0,
+          "prePredicateDecompressedBytes": 0,
+          "prePredicateDecompressedStructuredMetadataBytes": 0,
+          "postPredicateRows": 0,
+          "postPredicateDecompressedBytes": 0,
+          "postPredicateStructuredMetadataBytes": 0,
+          "postFilterRows": 0,
+          "pagesScanned": 0,
+          "pagesDownloaded": 0,
+          "pagesDownloadedBytes": 0,
+          "pageBatches": 0,
+          "totalRowsAvailable": 0,
+          "totalPageDownloadTime": 0
+         }
+        }
+       },
+       "ingester": {
+        "totalReached": 1,
+        "totalChunksMatched": 7,
+        "totalBatches": 1,
+        "totalLinesSent": 5,
+        "store": {
+         "totalChunksRef": 0,
+         "totalChunksDownloaded": 0,
+         "chunksDownloadTime": 0,
+         "queryReferencedStructuredMetadata": false,
+         "queryUsedV2Engine": false,
+         "chunk": {
+          "headChunkBytes": 683337,
+          "headChunkLines": 1842,
+          "decompressedBytes": 0,
+          "decompressedLines": 0,
+          "compressedBytes": 353195,
+          "totalDuplicates": 0,
+          "postFilterLines": 1842,
+          "headChunkStructuredMetadataBytes": 14736,
+          "decompressedStructuredMetadataBytes": 0
+         },
+         "chunkRefsFetchTime": 176832,
+         "congestionControlLatency": 0,
+         "pipelineWrapperFilteredLines": 0,
+         "dataobj": {
+          "prePredicateDecompressedRows": 0,
+          "prePredicateDecompressedBytes": 0,
+          "prePredicateDecompressedStructuredMetadataBytes": 0,
+          "postPredicateRows": 0,
+          "postPredicateDecompressedBytes": 0,
+          "postPredicateStructuredMetadataBytes": 0,
+          "postFilterRows": 0,
+          "pagesScanned": 0,
+          "pagesDownloaded": 0,
+          "pagesDownloadedBytes": 0,
+          "pageBatches": 0,
+          "totalRowsAvailable": 0,
+          "totalPageDownloadTime": 0
+         }
+        }
+       },
+       "cache": {
+        "chunk": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "index": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "result": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "statsResult": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "volumeResult": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "seriesResult": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "labelResult": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "instantMetricResult": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        }
+       },
+       "index": {
+        "totalChunks": 0,
+        "postFilterChunks": 0,
+        "shardsDuration": 0,
+        "usedBloomFilters": false
+       }
+      }
+     }
+    }
    }
-  ]
- }
+  }
+ ]
 }

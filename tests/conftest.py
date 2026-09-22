@@ -1,4 +1,4 @@
-"""공용 fixture — 녹화 응답 로더 · 가짜 transport · 격리된 env."""
+"""공용 fixture — 녹화 fixture 의 응답 로더 · 가짜 transport · 격리된 env."""
 from __future__ import annotations
 
 import json
@@ -11,13 +11,15 @@ import pytest
 
 from obs.adapters import cli
 from obs.core import JSON, Client, Config, DoctorReport, TransportError, TransportTimeout, load_config
+from tests.record import FIXTURES, ROOT, read_fixture, response_of
 
-ROOT: Path = Path(__file__).resolve().parents[1]
-FIXTURES: Path = ROOT / "fixtures"
+__all__ = ["FIXTURES", "ROOT"]   # 재수출 — 테스트가 여기서 가져온다
 
 
-def load_fixture(name: str) -> JSON:
-    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+def load_response(name: str, path: str | None = None) -> JSON:
+    """녹화 fixture(`fixtures/<name>` — tests/record.py 형식)에서 **응답 본문만** 꺼낸다. 요청 기록은 tests/record.py 의 read_fixture 로.
+    한 파일에 호출이 여럿이면(traces: api/search → api/traces/<id>) `path`(네이티브 경로 조각)로 하나를 고른다."""
+    return response_of(read_fixture(FIXTURES / name), path, name)
 
 
 @dataclass

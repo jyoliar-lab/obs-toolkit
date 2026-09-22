@@ -1,32 +1,55 @@
 {
- "traces": [
+ "format": "obs-fixture/1",
+ "recorded": "tests/record.py",
+ "calls": [
   {
-   "traceID": "592568ed3ac243ef13c1740d1e6ad00",
-   "rootServiceName": "review-service",
-   "rootTraceName": "careerhub.review_service.crawler_grpc.ReviewGrpc/finishCrawlingTask",
-   "startTimeUnixNano": "1788809943986913766",
-   "durationMs": 1
-  },
-  {
-   "traceID": "2f48525fd0d5a83ecbfaea2977ab7fb",
-   "rootServiceName": "posting-service",
-   "rootTraceName": "careerhub.posting_service.provider_grpc.ProviderGrpc/RegisterJobPostingInfo",
-   "startTimeUnixNano": "1788808544796985296",
-   "durationMs": 5
-  },
-  {
-   "traceID": "3cdcda0f8fef83a4ba5c374a8ae15bd",
-   "rootServiceName": "posting-service",
-   "rootTraceName": "careerhub.posting_service.provider_grpc.ProviderGrpc/IsCompanyRegistered",
-   "startTimeUnixNano": "1788808400665396184",
-   "durationMs": 2
+   "request": {
+    "at": 1790071906.50452,
+    "at_rfc3339": "2026-09-22T10:11:46Z",
+    "backend": "traces",
+    "path": "api/search",
+    "query_string": "start=1789985506&end=1790071906&limit=3",
+    "params": {
+     "start": "1789985506",
+     "end": "1790071906",
+     "limit": "3"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "traces": [
+      {
+       "traceID": "179100c2172ff27aea9669e2f3bd36c",
+       "rootServiceName": "posting-service",
+       "rootTraceName": "careerhub.posting_service.provider_grpc.ProviderGrpc/RegisterJobPostingInfo",
+       "startTimeUnixNano": "1790018250944379511",
+       "durationMs": 3
+      },
+      {
+       "traceID": "2a2311dce8622da3932fa09dce28062",
+       "rootServiceName": "posting-service",
+       "rootTraceName": "careerhub.posting_service.provider_grpc.ProviderGrpc/RegisterJobPostingInfo",
+       "startTimeUnixNano": "1790018142923889346",
+       "durationMs": 5
+      },
+      {
+       "traceID": "31487be6fec97b6242a1cf5e58b753c",
+       "rootServiceName": "posting-service",
+       "rootTraceName": "careerhub.posting_service.provider_grpc.ProviderGrpc/IsCompanyRegistered",
+       "startTimeUnixNano": "1790017992786827497",
+       "durationMs": 1
+      }
+     ],
+     "metrics": {
+      "inspectedBytes": "32488",
+      "totalBlocks": 1,
+      "completedJobs": 4,
+      "totalJobs": 4,
+      "totalBlockBytes": "81668"
+     }
+    }
+   }
   }
- ],
- "metrics": {
-  "inspectedBytes": "32639",
-  "totalBlocks": 1,
-  "completedJobs": 4,
-  "totalJobs": 4,
-  "totalBlockBytes": "82270"
- }
+ ]
 }
