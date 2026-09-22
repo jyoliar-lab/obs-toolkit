@@ -1,0 +1,208 @@
+{
+ "status": "success",
+ "data": {
+  "resultType": "vector",
+  "result": [
+   {
+    "metric": {
+     "pod": "api-composer-5cd4748b88-5scd5",
+     "stat": "now"
+    },
+    "value": [
+     1789636082.238,
+     "0.00013338216136803466"
+    ]
+   },
+   {
+    "metric": {
+     "pod": "api-composer-5cd4748b88-4w5hc",
+     "stat": "now"
+    },
+    "value": [
+     1789636082.238,
+     "0.00013906155906119285"
+    ]
+   },
+   {
+    "metric": {
+     "pod": "auth-service-869c7d45b9-bsrqg",
+     "stat": "now"
+    },
+    "value": [
+     1789636082.238,
+     "0.0001534328296524125"
+    ]
+   },
+   {
+    "metric": {
+     "pod": "auth-service-869c7d45b9-2j48w",
+     "stat": "now"
+    },
+    "value": [
+     1789636082.238,
+     "0.00011326827654152995"
+    ]
+   },
+   {
+    "metric": {
+     "pod": "frontend-5b9cb468cd-xnpvq",
+     "stat": "now"
+    },
+    "value": [
+     1789636082.238,
+     "0.00000511864411051571"
+    ]
+   },
+   {
+    "metric": {
+     "pod": "careerhub-mongodb-0",
+     "stat": "now"
+    },
+    "value": [
+     1789636082.238,
+     "0.07800354845191279"
+    ]
+   },
+   {
+    "metric": {
+     "pod": "careerhub-mongodb-1",
+     "stat": "now"
+    },
+    "value": [
+     1789636082.238,
+     "0.07846867653278261"
+    ]
+   },
+   {
+    "metric": {
+     "pod": "careerhub-mongodb-arb-0",
+     "stat": "now"
+    },
+    "value": [
+     1789636082.238,
+     "0.05175849086535996"
+    ]
+   },
+   {
+    "metric": {
+     "pod": "careerhub-nginx-gateway-nginx-6b74ff84d5-7hngr",
+     "stat": "now"
+    },
+    "value": [
+     1789636082.238,
+     "0.003622953309871475"
+    ]
+   },
+   {
+    "metric": {
+     "pod": "careerhub-postgresql-pooler-54dcf6c55b-2rgcv",
+     "stat": "now"
+    },
+    "value": [
+     1789636082.238,
+     "0.00031859792231818954"
+    ]
+   },
+   {
+    "metric": {
+     "pod": "careerhub-postgresql-1",
+     "stat": "now"
+    },
+    "value": [
+     1789636082.238,
+     "0.036744152737867686"
+    ]
+   },
+   {
+    "metric": {
+     "pod": "careerhub-postgresql-2",
+     "stat": "now"
+    },
+    "value": [
+     1789636082.238,
+     "0.0142357701501541"
+    ]
+   },
+   {
+    "metric": {
+     "pod": "posting-service-697c7c9468-nb6c8",
+     "stat": "now"
+    },
+    "value": [
+     1789636082.238,
+     "0.0009322599739372586"
+    ]
+   },
+   {
+    "metric": {
+     "pod": "posting-service-697c7c9468-2b45b",
+     "stat": "now"
+    },
+    "value": [
+     1789636082.238,
+     "0.000955139816476667"
+    ]
+   },
+   {
+    "metric": {
+     "pod": "review-service-599858944c-ht9m8",
+     "stat": "now"
+    },
+    "value": [
+     1789636082.238,
+     "0.0009332296870440443"
+    ]
+   },
+   {
+    "metric": {
+     "pod": "review-service-599858944c-trqvx",
+     "stat": "now"
+    },
+    "value": [
+     1789636082.238,
+     "0.0009685301790927015"
+    ]
+   },
+   {
+    "metric": {
+     "pod": "userinfo-service-5856d5d7bc-4m4pp",
+     "stat": "now"
+    },
+    "value": [
+     1789636082.238,
+     "0.0009813714439050121"
+    ]
+   },
+   {
+    "metric": {
+     "pod": "userinfo-service-5856d5d7bc-nh74j",
+     "stat": "now"
+    },
+    "value": [
+     1789636082.238,
+     "0.0009280653784307573"
+    ]
+   },
+   {
+    "metric": {
+     "pod": "zitadel-f65b884bd-jm9zg",
+     "stat": "now"
+    },
+    "value": [
+     1789636082.238,
+     "0.011792425963905052"
+    ]
+   },
+   {
+    "metric": {
+     "pod": "zitadel-login-5f84b58446-9pn4q",
+     "stat": "now"
+    },
+    "value": [
+     1789636082.238,
+     "0.023873030961267697"
+    ]
+   }
+  ]
+ }
+}

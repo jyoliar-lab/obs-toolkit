@@ -107,7 +107,7 @@ def _recording_doctor(fn: Callable[[DoctorReport], list[str]], sink: list[Block]
 
 @pytest.fixture(autouse=True)
 def dump_evidence(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """OBS_TEST_DUMP=1 이면 각 테스트가 promql_run·logql_run·traceql_run 에서 받은 Evidence.value.lines 와
+    """OBS_TEST_DUMP=1 이면 각 테스트가 promql_run·logql_run·traceql_run·metrics_run 에서 받은 Evidence.value.lines 와
     doctor_lines 의 반환을 tmp/test-output/<테스트 이름>.txt 로 쓴다. 테스트 본문은 건드리지 않는다 —
     cli 모듈의 함수를 감싸서 가로챈다. env 가 없으면 아무것도 하지 않는다(CI · 평소 실행)."""
     if not os.environ.get("OBS_TEST_DUMP"):
@@ -117,6 +117,7 @@ def dump_evidence(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(cli, "promql_run", _recording(cli.promql_run, captured))
     monkeypatch.setattr(cli, "logql_run", _recording(cli.logql_run, captured))
     monkeypatch.setattr(cli, "traceql_run", _recording(cli.traceql_run, captured))
+    monkeypatch.setattr(cli, "metrics_run", _recording(cli.metrics_run, captured))
     monkeypatch.setattr(cli, "doctor_lines", _recording_doctor(cli.doctor_lines, captured))
     yield
     if not captured:

@@ -36,6 +36,9 @@ agent 는 이 값을 읽지도 옮기지도 않는다 — 어디에도 적지 �
 | 명령 | 백엔드 | 하는 일 |
 |---|---|---|
 | `promql.py '<PromQL>'` | metrics | 즉시 조회. `--range 1h [--step]` 구간 조회(시계열별 요약). `--labels` · `--label-values <name>` · `--series` 로 탐색 |
+| `promql.py summarize '<PromQL>' --since 1h` | metrics | **환원** — 시계열별 n · min · p50 · p95 · max · last · 기울기. 계산은 백엔드(서브쿼리 위 `*_over_time` · `deriv`), 질의 1회 |
+| `promql.py compare '<PromQL>' --since 1h [--baseline 1d]` | metrics | **환원** — 같은 식의 p95 를 지금 창과 `offset` 기준선 창에서 한 질의로 받아 시계열별 차이(×비율 · Δ)만. 기준선 `1d`(기본 — 1일 전 같은 시각) · `1w` · `prev`(직전 창). 기준선에 없으면 "기준선 없음" |
+| `promql.py top '<PromQL>' --by pod [--k 10]` | metrics | **환원** — 레이블 축 상위 k. `topk` 로 감싸 서버가 k 개만 돌려준다(카디널리티 폭발 없음) |
 | `logql.py '<LogQL>'` | logs | 로그 줄. `--since 1h` `--limit 30`(기본 — 낮다). 메트릭 질의면 시계열 요약. `--labels` · `--label-values` · `--series` |
 | `traceql.py search [--q '<TraceQL>']` | traces | 최근 트레이스 목록. `--min-duration 500ms` |
 | `traceql.py trace <traceID>` | | 트레이스 요약 — 서비스·span 수·오류·느린 span. 원본은 항상 파일로 |
@@ -47,6 +50,8 @@ agent 는 이 값을 읽지도 옮기지도 않는다 — 어디에도 적지 �
 ```bash
 promql.py 'up == 0'
 promql.py 'sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="careerhub-prod"}[5m]))' --range 1h
+promql.py compare 'sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="careerhub-prod"}[5m]))' --since 1h --baseline 1d
+promql.py top 'container_memory_working_set_bytes' --by pod --k 10
 logql.py '{namespace="careerhub-prod"} |= "error"' --since 30m
 logql.py 'sum by (app) (count_over_time({namespace="careerhub-prod"} |= "error" [5m]))' --since 2h
 traceql.py search --q '{ status = error }' --since 1h
@@ -55,6 +60,7 @@ traceql.py trace 3f2a9c…
 
 ## 출력 규약 — 원본을 주 컨텍스트에 쏟지 않는다
 
+- **"높은가" 는 절대값이 아니라 기준선 대비로 판단한다.** 시계열을 두 번 조회해 눈으로 비교하지 말고 `promql.py compare` 를 쓴다 — 차이(×비율 · Δ)만 돌아온다. "데이터 없음" 과 `0` 은 다르다 — 시계열이 없으면 그렇게 표시된다.
 - 요약 줄의 시각은 **UTC** 이고 `Z` 를 붙여 표기한다(`09-15 05:20:11Z`). 코멘트에 옮길 때 그대로 적는다.
 - 명령 한 번이 **호출 디렉터리 하나** `tmp/obs/<시각>-<종류>/` 를 만든다 — `raw.json`(응답 원본) · `summary.txt`(잘리지 않은 요약 전체). stdout 은 **요약** 이고 `--max-lines`(기본 40) 에서 잘리며, 마지막 줄이 그 경로다. `--json` 은 stdout 에 요약을 찍지 않고 경로만.
 - 파일을 읽을 때는 통째로 열지 말고 `jq`·`grep` 으로 필요한 부분만 꺼낸다.
