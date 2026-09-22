@@ -12,7 +12,7 @@ import pytest
 from obs import metrics
 from obs.adapters import cli
 from obs.core import JSON, Evidence, Lines, ObsError, Window, to_dict
-from tests.conftest import ClientFactory, load_fixture
+from tests.conftest import ClientFactory, load_response
 
 PHYSICAL: tuple[str, ...] = ("obs.mg", "jyo-liar.com/api", "datasources/proxy", "uid/prometheus")
 CPU_QUERY: str = 'sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="careerhub-prod"}[5m]))'
@@ -96,7 +96,7 @@ def test_summaries_of_requires_n_and_marks_missing_as_nan() -> None:
 def test_summarize_fixture_one_query(make_client: ClientFactory) -> None:
     """녹화한 서버 환원 응답(20 pod × 7 통계 = 140 값) — GET 1 회(예산), 즉시 조회 URL 에 조립 질의·창 끝 시각, 시계열 20개
     각각 n=60(서브쿼리 점 수) · min ≤ p50 ≤ p95 ≤ max. Evidence.query 는 조립 질의(재실행 가능), window 는 받은 창."""
-    client, t = make_client({"api/v1/query?": (200, load_fixture("promql-instant-summarize-cpu-by-pod.json"))})
+    client, t = make_client({"api/v1/query?": (200, load_response("promql-instant-summarize-cpu-by-pod.json"))})
     ev, raw = metrics.summarize(client, CPU_QUERY, Window.last("1h", at=AT))
     assert len(t.calls) == 1 and "api/v1/query?" in t.calls[0].url and "time=100000.0" in t.calls[0].url
     assert "query_range" not in t.calls[0].url and "count_over_time" in t.calls[0].url and "deriv" in t.calls[0].url
@@ -116,7 +116,7 @@ def test_summarize_fixture_one_query(make_client: ClientFactory) -> None:
 
 def test_summarize_empty_is_no_data_not_zero(make_client: ClientFactory) -> None:
     """녹화한 빈 응답(없는 namespace) — series 가 비고, 렌더링은 "데이터 없음" 이지 0 이 아니다."""
-    client, _ = make_client({"api/v1/query?": (200, load_fixture("promql-instant-empty.json"))})
+    client, _ = make_client({"api/v1/query?": (200, load_response("promql-instant-empty.json"))})
     ev, _ = metrics.summarize(client, CPU_QUERY, Window.last("1h", at=AT))
     assert ev.value.series == []
     lines = cli.summary_lines(ev.value, Window.last("1h", at=AT))
@@ -134,7 +134,7 @@ def test_summarize_requires_query(make_client: ClientFactory) -> None:
 def test_compare_fixture_one_query_offset(make_client: ClientFactory) -> None:
     """AC 2 의 fixture 판 — 녹화한 `now` · `base`(offset 86400s) p95 40 값. GET 1 회, URL 에 `offset 86400s`, Delta 20개 비율 내림차순,
     Evidence.window 에 기준선 창이 달린다. 렌더링은 헤더 1줄 + 20행이고 물리 정보가 없다."""
-    client, t = make_client({"api/v1/query?": (200, load_fixture("promql-instant-compare-cpu-by-pod-1d.json"))})
+    client, t = make_client({"api/v1/query?": (200, load_response("promql-instant-compare-cpu-by-pod-1d.json"))})
     ev, raw = metrics.compare(client, CPU_QUERY, Window.last("1h", at=AT).with_baseline("1d"))
     assert len(t.calls) == 1 and "offset+86400s" in t.calls[0].url and "time=100000.0" in t.calls[0].url
     assert ev.window is not None and ev.window.baseline == Window(10000.0, 13600.0)
@@ -154,7 +154,7 @@ def test_compare_fixture_one_query_offset(make_client: ClientFactory) -> None:
 
 def test_compare_default_baseline_is_one_day(make_client: ClientFactory) -> None:
     """기준선이 없는 Window 를 주면 DEFAULT_BASELINE(1d) — offset 86400s. #102 의 red 도 같은 기본값을 쓴다."""
-    client, t = make_client({"api/v1/query?": (200, load_fixture("promql-instant-empty.json"))})
+    client, t = make_client({"api/v1/query?": (200, load_response("promql-instant-empty.json"))})
     ev, _ = metrics.compare(client, CPU_QUERY, Window.last("1h", at=AT))
     assert ev.window is not None and ev.window.baseline == Window(AT - 3600 - 86400, AT - 86400)
     assert ev.value.offset == "86400s" and "offset+86400s" in t.calls[0].url
@@ -162,7 +162,7 @@ def test_compare_default_baseline_is_one_day(make_client: ClientFactory) -> None
 
 def test_compare_prev_baseline(make_client: ClientFactory) -> None:
     """--baseline prev — 직전 창 = offset 창 길이(3600s). 급변 감지용 규약."""
-    client, t = make_client({"api/v1/query?": (200, load_fixture("promql-instant-empty.json"))})
+    client, t = make_client({"api/v1/query?": (200, load_response("promql-instant-empty.json"))})
     ev, _ = metrics.compare(client, CPU_QUERY, Window.last("1h", at=AT).with_baseline("prev"))
     assert ev.window is not None and ev.window.baseline == Window(AT - 7200, AT - 3600)
     assert ev.value.offset == "3600s" and "offset+3600s" in t.calls[0].url
@@ -203,7 +203,7 @@ def test_compare_missing_series_and_zero_do_not_divide(make_client: ClientFactor
 def test_compare_baseline_out_of_retention_says_so(make_client: ClientFactory) -> None:
     """AC 4 — 창 단위: 녹화한 `offset 5184000s`(60d, 보존 밖) 응답에는 `base` 시계열이 부재다(0 이 아니다) → baseline_empty,
     렌더링에 "기준선 없음" 이 명시되고 비율은 어디에도 없다. 지금 창의 값은 남는다."""
-    client, _ = make_client({"api/v1/query?": (200, load_fixture("promql-instant-compare-cpu-by-pod-no-baseline.json"))})
+    client, _ = make_client({"api/v1/query?": (200, load_response("promql-instant-compare-cpu-by-pod-no-baseline.json"))})
     ev, _ = metrics.compare(client, CPU_QUERY, Window.last("1h", at=AT).with_baseline("60d"))
     v = ev.value
     assert v.offset == "5184000s" and v.baseline_empty and not v.now_empty and len(v.deltas) == 20
@@ -214,7 +214,7 @@ def test_compare_baseline_out_of_retention_says_so(make_client: ClientFactory) -
 
 
 def test_compare_both_empty(make_client: ClientFactory) -> None:
-    client, _ = make_client({"api/v1/query?": (200, load_fixture("promql-instant-empty.json"))})
+    client, _ = make_client({"api/v1/query?": (200, load_response("promql-instant-empty.json"))})
     ev, _ = metrics.compare(client, CPU_QUERY, Window.last("1h", at=AT))
     assert ev.value.now_empty and ev.value.baseline_empty and ev.value.deltas == []
     lines = cli.compare_lines(ev.value, ev.window or Window(0, 0))
@@ -226,7 +226,7 @@ def test_compare_both_empty(make_client: ClientFactory) -> None:
 def test_top_wraps_query_server_side(make_client: ClientFactory) -> None:
     """AC 3 의 fixture 판 — 녹화한 topk(10, sum by (pod) (container_memory_working_set_bytes)). 나간 질의가 topk 로 감싸져
     서버가 k 개만 돌려주고(카디널리티는 여기서 막힌다), 즉시 조회는 창 끝 시각, 항목은 값 내림차순 10개, 줄도 10개 이하."""
-    client, t = make_client({"api/v1/query?": (200, load_fixture("promql-instant-topk-memory-by-pod.json"))})
+    client, t = make_client({"api/v1/query?": (200, load_response("promql-instant-topk-memory-by-pod.json"))})
     ev, _ = metrics.top(client, "container_memory_working_set_bytes", Window.last("1h", at=AT), k=10, by=["pod"])
     assert ev.query == "topk(10, sum by (pod) (container_memory_working_set_bytes))"
     assert "query=topk%2810%2C+sum+by+%28pod%29" in t.calls[0].url and "time=100000.0" in t.calls[0].url
@@ -234,7 +234,7 @@ def test_top_wraps_query_server_side(make_client: ClientFactory) -> None:
     v = ev.value
     assert (v.k, v.by, v.agg) == (10, ["pod"], "sum") and len(v.entries) == 10
     assert [e.value for e in v.entries] == sorted((e.value for e in v.entries), reverse=True)
-    assert v.entries[0].labels["pod"].startswith("prometheus-")
+    assert v.entries[0].labels["pod"].startswith("kube-apiserver-")   # 재녹화(2026-09-22): 상위는 kube-apiserver
     lines = cli.top_lines(v, ev.window or Window(0, 0))
     assert len(lines) <= 10 and all(re.match(r"^\d+  \{pod=", l) for l in lines)
     _no_physical("\n".join(lines))
@@ -242,7 +242,7 @@ def test_top_wraps_query_server_side(make_client: ClientFactory) -> None:
 
 def test_top_clips_to_k_even_if_server_returns_more(make_client: ClientFactory) -> None:
     """서버가 k 보다 많이 돌려줘도(다른 프록시 · 동률) 함수가 k 로 자른다 — 상한은 함수의 것."""
-    client, _ = make_client({"api/v1/query?": (200, load_fixture("promql-instant-topk-memory-by-pod.json"))})
+    client, _ = make_client({"api/v1/query?": (200, load_response("promql-instant-topk-memory-by-pod.json"))})
     ev, _ = metrics.top(client, "container_memory_working_set_bytes", Window.last("1h", at=AT), k=3, by=["pod"])
     assert len(ev.value.entries) == 3 and ev.query.startswith("topk(3, ")
 
@@ -257,7 +257,7 @@ def test_top_query_axes_and_validation() -> None:
 
 
 def test_top_empty_is_no_data(make_client: ClientFactory) -> None:
-    client, _ = make_client({"api/v1/query?": (200, load_fixture("promql-instant-empty.json"))})
+    client, _ = make_client({"api/v1/query?": (200, load_response("promql-instant-empty.json"))})
     ev, _ = metrics.top(client, "nothing", Window.last("1h", at=AT))
     assert ev.value.entries == []
     lines = cli.top_lines(ev.value, ev.window or Window(0, 0))
@@ -268,9 +268,9 @@ def test_top_empty_is_no_data(make_client: ClientFactory) -> None:
 
 def test_metrics_run_dispatch(make_client: ClientFactory) -> None:
     """metrics_run — 세 서브커맨드가 Evidence[Lines] 와 kind 를 내고, compare 의 Evidence.window 에 기준선이 달리며, top 의 query 는 감싼 질의."""
-    client, _ = make_client({"count_over_time": (200, load_fixture("promql-instant-summarize-cpu-by-pod.json")),
-                             "offset": (200, load_fixture("promql-instant-compare-cpu-by-pod-1d.json")),
-                             "topk": (200, load_fixture("promql-instant-topk-memory-by-pod.json"))})
+    client, _ = make_client({"count_over_time": (200, load_response("promql-instant-summarize-cpu-by-pod.json")),
+                             "offset": (200, load_response("promql-instant-compare-cpu-by-pod-1d.json")),
+                             "topk": (200, load_response("promql-instant-topk-memory-by-pod.json"))})
     ev, _, kind = cli.metrics_run(client, cli.MetricsArgs(cmd="summarize", query=CPU_QUERY), at=AT)
     assert kind == "promql-summarize" and isinstance(ev, Evidence) and isinstance(ev.value, Lines) and len(ev.value.lines) == 21
     ev, _, kind = cli.metrics_run(client, cli.MetricsArgs(cmd="compare", query=CPU_QUERY, baseline="1d"), at=AT)
@@ -286,7 +286,7 @@ def test_promql_main_dispatches_subcommand(make_client: ClientFactory, monkeypat
     """AC 3 의 CLI 판 — `promql.py top '<q>' --by pod --k 10` 이 서브커맨드로 분기해 stdout 에 표 10줄 이하 + 호출 디렉터리 한 줄만 찍는다.
     summary.txt 머리에는 백엔드로 보낸(감싼) 질의와 평가 시각이 남는다 — stdout 에는 없다. 기존 형태(`promql.py 'up'`)는 그대로 즉시 조회다.
     top 은 창이 없으므로 --since 를 받지 않는다(argparse 거부, exit 2)."""
-    client, t = make_client({"api/v1/query?": (200, load_fixture("promql-instant-topk-memory-by-pod.json"))})
+    client, t = make_client({"api/v1/query?": (200, load_response("promql-instant-topk-memory-by-pod.json"))})
     monkeypatch.setattr(cli, "_client", lambda: client)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     cli.promql_main(["top", "container_memory_working_set_bytes", "--by", "pod", "--k", "10"])
@@ -340,7 +340,7 @@ def test_compare_summary_preamble_has_query_window_baseline(make_client: ClientF
                                                             capsys: pytest.CaptureFixture[str]) -> None:
     """summary.txt 머리 — 조립된 질의(label_replace … offset …) · 창 · 기준선이 RFC3339 + unix 초로 남아 그대로 재실행할 수 있다.
     stdout 은 요약만(조립 질의 없음)."""
-    client, _ = make_client({"api/v1/query?": (200, load_fixture("promql-instant-compare-cpu-by-pod-1d.json"))})
+    client, _ = make_client({"api/v1/query?": (200, load_response("promql-instant-compare-cpu-by-pod-1d.json"))})
     monkeypatch.setattr(cli, "_client", lambda: client)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     cli.promql_main(["compare", CPU_QUERY, "--since", "1h", "--baseline", "1d", "--end", "100000"])

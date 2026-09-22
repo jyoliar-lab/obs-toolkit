@@ -1,98 +1,120 @@
 {
- "status": "success",
- "data": {
-  "resultType": "vector",
-  "result": [
-   {
-    "metric": {
-     "pod": "prometheus-monitoring-kube-prometheus-prometheus-0"
-    },
-    "value": [
-     1789545747.453,
-     "3872440320"
-    ]
+ "format": "obs-fixture/1",
+ "recorded": "tests/record.py",
+ "calls": [
+  {
+   "request": {
+    "at": 1790071906.50452,
+    "at_rfc3339": "2026-09-22T10:11:46Z",
+    "backend": "metrics",
+    "path": "api/v1/query",
+    "query_string": "query=topk%2810%2C+sum+by+%28pod%29+%28container_memory_working_set_bytes%29%29&time=1790071906.50452",
+    "params": {
+     "query": "topk(10, sum by (pod) (container_memory_working_set_bytes))",
+     "time": "1790071906.50452"
+    }
    },
-   {
-    "metric": {
-     "pod": "kube-apiserver-raspberrypi-1"
-    },
-    "value": [
-     1789545747.453,
-     "3401940992"
-    ]
-   },
-   {
-    "metric": {
-     "pod": "kube-apiserver-raspberrypi-0"
-    },
-    "value": [
-     1789545747.453,
-     "3110633472"
-    ]
-   },
-   {
-    "metric": {
-     "pod": "kube-apiserver-raspberrypi-2"
-    },
-    "value": [
-     1789545747.453,
-     "3072835584"
-    ]
-   },
-   {
-    "metric": {
-     "pod": "careerhub-mongodb-0"
-    },
-    "value": [
-     1789545747.453,
-     "1928773632"
-    ]
-   },
-   {
-    "metric": {
-     "pod": "instance-manager-995865632f1dffd248943ba7ea5a0b26"
-    },
-    "value": [
-     1789545747.453,
-     "1582743552"
-    ]
-   },
-   {
-    "metric": {
-     "pod": "instance-manager-b251ae4054af761d3a58f01effc1d556"
-    },
-    "value": [
-     1789545747.453,
-     "1576812544"
-    ]
-   },
-   {
-    "metric": {
-     "pod": "argocd-application-controller-0"
-    },
-    "value": [
-     1789545747.453,
-     "1251852288"
-    ]
-   },
-   {
-    "metric": {
-     "pod": "careerhub-mongodb-arb-0"
-    },
-    "value": [
-     1789545747.453,
-     "886145024"
-    ]
-   },
-   {
-    "metric": {
-     "pod": "longhorn-manager-hzcvm"
-    },
-    "value": [
-     1789545747.453,
-     "776765440"
-    ]
+   "response": {
+    "status": 200,
+    "body": {
+     "status": "success",
+     "data": {
+      "resultType": "vector",
+      "result": [
+       {
+        "metric": {
+         "pod": "kube-apiserver-raspberrypi-1"
+        },
+        "value": [
+         1790071906.505,
+         "3309109248"
+        ]
+       },
+       {
+        "metric": {
+         "pod": "kube-apiserver-raspberrypi-0"
+        },
+        "value": [
+         1790071906.505,
+         "3066085376"
+        ]
+       },
+       {
+        "metric": {
+         "pod": "kube-apiserver-raspberrypi-2"
+        },
+        "value": [
+         1790071906.505,
+         "2870034432"
+        ]
+       },
+       {
+        "metric": {
+         "pod": "prometheus-monitoring-kube-prometheus-prometheus-0"
+        },
+        "value": [
+         1790071906.505,
+         "2806497280"
+        ]
+       },
+       {
+        "metric": {
+         "pod": "instance-manager-b251ae4054af761d3a58f01effc1d556"
+        },
+        "value": [
+         1790071906.505,
+         "1637023744"
+        ]
+       },
+       {
+        "metric": {
+         "pod": "instance-manager-995865632f1dffd248943ba7ea5a0b26"
+        },
+        "value": [
+         1790071906.505,
+         "1589477376"
+        ]
+       },
+       {
+        "metric": {
+         "pod": "careerhub-mongodb-0"
+        },
+        "value": [
+         1790071906.505,
+         "1505820672"
+        ]
+       },
+       {
+        "metric": {
+         "pod": "argocd-application-controller-0"
+        },
+        "value": [
+         1790071906.505,
+         "1111392256"
+        ]
+       },
+       {
+        "metric": {
+         "pod": "careerhub-mongodb-1"
+        },
+        "value": [
+         1790071906.505,
+         "1012187136"
+        ]
+       },
+       {
+        "metric": {
+         "pod": "careerhub-mongodb-arb-0"
+        },
+        "value": [
+         1790071906.505,
+         "920600576"
+        ]
+       }
+      ]
+     }
+    }
    }
-  ]
- }
+  }
+ ]
 }

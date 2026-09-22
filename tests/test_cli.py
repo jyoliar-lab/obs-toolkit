@@ -12,7 +12,7 @@ import pytest
 
 from obs.adapters import cli
 from obs.core import DoctorReport, Evidence, Lines, Probe, Resolved
-from tests.conftest import ROOT, ClientFactory, load_fixture
+from tests.conftest import ROOT, ClientFactory, load_response
 
 PHYSICAL: tuple[str, ...] = ("obs.mg", "jyo-liar.com/api", "datasources/proxy", "uid/prometheus", "loki-careerhub", "tempo-careerhub")
 
@@ -26,29 +26,29 @@ def _no_physical(text: str) -> None:
 
 def test_promql_instant_up(make_client: ClientFactory) -> None:
     """AC 3 의 첫 실측 `up` — 녹화 응답이 Evidence[Lines] 로 옮겨지고 시계열마다 `값  {레이블}` 한 줄이며, 나간 URL 에 query·time 이 있고 출력에 물리 정보가 없다."""
-    client, t = make_client({"api/v1/query?": (200, load_fixture("promql-instant-up.json"))})
+    client, t = make_client({"api/v1/query?": (200, load_response("promql-instant-up.json"))})
     ev, _, kind = cli.promql_run(client, cli.PromqlArgs(query="up"), at=1000.0)
     assert isinstance(ev, Evidence) and isinstance(ev.value, Lines) and ev.backend == "metrics" and ev.query == "up" and kind == "promql"
     lines = ev.value.lines
-    assert len(lines) == 5 and all(l.startswith("1  {") for l in lines) and "job=kubelet" in lines[0]
+    assert len(lines) == 65 and all(l.startswith("1  {") for l in lines) and "job=kubelet" in lines[0]   # 2026-09-22 재녹화: 65 타깃 전부 up
     assert "query=up" in t.calls[0].url and "time=1000.0" in t.calls[0].url
     _no_physical("\n".join(lines))
 
 
 def test_promql_range_summary(make_client: ClientFactory) -> None:
     """--range 구간 조회 — 창 길이가 계산되고 step 이 자동(range/60, 최소 15s)으로 붙으며, 시계열이 `n min max first last` 한 줄로 요약된다."""
-    client, t = make_client({"api/v1/query_range": (200, load_fixture("promql-range-sum-up.json"))})
+    client, t = make_client({"api/v1/query_range": (200, load_response("promql-range-sum-up.json"))})
     ev, _, kind = cli.promql_run(client, cli.PromqlArgs(query="sum(up)", range_="30m"), at=10000.0)
     assert kind == "promql-range" and ev.window is not None and ev.window.seconds == 1800.0
-    assert ev.value.lines == ["n=6  min=65  max=65  first=65  last=65  {}"]
+    assert ev.value.lines == ["n=61  min=65  max=65  first=65  last=65  {}"]   # 30m/30s → 61 점 (재녹화)
     assert "step=30s" in t.calls[0].url and "start=8200.0" in t.calls[0].url
 
 
 def test_promql_points(make_client: ClientFactory) -> None:
     """--points — 요약 대신 레이블 줄 아래 시각별 값이 전부 나온다(많으니 보통 spill 로 떨어지는 형태)."""
-    client, _ = make_client({"api/v1/query_range": (200, load_fixture("promql-range-sum-up.json"))})
+    client, _ = make_client({"api/v1/query_range": (200, load_response("promql-range-sum-up.json"))})
     ev, _, _ = cli.promql_run(client, cli.PromqlArgs(query="sum(up)", range_="30m", points=True), at=10000.0)
-    assert ev.value.lines[0] == "{}" and len(ev.value.lines) == 7 and ev.value.lines[1].strip().endswith("65")
+    assert ev.value.lines[0] == "{}" and len(ev.value.lines) == 62 and ev.value.lines[1].strip().endswith("65")   # 레이블 줄 + 61 점
 
 
 def test_promql_requires_query(make_client: ClientFactory) -> None:
@@ -60,8 +60,8 @@ def test_promql_requires_query(make_client: ClientFactory) -> None:
 
 def test_parse_metric_shapes() -> None:
     """파서 단독 — vector 응답이 MetricResult(시계열·값)로, scalar 응답은 scalar 필드로 옮겨지고, 형태가 깨진 result 는 빈 목록으로 조용히 처리된다."""
-    res = cli.parse_metric(cli.check_status(load_fixture("promql-instant-up.json"), "metrics"))
-    assert res.result_type == "vector" and res.scalar is None and len(res.series) == 5
+    res = cli.parse_metric(cli.check_status(load_response("promql-instant-up.json"), "metrics"))
+    assert res.result_type == "vector" and res.scalar is None and len(res.series) == 65
     assert all(len(s.values) == 1 and s.values[0][1] == "1" for s in res.series)
     scalar = cli.parse_metric({"data": {"resultType": "scalar", "result": [1.0, "42"]}})
     assert scalar.scalar == "42" and cli.instant_lines(scalar) == ["42"]
@@ -81,13 +81,13 @@ def test_promql_backend_error_status(make_client: ClientFactory) -> None:
 def test_logql_streams(make_client: ClientFactory) -> None:
     """AC 3 의 둘째 실측 careerhub-prod 로그 — 공통 레이블은 머리에 한 번, 각 줄은 시각으로 시작하고 최신순이며, URL 에 limit·direction·나노초 창이 있고 출력에 물리 정보가 없다.
     줄 수 기대값은 fixture 를 파서로 다시 읽어 계산한다(숫자를 하드코딩하지 않는다)."""
-    client, t = make_client({"loki/api/v1/query_range": (200, load_fixture("logql-streams-careerhub-prod.json"))})
+    client, t = make_client({"loki/api/v1/query_range": (200, load_response("logql-streams-careerhub-prod.json"))})
     ev, _, kind = cli.logql_run(client, cli.LogqlArgs(query='{namespace="careerhub-prod"}', limit=5), at=10000.0)
     lines = ev.value.lines
     assert kind == "logql" and lines[0].startswith("공통 레이블 {") and "namespace=careerhub-prod" in lines[0]
-    parsed = cli.parse_logs(cli.check_json(load_fixture("logql-streams-careerhub-prod.json"), "logs"))
+    parsed = cli.parse_logs(cli.check_json(load_response("logql-streams-careerhub-prod.json"), "logs"))
     expected = sum(len(st.values) for st in parsed.streams)
-    assert len(parsed.streams) == 2 and expected >= 3 and len(lines) == 1 + expected
+    assert len(parsed.streams) == 1 and expected == 5 and len(lines) == 1 + expected   # 재녹화: limit=5 가 한 스트림(mongodb)에서 찼다
     assert re.match(r"^\d\d-\d\d \d\d:\d\d:\d\dZ ", lines[1])   # 시각은 UTC 이고 Z 로 표기한다(마찰 2)
     # backward: 최신이 먼저
     assert lines[1][:14] >= lines[-1][:14]
@@ -98,14 +98,14 @@ def test_logql_streams(make_client: ClientFactory) -> None:
 
 def test_logql_matrix(make_client: ClientFactory) -> None:
     """메트릭형 LogQL(count_over_time) — resultType=matrix 를 알아보고 시계열 요약(`n=… detected_level=…`)으로 낸다."""
-    client, _ = make_client({"loki/api/v1/query_range": (200, load_fixture("logql-matrix-count-over-time.json"))})
+    client, _ = make_client({"loki/api/v1/query_range": (200, load_response("logql-matrix-count-over-time.json"))})
     ev, _, _ = cli.logql_run(client, cli.LogqlArgs(query="sum by (detected_level) (count_over_time({namespace=\"careerhub-prod\"}[5m]))"))
     assert all(l.startswith("n=") and "detected_level=" in l for l in ev.value.lines)
 
 
 def test_logql_width_clip(make_client: ClientFactory) -> None:
     """--width — 로그 본문이 지정 폭에서 잘린다. 긴 줄이 컨텍스트를 먹지 않게 하는 절제다."""
-    client, _ = make_client({"loki/api/v1/query_range": (200, load_fixture("logql-streams-careerhub-prod.json"))})
+    client, _ = make_client({"loki/api/v1/query_range": (200, load_response("logql-streams-careerhub-prod.json"))})
     ev, _, _ = cli.logql_run(client, cli.LogqlArgs(query="{a=\"b\"}", width=60))
     assert all(len(l.split("  ", 2)[-1]) <= 60 for l in ev.value.lines[1:])
 
@@ -114,8 +114,8 @@ def test_logql_width_clip(make_client: ClientFactory) -> None:
 
 def test_traceql_search_then_trace(make_client: ClientFactory) -> None:
     """AC 3 의 셋째 실측 — search 결과 첫 줄에서 trace ID 를 뽑아 trace 명령에 넣는 흐름. search URL 에 limit·창이 있고, trace URL 이 api/traces/<id> 로 끝나며, 요약(총시간·루트·오류 수)에 물리 정보가 없다."""
-    client, t = make_client({"api/search": (200, load_fixture("traceql-search.json")),
-                             "api/traces/": (200, load_fixture("traceql-trace.json"))})
+    client, t = make_client({"api/search": (200, load_response("traceql-search.json")),
+                             "api/traces/": (200, load_response("traceql-trace.json", "api/traces/"))})
     ev, _, kind = cli.traceql_run(client, cli.TraceqlArgs(cmd="search", since="24h", limit=3), at=10000.0)
     assert kind == "traceql-search" and len(ev.value.lines) == 3
     trace_id = ev.value.lines[0].split()[0]
@@ -125,7 +125,7 @@ def test_traceql_search_then_trace(make_client: ClientFactory) -> None:
     ev2, _, kind2 = cli.traceql_run(client, cli.TraceqlArgs(cmd="trace", arg=trace_id))
     lines = ev2.value.lines
     assert kind2 == "traceql-trace" and lines[0].startswith("트레이스 %s  총 " % trace_id)
-    assert lines[1].startswith("루트: posting-service /") and lines[3] == "오류 span: 0"
+    assert lines[1].startswith("루트: ngf:careerhub-prod:careerhub-nginx-gateway /") and lines[3] == "오류 span: 0"   # 재녹화(2026-09-22 10:44Z): 게이트웨이 → api-composer → 세 서비스, span 8
     assert t.calls[1].url.endswith("api/traces/" + trace_id)
     _no_physical("\n".join(lines))
 
@@ -139,7 +139,7 @@ def test_traceql_search_empty_hints_wider_window(make_client: ClientFactory) -> 
 
 def test_traceql_tags(make_client: ClientFactory) -> None:
     """tags — scope 별로 `[resource] a, b, c` 한 줄. 탐색용 명령의 형식."""
-    client, _ = make_client({"api/v2/search/tags": (200, load_fixture("traceql-tags.json"))})
+    client, _ = make_client({"api/v2/search/tags": (200, load_response("traceql-tags.json"))})
     ev, _, _ = cli.traceql_run(client, cli.TraceqlArgs(cmd="tags"))
     assert any(l.startswith("[resource] ") and "service.name" in l for l in ev.value.lines)
 
@@ -154,8 +154,8 @@ def test_traceql_trace_requires_id(make_client: ClientFactory) -> None:
 def test_parse_spans_error_detection() -> None:
     """span 파서와 오류 표시 — 녹화 트레이스가 Span 으로 옮겨지고(service·오류 아님), 상태를 STATUS_CODE_ERROR 로 바꾸면 `오류 span: 1` 과 ✗ 줄이 나온다.
     fixture dict 를 고치지 않고 dataclasses.replace 로 바꾼다 — Any 없이 쓰는 방식."""
-    spans = cli.parse_spans(cli.check_json(load_fixture("traceql-trace.json"), "traces"))
-    assert len(spans) == 1 and spans[0].service == "posting-service" and not spans[0].is_error
+    spans = cli.parse_spans(cli.check_json(load_response("traceql-trace.json", "api/traces/"), "traces"))
+    assert len(spans) == 8 and spans[0].service == "posting-service" and not spans[0].is_error   # 재녹화: 8 span — 첫 span 은 posting-service
     errored = [dataclasses.replace(spans[0], status_code="STATUS_CODE_ERROR")]
     lines = cli.trace_lines("abc", errored, top=5)
     assert lines[3] == "오류 span: 1" and lines[4].startswith("  ✗ posting-service /")
@@ -164,7 +164,7 @@ def test_parse_spans_error_detection() -> None:
 def test_trace_error_span_shows_status_message() -> None:
     """재시험 보고(#93 코멘트)의 새 마찰 2 — ✗ 줄 뒤가 비어 원인을 보려면 jq 왕복이 필요했다. 녹화한 실제 오류 트레이스(posting-service
     GetAllHiring, mongodb EOF)에서 status.message 의 첫 줄(탭 뒤 StackTrace 제외)이 ✗ 줄에 실린다. 원인이 여러 번 반복된 긴 문구라 잘리되 EOF 원인은 남는다."""
-    spans = cli.parse_spans(cli.check_json(load_fixture("traceql-trace-error.json"), "traces"))
+    spans = cli.parse_spans(cli.check_json(load_response("traceql-trace-error.json", "api/traces/"), "traces"))
     assert len(spans) == 1 and spans[0].is_error and spans[0].status_message.lstrip().startswith("connection(")
     lines = cli.trace_lines("d47871cc20408ed84a7506ccf306200d", spans, top=5)
     assert lines[3] == "오류 span: 1"
@@ -176,7 +176,7 @@ def test_trace_error_span_shows_status_message() -> None:
 def test_trace_error_reason_falls_back_to_attrs() -> None:
     """status.message 가 비면 예전처럼 exception.message → error.message → http.status_code 순으로 속성에서 찾는다.
     스택만 있고 첫 줄이 비는 message 도 빈 것으로 본다."""
-    base = cli.parse_spans(cli.check_json(load_fixture("traceql-trace.json"), "traces"))[0]
+    base = cli.parse_spans(cli.check_json(load_response("traceql-trace.json", "api/traces/"), "traces"))[0]
     s = dataclasses.replace(base, status_code="STATUS_CODE_ERROR", status_message="", attrs={**base.attrs, "exception.message": "boom"})
     assert cli.error_reason(s) == "boom"
     s = dataclasses.replace(s, status_message="\n\tStackTrace: a.go:1")

@@ -1,0 +1,354 @@
+"""tests/record.py — fixture 녹화기 · fixture 형식 · 응답 고르기.
+
+`FakeTransport`(conftest) 의 반대 방향이다: 진짜 `_urllib_transport` 를 감싸 **나간 호출**(백엔드 논리 이름 · 네이티브 경로 ·
+query string · 기준 시각 `at`)과 **받은 응답**을 한 파일에 떨어뜨린다. `Client(transport=Recorder(...))` 로 끼운다 —
+어떤 실행(`*_run` · 환원 연산)에든 끼울 수 있는 transport 이고, 코어는 고치지 않는다.
+
+fixture 형식 — JSON 봉투. `.json` 확장자를 유지해 편집기·린터가 깨진 파일로 보지 않고, 요청·응답을 각각 기계로 꺼낸다:
+  {
+   "format": "obs-fixture/1",
+   "recorded": "tests/record.py" | "manual",        # manual 이면 "reason" 이 재현 불가 이유를 말한다. 표시 없는 파일은 전부 녹화기가 만든 것
+   "calls": [                                        # 한 실행의 호출 전부 — 순서대로. traces 는 api/search → api/traces/<id> 둘
+    {"request":  {"at": <unix 초>, "at_rfc3339": "…Z", "backend": "metrics", "path": "api/v1/query",
+                  "query_string": "query=up&time=…", "params": {"query": "up", "time": "…"}},
+     "response": {"status": 200, "body": {…}}}
+   ]
+  }
+- `at` 은 명시 필드다 — URL 의 time=/start= 에서 역산하지 않는다(백엔드마다 단위가 다르다: PromQL 초 · LogQL 나노초 · TraceQL 초).
+  래퍼는 URL 에서 `at` 을 알 수 없으므로, 녹화 실행이 `at = now()` 를 한 번 읽어 `*_run(…, at=at)` 과 래퍼에 같은 값을 준다.
+- 물리(호스트 · 프록시 접두 · 데이터소스 uid · 토큰)는 실리지 않는다 — URL 은 `Config.proxy_url(backend, "")` 접두를 잘라
+  `Response.path` 와 같은 층(네이티브 경로 · query string)만 남기고, 헤더(Authorization)는 기록하지 않는다. 접두를 모르는 URL 은 거부한다.
+
+실환경 재녹화 — 토큰(OBS_GRAFANA_TOKEN)이 있어야 돈다. `test_` 접두가 없어 pytest 가 수집하지 않는다:
+  python -m tests.record --all                                  # RECIPES 전부 — 한 실행의 모든 fixture 가 같은 at
+  python -m tests.record promql-instant-up.json traceql-trace.json
+  python -m tests.record --list
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import urllib.parse
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Callable, Mapping, Sequence
+
+from obs.adapters import cli
+from obs.core import (
+    JSON, LOGICAL_BACKENDS, Client, Config, ObsError, Transport, fmt_rfc3339, json_int, json_list, json_obj, json_str, load_config,
+    now, to_dict, token_from_env,
+)
+from obs.core import _urllib_transport  # pyright: ignore[reportPrivateUsage] — 녹화기는 진짜 GET 을 감싼다(코어를 고치지 않는다 — ops-workflow#103)
+
+ROOT: Path = Path(__file__).resolve().parents[1]
+FIXTURES: Path = ROOT / "fixtures"
+
+FORMAT: str = "obs-fixture/1"
+RECORDED_BY: str = "tests/record.py"   # 녹화기가 만든 파일의 표시
+RECORDED_MANUAL: str = "manual"        # 재현할 수 없는 조건의 손 기록 — reason 필수
+
+QueryParams = dict[str, str | list[str]]
+"""query string 을 풀어 놓은 것 — 같은 키가 여러 번이면 목록(match[] 등)."""
+
+
+# ── 형식 — dataclass 로 다루고 JSON 으로 쓴다 ──────────────────────────────────────
+
+@dataclass(frozen=True)
+class Request:
+    """나간 호출 — 물리 없이. `at` 은 이 호출을 낳은 기준 시각(manual 기록에서 불명이면 None)."""
+    at: float | None
+    at_rfc3339: str | None
+    backend: str        # 논리 이름 — metrics · logs · traces
+    path: str           # 네이티브 경로(api/v1/query 등) — 호스트 · 프록시 접두 · uid 없음
+    query_string: str   # 나간 그대로(URL 인코딩된 채)
+    params: QueryParams
+
+
+@dataclass(frozen=True)
+class Reply:
+    status: int
+    body: JSON          # 파싱된 JSON — JSON 이 아니면 str (Client.get 과 같다)
+
+
+@dataclass(frozen=True)
+class RecordedCall:
+    request: Request
+    response: Reply
+
+
+@dataclass(frozen=True)
+class Fixture:
+    format: str
+    recorded: str            # RECORDED_BY · RECORDED_MANUAL
+    reason: str | None       # manual 일 때 재현 불가 이유
+    calls: list[RecordedCall]
+
+    @property
+    def manual(self) -> bool:
+        return self.recorded == RECORDED_MANUAL
+
+
+def parse_params(query_string: str) -> QueryParams:
+    out: QueryParams = {}
+    for k, v in urllib.parse.parse_qsl(query_string, keep_blank_values=True):
+        prev = out.get(k)
+        if prev is None:
+            out[k] = v
+        elif isinstance(prev, list):
+            prev.append(v)
+        else:
+            out[k] = [prev, v]
+    return out
+
+
+def strip_physical(url: str, config: Config, at: float | None) -> Request:
+    """물리 URL → Request. `Config.proxy_url(backend, "")` 접두(호스트 · 프록시 접두 · uid)를 잘라 논리 이름을 알아내고
+    네이티브 경로 · query string 만 남긴다. 어느 접두에도 맞지 않으면 기록을 거부한다 — 호스트를 fixture 에 싣지 않는다."""
+    for backend in LOGICAL_BACKENDS:
+        prefix = config.proxy_url(backend, "")
+        if url.startswith(prefix):
+            path, _, qs = url[len(prefix):].partition("?")
+            return Request(at=at, at_rfc3339=fmt_rfc3339(at) if at is not None else None, backend=backend,
+                           path=path, query_string=qs, params=parse_params(qs))
+    raise ValueError("물리 접두를 모르는 URL — 기록하지 않는다(호스트 · uid 를 fixture 에 싣지 않는다)")
+
+
+def decode_body(raw: bytes) -> JSON:
+    """Client.get 과 같은 규칙 — 빈 본문은 {}, JSON 이 아니면 str."""
+    text = raw.decode("utf-8", "replace")
+    if not text:
+        return {}
+    try:
+        parsed: JSON = json.loads(text)
+    except ValueError:
+        return text
+    return parsed
+
+
+def write_fixture(path: Path, calls: Sequence[RecordedCall], recorded: str = RECORDED_BY, reason: str | None = None) -> Path:
+    """봉투를 쓴다. manual 이면 reason 이 필수 — 표시 없는 파일은 전부 녹화기가 만든 것이어야 한다."""
+    if not calls:
+        raise ValueError("기록된 호출이 없다 — 쓰지 않는다")
+    if recorded == RECORDED_MANUAL and not reason:
+        raise ValueError("manual 기록에는 재현 불가 이유(reason)가 필요하다")
+    envelope: dict[str, JSON] = {"format": FORMAT, "recorded": recorded}
+    if reason:
+        envelope["reason"] = reason
+    envelope["calls"] = to_dict(list(calls))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(envelope, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    return path
+
+
+def parse_fixture(data: JSON, where: str) -> Fixture:
+    """외부 경계(파일의 JSON) → Fixture. 형식이 아니면 ValueError — 옛 형식(응답 본문만)은 여기서 걸린다."""
+    o = json_obj(data)
+    if json_str(o.get("format")) != FORMAT:
+        raise ValueError("%s: fixture 형식(%s)이 아니다 — tests/record.py 로 녹화한다" % (where, FORMAT))
+    calls: list[RecordedCall] = []
+    for item in json_list(o.get("calls")):
+        c = json_obj(item)
+        rq, rs = json_obj(c.get("request")), json_obj(c.get("response"))
+        at_raw = rq.get("at")
+        at = float(at_raw) if isinstance(at_raw, (int, float)) and not isinstance(at_raw, bool) else None
+        params: QueryParams = {}
+        for k, v in json_obj(rq.get("params")).items():
+            params[k] = [json_str(x) for x in v] if isinstance(v, list) else json_str(v)
+        calls.append(RecordedCall(
+            request=Request(at=at, at_rfc3339=json_str(rq.get("at_rfc3339")) or None, backend=json_str(rq.get("backend")),
+                            path=json_str(rq.get("path")), query_string=json_str(rq.get("query_string")), params=params),
+            response=Reply(status=json_int(rs.get("status")), body=rs.get("body")),
+        ))
+    reason = o.get("reason")
+    return Fixture(format=FORMAT, recorded=json_str(o.get("recorded")), reason=json_str(reason) if reason is not None else None, calls=calls)
+
+
+def read_fixture(path: Path) -> Fixture:
+    return parse_fixture(json.loads(path.read_text(encoding="utf-8")), str(path))
+
+
+def response_of(fx: Fixture, path: str | None, where: str) -> JSON:
+    """응답만 — 호출이 하나면 그것, 여럿이면 `path`(네이티브 경로 조각)로 하나를 고른다. 못 고르면 ValueError(있는 경로를 말한다)."""
+    calls = fx.calls if path is None else [c for c in fx.calls if path in c.request.path]
+    if len(calls) != 1:
+        raise ValueError("%s: 호출 %d개 — path=%r 로 하나를 고를 수 없다. 있는 경로: %s"
+                         % (where, len(calls), path, [c.request.path for c in fx.calls]))
+    return calls[0].response.body
+
+
+# ── 녹화기 — Client.transport 래퍼 ───────────────────────────────────────────────
+
+@dataclass
+class Recorder:
+    """(url, headers, timeout) → inner 로 보내고, 나간 호출과 받은 응답을 `calls` 에 순서대로 쌓는다. 헤더는 기록하지 않는다."""
+    inner: Transport
+    config: Config
+    at: float
+    calls: list[RecordedCall] = field(default_factory=list[RecordedCall])
+
+    def __call__(self, url: str, headers: Mapping[str, str], timeout: float) -> tuple[int, bytes]:
+        status, raw = self.inner(url, headers, timeout)
+        self.calls.append(RecordedCall(request=strip_physical(url, self.config, self.at), response=Reply(status=status, body=decode_body(raw))))
+        return status, raw
+
+    def save(self, path: Path) -> Path:
+        return write_fixture(path, self.calls)
+
+
+def real_client(at: float) -> tuple[Client, Recorder]:
+    """실환경 Client — 토큰은 env 에서, transport 는 진짜 urllib 을 감싼 Recorder."""
+    token = token_from_env()
+    if not token:
+        raise ObsError("OBS_GRAFANA_TOKEN 이 비어 있다 — 녹화는 실환경 토큰이 필요하다(.claude/settings.local.json 의 env)")
+    config = load_config()
+    rec = Recorder(inner=_urllib_transport, config=config, at=at)
+    return Client(config=config, token=token, transport=rec), rec
+
+
+Recipe = Callable[[Client, float], None]
+"""한 fixture 를 낳는 실행 — Client 와 기준 시각 `at` 을 받아 `*_run(…, at=at)` 을 부른다. 호출이 여럿이어도 된다."""
+
+
+class Unreproducible(Exception):
+    """재현할 수 없는 조건 — 이 fixture 는 recorded: manual 예외 후보다."""
+
+
+def record(name: str, recipe: Recipe, at: float, out: Path = FIXTURES) -> list[Path]:
+    """파일 이름 · 호출(전부) · 응답이 한 번에 — recipe 를 Recorder 가 끼워진 Client 로 돌리고 `out/name` 에 쓴다.
+    같은 실행의 호출 하나를 다른 이름으로도 쓰는 파생(DERIVED)이 있으면 그 파일도 쓴다. 쓴 경로 전부를 돌려준다."""
+    client, rec = real_client(at)
+    recipe(client, at)
+    written = [rec.save(out / name)]
+    for derived, (source, index) in DERIVED.items():
+        if source == name:
+            written.append(write_fixture(out / derived, [rec.calls[index]]))
+    return written
+
+
+# ── 레시피 — 기존 fixture 13개. 테스트가 보내는 것과 같은 인자로 부른다 ────────────────
+
+CPU_QUERY: str = 'sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="careerhub-prod"}[5m]))'   # tests/test_metrics.py 와 같다
+EMPTY_QUERY: str = CPU_QUERY.replace('namespace="careerhub-prod"', 'namespace="no-such-namespace"')          # 없는 namespace → 빈 응답
+LOG_SELECTOR: str = '{namespace="careerhub-prod"}'
+LOG_METRIC_QUERY: str = "sum by (detected_level) (count_over_time(%s[5m]))" % LOG_SELECTOR
+TRACE_SEARCH: cli.TraceqlArgs = cli.TraceqlArgs(cmd="search", since="24h", limit=3)
+
+
+def _promql(a: cli.PromqlArgs) -> Recipe:
+    def run(client: Client, at: float) -> None:
+        cli.promql_run(client, a, at=at)
+    return run
+
+
+def _metrics(a: cli.MetricsArgs) -> Recipe:
+    def run(client: Client, at: float) -> None:
+        cli.metrics_run(client, a, at=at)
+    return run
+
+
+def _logql(a: cli.LogqlArgs) -> Recipe:
+    def run(client: Client, at: float) -> None:
+        cli.logql_run(client, a, at=at)
+    return run
+
+
+def _traceql(a: cli.TraceqlArgs) -> Recipe:
+    def run(client: Client, at: float) -> None:
+        cli.traceql_run(client, a, at=at)
+    return run
+
+
+def _first_trace_id(client: Client, search: cli.TraceqlArgs, at: float) -> str:
+    _, body, _ = cli.traceql_run(client, search, at=at)
+    hits = cli.parse_search(cli.check_json(body, "traces"))
+    if not hits:
+        raise Unreproducible("search(%s, since=%s) 에 trace 가 없다 — 창을 넓히거나 recorded: manual 로" % (search.q or "", search.since))
+    return hits[0].trace_id
+
+
+def _search_then_trace(client: Client, at: float) -> None:
+    """한 실행에 호출 둘 — api/search 로 trace id 를 얻고 api/traces/<id> 를 다시 부른다. 둘 다 순서대로 기록된다."""
+    trace_id = _first_trace_id(client, TRACE_SEARCH, at)
+    cli.traceql_run(client, cli.TraceqlArgs(cmd="trace", arg=trace_id), at=at)
+
+
+def _error_trace(client: Client, at: float) -> None:
+    """오류 trace 는 주문할 수 없다 — Tempo 검색 상한(168h) 안에서 `{ status = error }` 를 찾아 없으면 Unreproducible."""
+    trace_id = _first_trace_id(client, cli.TraceqlArgs(cmd="search", q="{ status = error }", since="168h", limit=1), at)
+    cli.traceql_run(client, cli.TraceqlArgs(cmd="trace", arg=trace_id), at=at)
+
+
+RECIPES: dict[str, Recipe] = {
+    # 파일 이름 → 그 파일을 낳는 실행. traceql-search.json 은 DERIVED — traceql-trace.json 실행의 첫 호출과 같은 것이다
+    "promql-instant-up.json": _promql(cli.PromqlArgs(query="up")),
+    "promql-range-sum-up.json": _promql(cli.PromqlArgs(query="sum(up)", range_="30m")),
+    "promql-instant-summarize-cpu-by-pod.json": _metrics(cli.MetricsArgs(cmd="summarize", query=CPU_QUERY)),
+    "promql-instant-compare-cpu-by-pod-1d.json": _metrics(cli.MetricsArgs(cmd="compare", query=CPU_QUERY, baseline="1d")),
+    "promql-instant-compare-cpu-by-pod-no-baseline.json": _metrics(cli.MetricsArgs(cmd="compare", query=CPU_QUERY, baseline="60d")),   # 보존 밖 offset
+    "promql-instant-empty.json": _metrics(cli.MetricsArgs(cmd="summarize", query=EMPTY_QUERY)),
+    "promql-instant-topk-memory-by-pod.json": _metrics(cli.MetricsArgs(cmd="top", query="container_memory_working_set_bytes", by="pod", k=10)),
+    "logql-matrix-count-over-time.json": _logql(cli.LogqlArgs(query=LOG_METRIC_QUERY)),
+    "logql-streams-careerhub-prod.json": _logql(cli.LogqlArgs(query=LOG_SELECTOR, limit=5)),
+    "traceql-trace.json": _search_then_trace,
+    "traceql-tags.json": _traceql(cli.TraceqlArgs(cmd="tags")),
+    "traceql-trace-error.json": _error_trace,
+}
+
+
+DERIVED: dict[str, tuple[str, int]] = {
+    # 파생 파일 → (원 실행의 파일, 호출 인덱스). 같은 실행의 호출을 그 이름으로도 쓴다 — 별도 실행이면 Tempo 가 limit 안의
+    # hit 을 호출마다 다르게 고를 수 있어 search 의 첫 hit 과 trace 의 id 가 어긋난다. 같은 실행에서 나오면 정합이 구조로 선다.
+    "traceql-search.json": ("traceql-trace.json", 0),
+}
+
+
+def fixture_names() -> list[str]:
+    """녹화기가 만드는 파일 전부 — 실행의 파일과 파생 파일."""
+    return sorted([*RECIPES, *DERIVED])
+
+
+def _clip(text: str, width: int = 90) -> str:
+    return text if len(text) <= width else text[: width - 1] + "…"
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="python -m tests.record", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("names", nargs="*", help="fixture 파일 이름(RECIPES 의 키). 없으면 --all")
+    ap.add_argument("--all", action="store_true", help="RECIPES 전부")
+    ap.add_argument("--list", action="store_true", help="레시피 이름만 보이고 끝")
+    ap.add_argument("--out", type=Path, default=FIXTURES, help="쓸 디렉터리. 기본 fixtures/")
+    ap.add_argument("--at", type=float, default=None, help="기준 시각(unix 초). 기본 now — 한 실행의 모든 fixture 가 같은 at 을 받는다")
+    a = ap.parse_args(argv)
+    if a.list:
+        print("\n".join("%s%s" % (n, "  (← %s 실행의 호출 %d)" % DERIVED[n] if n in DERIVED else "") for n in fixture_names()))
+        return 0
+    names: list[str] = fixture_names() if a.all or not a.names else list(a.names)
+    unknown = [n for n in names if n not in RECIPES and n not in DERIVED]
+    if unknown:
+        print("모르는 fixture: %s — --list 로 이름을 본다" % ", ".join(unknown), file=sys.stderr)
+        return 2
+    runs: list[str] = []
+    for n in names:
+        source = DERIVED[n][0] if n in DERIVED else n
+        if source not in runs:
+            runs.append(source)
+    at: float = now() if a.at is None else a.at
+    out: Path = a.out
+    print("at=%.3f (%s) → %s" % (at, fmt_rfc3339(at), out))
+    failed = 0
+    for name in runs:
+        try:
+            paths = record(name, RECIPES[name], at, out)
+        except (ObsError, Unreproducible, ValueError) as e:
+            print("  ✗ %s — %s" % (name, e))
+            failed += 1
+            continue
+        for path in paths:
+            for c in read_fixture(path).calls:
+                print("  ✓ %s — %s %s?%s [%d]" % (path.name, c.request.backend, c.request.path, _clip(c.request.query_string), c.response.status))
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,32 +1,56 @@
 {
- "traces": [
+ "format": "obs-fixture/1",
+ "recorded": "tests/record.py",
+ "calls": [
   {
-   "traceID": "592568ed3ac243ef13c1740d1e6ad00",
-   "rootServiceName": "review-service",
-   "rootTraceName": "careerhub.review_service.crawler_grpc.ReviewGrpc/finishCrawlingTask",
-   "startTimeUnixNano": "1788809943986913766",
-   "durationMs": 1
-  },
-  {
-   "traceID": "2f48525fd0d5a83ecbfaea2977ab7fb",
-   "rootServiceName": "posting-service",
-   "rootTraceName": "careerhub.posting_service.provider_grpc.ProviderGrpc/RegisterJobPostingInfo",
-   "startTimeUnixNano": "1788808544796985296",
-   "durationMs": 5
-  },
-  {
-   "traceID": "3cdcda0f8fef83a4ba5c374a8ae15bd",
-   "rootServiceName": "posting-service",
-   "rootTraceName": "careerhub.posting_service.provider_grpc.ProviderGrpc/IsCompanyRegistered",
-   "startTimeUnixNano": "1788808400665396184",
-   "durationMs": 2
+   "request": {
+    "at": 1790073894.461181,
+    "at_rfc3339": "2026-09-22T10:44:54Z",
+    "backend": "traces",
+    "path": "api/search",
+    "query_string": "start=1789987494&end=1790073894&limit=3",
+    "params": {
+     "start": "1789987494",
+     "end": "1790073894",
+     "limit": "3"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "traces": [
+      {
+       "traceID": "5218697c3912d4fe404780fba90d7604",
+       "rootServiceName": "ngf:careerhub-prod:careerhub-nginx-gateway",
+       "rootTraceName": "/api/",
+       "startTimeUnixNano": "1790073655078000000",
+       "durationMs": 105
+      },
+      {
+       "traceID": "50f6c33fcec93275c20de3355df96d64",
+       "rootServiceName": "ngf:careerhub-prod:careerhub-nginx-gateway",
+       "rootTraceName": "/api/",
+       "startTimeUnixNano": "1790073653988000000",
+       "durationMs": 98
+      },
+      {
+       "traceID": "d09d1f3a0ec6cf7a78723a96f1e6d2a",
+       "rootServiceName": "ngf:careerhub-prod:careerhub-nginx-gateway",
+       "rootTraceName": "/",
+       "startTimeUnixNano": "1790073651045000000",
+       "durationMs": 29
+      }
+     ],
+     "metrics": {
+      "inspectedTraces": 5,
+      "inspectedBytes": "21485",
+      "totalBlocks": 1,
+      "completedJobs": 3,
+      "totalJobs": 4,
+      "totalBlockBytes": "81668"
+     }
+    }
+   }
   }
- ],
- "metrics": {
-  "inspectedBytes": "32639",
-  "totalBlocks": 1,
-  "completedJobs": 4,
-  "totalJobs": 4,
-  "totalBlockBytes": "82270"
- }
+ ]
 }

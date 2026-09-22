@@ -1,68 +1,114 @@
 {
- "scopes": [
+ "format": "obs-fixture/1",
+ "recorded": "tests/record.py",
+ "calls": [
   {
-   "name": "span",
-   "tags": [
-    "rpc.method",
-    "rpc.response.status_code",
-    "rpc.system.name",
-    "server.port"
-   ]
-  },
-  {
-   "name": "resource",
-   "tags": [
-    "deployment.environment",
-    "k8s.container.name",
-    "k8s.deployment.name",
-    "k8s.namespace.name",
-    "k8s.pod.name",
-    "process.command_args",
-    "process.executable.name",
-    "process.executable.path",
-    "process.owner",
-    "process.pid",
-    "process.runtime.description",
-    "process.runtime.name",
-    "process.runtime.version",
-    "service.name",
-    "telemetry.sdk.language",
-    "telemetry.sdk.name",
-    "telemetry.sdk.version"
-   ]
-  },
-  {
-   "name": "intrinsic",
-   "tags": [
-    "duration",
-    "event:name",
-    "event:timeSinceStart",
-    "instrumentation:name",
-    "instrumentation:version",
-    "kind",
-    "link:spanID",
-    "link:traceID",
-    "name",
-    "rootName",
-    "rootServiceName",
-    "span:duration",
-    "span:id",
-    "span:kind",
-    "span:name",
-    "span:parentID",
-    "span:status",
-    "span:statusMessage",
-    "status",
-    "statusMessage",
-    "trace:duration",
-    "trace:id",
-    "trace:rootName",
-    "trace:rootService",
-    "traceDuration"
-   ]
+   "request": {
+    "at": 1790073774.708153,
+    "at_rfc3339": "2026-09-22T10:42:54Z",
+    "backend": "traces",
+    "path": "api/v2/search/tags",
+    "query_string": "start=1790070174&end=1790073774",
+    "params": {
+     "start": "1790070174",
+     "end": "1790073774"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "scopes": [
+      {
+       "name": "intrinsic",
+       "tags": [
+        "duration",
+        "event:name",
+        "event:timeSinceStart",
+        "instrumentation:name",
+        "instrumentation:version",
+        "kind",
+        "link:spanID",
+        "link:traceID",
+        "name",
+        "rootName",
+        "rootServiceName",
+        "span:duration",
+        "span:id",
+        "span:kind",
+        "span:name",
+        "span:parentID",
+        "span:status",
+        "span:statusMessage",
+        "status",
+        "statusMessage",
+        "trace:duration",
+        "trace:id",
+        "trace:rootName",
+        "trace:rootService",
+        "traceDuration"
+       ]
+      },
+      {
+       "name": "resource",
+       "tags": [
+        "deployment.environment",
+        "k8s.container.name",
+        "k8s.deployment.name",
+        "k8s.namespace.name",
+        "k8s.pod.name",
+        "process.command_args",
+        "process.executable.name",
+        "process.executable.path",
+        "process.owner",
+        "process.pid",
+        "process.runtime.description",
+        "process.runtime.name",
+        "process.runtime.version",
+        "service.name",
+        "telemetry.sdk.language",
+        "telemetry.sdk.name",
+        "telemetry.sdk.version"
+       ]
+      },
+      {
+       "name": "span",
+       "tags": [
+        "client.address",
+        "http.flavor",
+        "http.method",
+        "http.request.body.size",
+        "http.request.method",
+        "http.request_content_length",
+        "http.response.body.size",
+        "http.response.status_code",
+        "http.response_content_length",
+        "http.route",
+        "http.scheme",
+        "http.status_code",
+        "http.target",
+        "http.user_agent",
+        "net.host.name",
+        "net.sock.peer.addr",
+        "net.sock.peer.port",
+        "network.peer.address",
+        "network.peer.port",
+        "network.protocol.version",
+        "rpc.method",
+        "rpc.response.status_code",
+        "rpc.system.name",
+        "server.address",
+        "server.port",
+        "url.path",
+        "url.scheme",
+        "user_agent.original"
+       ]
+      }
+     ],
+     "metrics": {
+      "inspectedBytes": "161362"
+     }
+    }
+   }
   }
- ],
- "metrics": {
-  "inspectedBytes": "25626"
- }
+ ]
 }
