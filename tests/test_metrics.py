@@ -66,8 +66,8 @@ def test_baseline_offset_rules() -> None:
     w = Window.last("1h", at=AT)
     assert metrics.DEFAULT_BASELINE == "1d"
     assert metrics.baseline_offset(w) == (w.with_baseline("1d"), "86400s")
-    assert metrics.baseline_offset(w.with_baseline("prev"))[1] == "3600s"
-    assert metrics.baseline_offset(w.with_baseline("1w"))[1] == "604800s"
+    assert metrics.baseline_offset(w.with_baseline("prev")) == (w.with_baseline("prev"), "3600s")
+    assert metrics.baseline_offset(w.with_baseline("1w")) == (w.with_baseline("1w"), "604800s")
     for bad in (Window(0.0, 3600.0, baseline=Window(0.0, 1800.0)), Window(0.0, 3600.0, baseline=Window(100.0, 3700.0))):
         with pytest.raises(ObsError):
             metrics.baseline_offset(bad)
@@ -182,10 +182,14 @@ def test_compare_missing_series_and_zero_do_not_divide(make_client: ClientFactor
     ev, _ = metrics.compare(client, "q", Window.last("1h", at=AT).with_baseline("1d"))
     by = {d.labels["pod"]: d for d in ev.value.deltas}
     assert [d.labels["pod"] for d in ev.value.deltas] == ["d", "a", "b", "c"]
-    assert by["a"].base == 0 and by["a"].ratio is None and by["a"].delta == pytest.approx(0.4) and by["a"].base_is_zero
-    assert by["b"].base is None and by["b"].ratio is None and by["b"].delta is None
-    assert by["c"].now is None and by["c"].base == 3
-    assert by["d"].ratio == pytest.approx(3.9) and by["d"].delta == pytest.approx(2.9)
+
+    def fields(d: metrics.Delta) -> tuple[float | None, float | None, float | None, float | None, bool]:
+        return d.now, d.base, d.ratio, d.delta, d.base_is_zero
+
+    assert fields(by["a"]) == (0.4, 0.0, None, pytest.approx(0.4), True)     # 기준선 0 — 비율 없음, Δ 는 남는다
+    assert fields(by["b"]) == (1.0, None, None, None, False)                 # 기준선 없음
+    assert fields(by["c"]) == (None, 3.0, None, None, False)                 # 지금 없음
+    assert fields(by["d"]) == (3.9, 1.0, pytest.approx(3.9), pytest.approx(2.9), False)   # 보통 — 비율·Δ
     assert not ev.value.now_empty and not ev.value.baseline_empty
     lines = cli.compare_lines(ev.value, ev.window or Window(0, 0))
     assert lines[1].startswith("×3.9  Δ+2.9  now p95=3.9  base p95=1  {pod=d}")
