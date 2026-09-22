@@ -108,7 +108,9 @@ def test_summarize_fixture_one_query(make_client: ClientFactory) -> None:
     assert isinstance(raw, dict) and raw.get("status") == "success"
     json.loads(cli.to_json(ev))   # 환원물이 직렬화된다(MCP outputSchema 대비)
     lines = cli.summary_lines(ev.value, ev.window or Window(0, 0))
-    assert len(lines) == 20 and all(re.match(r"^n=60  min=\S+  p50=\S+  p95=\S+  max=\S+  last=\S+  slope=[+-]\S+/s  \{pod=", l) for l in lines)
+    assert len(lines) == 21 and lines[0].startswith("창 ") and "step=60s" in lines[0]   # 헤더 — 언제 · 어떤 해상도인가
+    assert re.match(r"^창 \d\d-\d\d \d\d:\d\d:\d\dZ ~ \d\d-\d\d \d\d:\d\d:\d\dZ  step=", lines[0])   # 스킬이 약속한 시각 표기
+    assert all(re.match(r"^n=60  min=\S+  p50=\S+  p95=\S+  max=\S+  last=\S+  slope=[+-]\S+/s  \{pod=", l) for l in lines[1:])
     _no_physical("\n".join(lines))
 
 
@@ -145,6 +147,7 @@ def test_compare_fixture_one_query_offset(make_client: ClientFactory) -> None:
     assert isinstance(raw, dict) and raw.get("status") == "success"
     lines = cli.compare_lines(v, ev.window)
     assert len(lines) == 21 and lines[0].startswith("지금 ") and "(offset 86400s)" in lines[0] and "step=60s" in lines[0]
+    assert "T" not in lines[0].split("(offset")[0]   # 창 표기는 fmt_ts(`MM-DD HH:MM:SSZ`) — RFC3339 는 summary.txt 머리에만
     assert all(re.match(r"^×[\d.e+-]+  Δ[+-]\S+  now p95=\S+  base p95=\S+  \{pod=", l) for l in lines[1:])
     _no_physical("\n".join(lines))
 
@@ -269,7 +272,7 @@ def test_metrics_run_dispatch(make_client: ClientFactory) -> None:
                              "offset": (200, load_fixture("promql-instant-compare-cpu-by-pod-1d.json")),
                              "topk": (200, load_fixture("promql-instant-topk-memory-by-pod.json"))})
     ev, _, kind = cli.metrics_run(client, cli.MetricsArgs(cmd="summarize", query=CPU_QUERY), at=AT)
-    assert kind == "promql-summarize" and isinstance(ev, Evidence) and isinstance(ev.value, Lines) and len(ev.value.lines) == 20
+    assert kind == "promql-summarize" and isinstance(ev, Evidence) and isinstance(ev.value, Lines) and len(ev.value.lines) == 21
     ev, _, kind = cli.metrics_run(client, cli.MetricsArgs(cmd="compare", query=CPU_QUERY, baseline="1d"), at=AT)
     assert kind == "promql-compare" and ev.window is not None and ev.window.baseline is not None and len(ev.value.lines) == 21
     ev, _, kind = cli.metrics_run(client, cli.MetricsArgs(cmd="top", query="container_memory_working_set_bytes", by="pod", k=10), at=AT)
@@ -281,7 +284,8 @@ def test_metrics_run_dispatch(make_client: ClientFactory) -> None:
 def test_promql_main_dispatches_subcommand(make_client: ClientFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
                                             capsys: pytest.CaptureFixture[str]) -> None:
     """AC 3 의 CLI 판 — `promql.py top '<q>' --by pod --k 10` 이 서브커맨드로 분기해 stdout 에 표 10줄 이하 + 호출 디렉터리 한 줄만 찍는다.
-    기존 형태(`promql.py 'up'`)는 그대로 즉시 조회다."""
+    summary.txt 머리에는 백엔드로 보낸(감싼) 질의와 평가 시각이 남는다 — stdout 에는 없다. 기존 형태(`promql.py 'up'`)는 그대로 즉시 조회다.
+    top 은 창이 없으므로 --since 를 받지 않는다(argparse 거부, exit 2)."""
     client, t = make_client({"api/v1/query?": (200, load_fixture("promql-instant-topk-memory-by-pod.json"))})
     monkeypatch.setattr(cli, "_client", lambda: client)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
@@ -289,8 +293,15 @@ def test_promql_main_dispatches_subcommand(make_client: ClientFactory, monkeypat
     out = capsys.readouterr().out.splitlines()
     assert len(out) <= 11 and out[-1].startswith("원본·요약: tmp/obs/") and out[-1].endswith("-promql-top/ (raw.json · summary.txt)")
     assert all(re.match(r"^\d+  \{pod=", l) for l in out[:-1]) and "topk%2810" in t.calls[0].url
+    assert not any("topk(" in l for l in out)
+    summary = (tmp_path / out[-1].split()[1].rstrip("/")).joinpath("summary.txt").read_text(encoding="utf-8").splitlines()
+    assert summary[0] == "# 질의  topk(10, sum by (pod) (container_memory_working_set_bytes))"
+    assert summary[1].startswith("# 창  ") and "start=" in summary[1] and summary[2] == "" and summary[3:] == out[:-1]
     cli.promql_main(["up"])
     assert "query=up" in t.calls[1].url and "topk" not in t.calls[1].url
+    with pytest.raises(SystemExit) as ei:
+        cli.promql_main(["top", "x", "--since", "1h"])
+    assert ei.value.code == 2 and len(t.calls) == 2
 
 
 @pytest.mark.parametrize("argv", [["--help"], ["compare", "--help"], ["top", "--help"], ["summarize", "--help"]])
@@ -302,10 +313,12 @@ def test_help_mentions_operations_without_physical(argv: list[str], capsys: pyte
     text = capsys.readouterr().out
     if argv == ["--help"]:
         assert "summarize" in text and "compare" in text and "top" in text
+    if argv[0] == "summarize":
+        assert "quantile(0.5·0.95)" in text and "deriv" in text and "--since" in text and "--step" in text
     if argv[0] == "compare":
-        assert "--baseline" in text and "prev" in text and "offset" in text
+        assert "--baseline" in text and "prev" in text and "offset" in text and "기준선 없음" in text
     if argv[0] == "top":
-        assert "--by" in text and "--k" in text
+        assert "--by" in text and "--k" in text and "--agg" in text and "namespace,pod" in text and "--since SINCE" not in text   # 옵션으로는 없다(설명 문장에만)
     for flag in ("--uid", "--url", "--token", "--host"):
         assert flag not in text
     _no_physical(text)
@@ -316,7 +329,25 @@ def test_window_baseline_prev_and_serialization() -> None:
     w = Window(1000.0, 1600.0)
     assert w.with_baseline("prev").baseline == Window(400.0, 1000.0)
     assert w.with_baseline("1w").baseline == Window(1000.0 - 604800, 1600.0 - 604800)
-    with pytest.raises(ObsError):
+    with pytest.raises(ObsError) as ei:
         w.with_baseline("yesterday")
+    assert "prev" in str(ei.value) and "yesterday" in str(ei.value)   # 오류 문구가 유효한 후보 전부를 말한다
     d = to_dict(w.with_baseline("prev"))
     assert isinstance(d, dict) and d["baseline"] == {"start": 400.0, "end": 1000.0, "baseline": None}
+
+
+def test_compare_summary_preamble_has_query_window_baseline(make_client: ClientFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+                                                            capsys: pytest.CaptureFixture[str]) -> None:
+    """summary.txt 머리 — 조립된 질의(label_replace … offset …) · 창 · 기준선이 RFC3339 + unix 초로 남아 그대로 재실행할 수 있다.
+    stdout 은 요약만(조립 질의 없음)."""
+    client, _ = make_client({"api/v1/query?": (200, load_fixture("promql-instant-compare-cpu-by-pod-1d.json"))})
+    monkeypatch.setattr(cli, "_client", lambda: client)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    cli.promql_main(["compare", CPU_QUERY, "--since", "1h", "--baseline", "1d", "--end", "100000"])
+    out = capsys.readouterr().out.splitlines()
+    assert not any("label_replace" in l for l in out)
+    summary = (tmp_path / out[-1].split()[1].rstrip("/")).joinpath("summary.txt").read_text(encoding="utf-8").splitlines()
+    assert summary[0].startswith("# 질의  label_replace(quantile_over_time(0.95, ") and "offset 86400s" in summary[0]
+    assert summary[1] == "# 창  1970-01-02T02:46:40Z ~ 1970-01-02T03:46:40Z  (start=96400.000 end=100000.000)"
+    assert summary[2] == "# 기준선  1970-01-01T02:46:40Z ~ 1970-01-01T03:46:40Z  (start=10000.000 end=13600.000)"
+    assert summary[3] == "" and summary[4:] == out[:-1] and len(out) == 22

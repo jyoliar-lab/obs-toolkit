@@ -319,7 +319,13 @@ class Window:
     def with_baseline(self, spec: str) -> Window:
         """같은 길이의 창을 앞으로 옮겨 기준선으로 단다. `spec` 은 기간('1d' · '1w' — 그만큼 앞의 같은 시각) 또는
         'prev'(직전 창 — 창 길이만큼 앞). 표기가 아니면 ObsError."""
-        offset = self.seconds if spec.strip() == BASELINE_PREV else parse_duration(spec)
+        if spec.strip() == BASELINE_PREV:
+            offset = self.seconds
+        else:
+            try:
+                offset = parse_duration(spec)
+            except ObsError:
+                raise ObsError("기준선 표기가 아니다: %r — 기간(1d · 1w · 12h …) 또는 %s(직전 창)" % (spec, BASELINE_PREV))
         return Window(start=self.start, end=self.end, baseline=self.shifted(-offset))
 
     def label(self) -> str:
