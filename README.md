@@ -8,7 +8,7 @@
 - `bin/` — 명령 4개(얇은 shim). Claude Code 가 플러그인이 켜진 동안 자동으로 PATH 에 올린다 — hook 없이도 bare name 실행.
 - `skills/obs-query/` — 스킬(Agent Skills 스펙 필드만). 명령은 `bin/` 에만 있다.
 - `hooks/hooks.json` — SessionStart 가 `bin/` 을 PATH 에, 플러그인 루트를 PYTHONPATH 에 올린다(`--plugin-dir` 대비).
-- `tests/` + `fixtures/` — 녹화 fixture 로 도는 pytest. GET 유일성 · 설정 해석 순서 · 물리 비노출을 검사한다. fixture 는 **호출 요청(백엔드 · 경로 · query string · 기준 시각 `at`)과 응답을 함께 담은 JSON 봉투**(`tests/record.py` 의 형식)이고, 테스트는 `load_response` 로 응답만 꺼낸다. 녹화기 `tests/record.py` 는 `Client.transport` 래퍼 — 실환경에 한 번 돌리면 파일 이름 · 호출(전부) · 응답이 한 번에 떨어진다.
+- `tests/` + `fixtures/` — 녹화 fixture 로 도는 pytest. GET 유일성 · 설정 해석 순서 · 물리 비노출을 검사한다. fixture 는 **호출 요청(백엔드 · 경로 · query string · 기준 시각 `at`)과 응답을 함께 담은 JSON 봉투**(`tests/record.py` 의 형식)이고, 테스트는 `replay`(conftest)로 녹화 호출을 순서대로 돌려받으며 **나간 요청이 녹화 요청과 같은지 호출마다 검사**한다(`tests/replay.py` — `request_key` 정규화 · 녹화 `at` 주입 · 검사를 끄는 유일한 길은 `unchecked=<이유>`). 녹화기 `tests/record.py` 는 `Client.transport` 래퍼 — 실환경에 한 번 돌리면 파일 이름 · 호출(전부) · 응답이 한 번에 떨어진다.
 
 ## 쓰기
 
@@ -39,5 +39,7 @@ OBS_TEST_DUMP=1 python -m pytest tests/test_cli.py   # 각 테스트가 받은 E
 python -m tests.record --all                        # 13개 전부(레시피: tests/record.py 의 RECIPES)
 python -m tests.record traceql-trace.json           # 하나만. 재현 불가(오류 trace 없음 등)면 ✗ 로 남기고 파일은 건드리지 않는다
 ```
+
+`obs/metrics.py` 등이 질의 조립을 바꾸면 fixture replay 테스트가 **요청 불일치**로 실패한다(문구에 나간 요청 · 녹화 요청이 나란히) — 그때는 `python -m tests.record <fixture>` 로 다시 녹화한다. 공유 fixture(`promql-instant-empty.json`)만 `unchecked=` 로 검사를 끄고, 그 이유가 테스트 코드에 있다.
 
 fixture 에 `recorded: manual` 표시가 있는 것은 재현할 수 없는 조건의 손 기록이고 `reason` 이 이유를 말한다 — 표시 없는 파일은 전부 녹화기가 만든 것이다. 물리(호스트 · 프록시 경로 · uid · 토큰)는 fixture 에 실리지 않는다(`tests/test_fixtures.py` 가 파일 전체를 검사한다).

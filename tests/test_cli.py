@@ -12,7 +12,7 @@ import pytest
 
 from obs.adapters import cli
 from obs.core import DoctorReport, Evidence, Lines, Probe, Resolved
-from tests.conftest import ROOT, ClientFactory, load_response
+from tests.conftest import ROOT, ClientFactory, ReplayFactory, load_response
 
 PHYSICAL: tuple[str, ...] = ("obs.mg", "jyo-liar.com/api", "datasources/proxy", "uid/prometheus", "loki-careerhub", "tempo-careerhub")
 
@@ -24,30 +24,30 @@ def _no_physical(text: str) -> None:
 
 # ── promql ───────────────────────────────────────────────────────────────────────
 
-def test_promql_instant_up(make_client: ClientFactory) -> None:
+def test_promql_instant_up(replay: ReplayFactory) -> None:
     """AC 3 의 첫 실측 `up` — 녹화 응답이 Evidence[Lines] 로 옮겨지고 시계열마다 `값  {레이블}` 한 줄이며, 나간 URL 에 query·time 이 있고 출력에 물리 정보가 없다."""
-    client, t = make_client({"api/v1/query?": (200, load_response("promql-instant-up.json"))})
-    ev, _, kind = cli.promql_run(client, cli.PromqlArgs(query="up"), at=1000.0)
+    client, t = replay("promql-instant-up.json")
+    ev, _, kind = cli.promql_run(client, cli.PromqlArgs(query="up"), at=t.at)
     assert isinstance(ev, Evidence) and isinstance(ev.value, Lines) and ev.backend == "metrics" and ev.query == "up" and kind == "promql"
     lines = ev.value.lines
     assert len(lines) == 65 and all(l.startswith("1  {") for l in lines) and "job=kubelet" in lines[0]   # 2026-09-22 재녹화: 65 타깃 전부 up
-    assert "query=up" in t.calls[0].url and "time=1000.0" in t.calls[0].url
+    assert "query=up" in t.calls[0].url and "time=%s" % t.at in t.calls[0].url
     _no_physical("\n".join(lines))
 
 
-def test_promql_range_summary(make_client: ClientFactory) -> None:
+def test_promql_range_summary(replay: ReplayFactory) -> None:
     """--range 구간 조회 — 창 길이가 계산되고 step 이 자동(range/60, 최소 15s)으로 붙으며, 시계열이 `n min max first last` 한 줄로 요약된다."""
-    client, t = make_client({"api/v1/query_range": (200, load_response("promql-range-sum-up.json"))})
-    ev, _, kind = cli.promql_run(client, cli.PromqlArgs(query="sum(up)", range_="30m"), at=10000.0)
+    client, t = replay("promql-range-sum-up.json")
+    ev, _, kind = cli.promql_run(client, cli.PromqlArgs(query="sum(up)", range_="30m"), at=t.at)
     assert kind == "promql-range" and ev.window is not None and ev.window.seconds == 1800.0
     assert ev.value.lines == ["n=61  min=65  max=65  first=65  last=65  {}"]   # 30m/30s → 61 점 (재녹화)
-    assert "step=30s" in t.calls[0].url and "start=8200.0" in t.calls[0].url
+    assert "step=30s" in t.calls[0].url and "start=%s" % (t.at - 1800.0) in t.calls[0].url
 
 
-def test_promql_points(make_client: ClientFactory) -> None:
+def test_promql_points(replay: ReplayFactory) -> None:
     """--points — 요약 대신 레이블 줄 아래 시각별 값이 전부 나온다(많으니 보통 spill 로 떨어지는 형태)."""
-    client, _ = make_client({"api/v1/query_range": (200, load_response("promql-range-sum-up.json"))})
-    ev, _, _ = cli.promql_run(client, cli.PromqlArgs(query="sum(up)", range_="30m", points=True), at=10000.0)
+    client, t = replay("promql-range-sum-up.json")
+    ev, _, _ = cli.promql_run(client, cli.PromqlArgs(query="sum(up)", range_="30m", points=True), at=t.at)
     assert ev.value.lines[0] == "{}" and len(ev.value.lines) == 62 and ev.value.lines[1].strip().endswith("65")   # 레이블 줄 + 61 점
 
 
@@ -78,11 +78,11 @@ def test_promql_backend_error_status(make_client: ClientFactory) -> None:
 
 # ── logql ────────────────────────────────────────────────────────────────────────
 
-def test_logql_streams(make_client: ClientFactory) -> None:
+def test_logql_streams(replay: ReplayFactory) -> None:
     """AC 3 의 둘째 실측 careerhub-prod 로그 — 공통 레이블은 머리에 한 번, 각 줄은 시각으로 시작하고 최신순이며, URL 에 limit·direction·나노초 창이 있고 출력에 물리 정보가 없다.
     줄 수 기대값은 fixture 를 파서로 다시 읽어 계산한다(숫자를 하드코딩하지 않는다)."""
-    client, t = make_client({"loki/api/v1/query_range": (200, load_response("logql-streams-careerhub-prod.json"))})
-    ev, _, kind = cli.logql_run(client, cli.LogqlArgs(query='{namespace="careerhub-prod"}', limit=5), at=10000.0)
+    client, t = replay("logql-streams-careerhub-prod.json")
+    ev, _, kind = cli.logql_run(client, cli.LogqlArgs(query='{namespace="careerhub-prod"}', limit=5), at=t.at)
     lines = ev.value.lines
     assert kind == "logql" and lines[0].startswith("공통 레이블 {") and "namespace=careerhub-prod" in lines[0]
     parsed = cli.parse_logs(cli.check_json(load_response("logql-streams-careerhub-prod.json"), "logs"))
@@ -92,41 +92,41 @@ def test_logql_streams(make_client: ClientFactory) -> None:
     # backward: 최신이 먼저
     assert lines[1][:14] >= lines[-1][:14]
     assert "limit=5" in t.calls[0].url and "direction=backward" in t.calls[0].url
-    assert "start=%d" % int((10000.0 - 3600) * 1e9) in t.calls[0].url
+    assert "start=%d" % int((t.at - 3600) * 1e9) in t.calls[0].url
     _no_physical("\n".join(lines))
 
 
-def test_logql_matrix(make_client: ClientFactory) -> None:
+def test_logql_matrix(replay: ReplayFactory) -> None:
     """메트릭형 LogQL(count_over_time) — resultType=matrix 를 알아보고 시계열 요약(`n=… detected_level=…`)으로 낸다."""
-    client, _ = make_client({"loki/api/v1/query_range": (200, load_response("logql-matrix-count-over-time.json"))})
-    ev, _, _ = cli.logql_run(client, cli.LogqlArgs(query="sum by (detected_level) (count_over_time({namespace=\"careerhub-prod\"}[5m]))"))
+    client, t = replay("logql-matrix-count-over-time.json")
+    ev, _, _ = cli.logql_run(client, cli.LogqlArgs(query="sum by (detected_level) (count_over_time({namespace=\"careerhub-prod\"}[5m]))"), at=t.at)
     assert all(l.startswith("n=") and "detected_level=" in l for l in ev.value.lines)
 
 
-def test_logql_width_clip(make_client: ClientFactory) -> None:
+def test_logql_width_clip(replay: ReplayFactory) -> None:
     """--width — 로그 본문이 지정 폭에서 잘린다. 긴 줄이 컨텍스트를 먹지 않게 하는 절제다."""
-    client, _ = make_client({"loki/api/v1/query_range": (200, load_response("logql-streams-careerhub-prod.json"))})
-    ev, _, _ = cli.logql_run(client, cli.LogqlArgs(query="{a=\"b\"}", width=60))
+    client, t = replay("logql-streams-careerhub-prod.json")
+    ev, _, _ = cli.logql_run(client, cli.LogqlArgs(query='{namespace="careerhub-prod"}', limit=5, width=60), at=t.at)   # 녹화와 같은 질의 — width 는 URL 에 없다
     assert all(len(l.split("  ", 2)[-1]) <= 60 for l in ev.value.lines[1:])
 
 
 # ── traceql ──────────────────────────────────────────────────────────────────────
 
-def test_traceql_search_then_trace(make_client: ClientFactory) -> None:
+def test_traceql_search_then_trace(replay: ReplayFactory) -> None:
     """AC 3 의 셋째 실측 — search 결과 첫 줄에서 trace ID 를 뽑아 trace 명령에 넣는 흐름. search URL 에 limit·창이 있고, trace URL 이 api/traces/<id> 로 끝나며, 요약(총시간·루트·오류 수)에 물리 정보가 없다."""
-    client, t = make_client({"api/search": (200, load_response("traceql-search.json")),
-                             "api/traces/": (200, load_response("traceql-trace.json", "api/traces/"))})
-    ev, _, kind = cli.traceql_run(client, cli.TraceqlArgs(cmd="search", since="24h", limit=3), at=10000.0)
+    client, t = replay("traceql-search.json", ("traceql-trace.json", "api/traces/"))   # 순서대로: search → traces/<id>
+    ev, _, kind = cli.traceql_run(client, cli.TraceqlArgs(cmd="search", since="24h", limit=3), at=t.at)
     assert kind == "traceql-search" and len(ev.value.lines) == 3
     trace_id = ev.value.lines[0].split()[0]
     assert re.fullmatch(r"[0-9a-f]{31,32}", trace_id)
-    assert "limit=3" in t.calls[0].url and "start=%d" % (10000 - 86400) in t.calls[0].url
+    assert "limit=3" in t.calls[0].url and "start=%d" % (int(t.at) - 86400) in t.calls[0].url
 
-    ev2, _, kind2 = cli.traceql_run(client, cli.TraceqlArgs(cmd="trace", arg=trace_id))
+    ev2, _, kind2 = cli.traceql_run(client, cli.TraceqlArgs(cmd="trace", arg=trace_id), at=t.at)
     lines = ev2.value.lines
     assert kind2 == "traceql-trace" and lines[0].startswith("트레이스 %s  총 " % trace_id)
     assert lines[1].startswith("루트: ngf:careerhub-prod:careerhub-nginx-gateway /") and lines[3] == "오류 span: 0"   # 재녹화(2026-09-22 10:44Z): 게이트웨이 → api-composer → 세 서비스, span 8
     assert t.calls[1].url.endswith("api/traces/" + trace_id)
+    t.assert_exhausted()
     _no_physical("\n".join(lines))
 
 
@@ -137,10 +137,10 @@ def test_traceql_search_empty_hints_wider_window(make_client: ClientFactory) -> 
     assert ev.value.lines == ["(결과 없음 — 트레이스는 드물다. 창을 넓혀 다시: --since 24h · 7d)"]
 
 
-def test_traceql_tags(make_client: ClientFactory) -> None:
+def test_traceql_tags(replay: ReplayFactory) -> None:
     """tags — scope 별로 `[resource] a, b, c` 한 줄. 탐색용 명령의 형식."""
-    client, _ = make_client({"api/v2/search/tags": (200, load_response("traceql-tags.json"))})
-    ev, _, _ = cli.traceql_run(client, cli.TraceqlArgs(cmd="tags"))
+    client, t = replay("traceql-tags.json")
+    ev, _, _ = cli.traceql_run(client, cli.TraceqlArgs(cmd="tags"), at=t.at)
     assert any(l.startswith("[resource] ") and "service.name" in l for l in ev.value.lines)
 
 

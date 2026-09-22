@@ -1,4 +1,4 @@
-"""공용 fixture — 녹화 fixture 의 응답 로더 · 가짜 transport · 격리된 env."""
+"""공용 fixture — 녹화 fixture 의 로더(응답 · 요청 키 · at) · replay transport(요청 정합 검사) · 가짜 transport · 격리된 env."""
 from __future__ import annotations
 
 import json
@@ -12,8 +12,9 @@ import pytest
 from obs.adapters import cli
 from obs.core import JSON, Client, Config, DoctorReport, TransportError, TransportTimeout, load_config
 from tests.record import FIXTURES, ROOT, read_fixture, response_of
+from tests.replay import Call, FixtureSpec, Loaded, ReplayTransport, load_call, load_fixture_calls
 
-__all__ = ["FIXTURES", "ROOT"]   # 재수출 — 테스트가 여기서 가져온다
+__all__ = ["FIXTURES", "ROOT", "Call", "Loaded", "load_call"]   # 재수출 — 테스트가 여기서 가져온다
 
 
 def load_response(name: str, path: str | None = None) -> JSON:
@@ -23,15 +24,9 @@ def load_response(name: str, path: str | None = None) -> JSON:
 
 
 @dataclass
-class Call:
-    url: str
-    headers: dict[str, str]
-    timeout: float
-
-
-@dataclass
 class FakeTransport:
-    """(url, headers, timeout) → (status, body). 경로 조각으로 응답을 고른다. 부른 기록을 남긴다."""
+    """(url, headers, timeout) → (status, body). 경로 조각으로 응답을 고른다. 부른 기록을 남긴다.
+    실환경이 만들 수 없는 조건(연결 실패 · 시간 초과 · 404 · 손으로 만든 응답 · k 초과 응답)용 — fixture replay 는 `replay` 로."""
     routes: dict[str, tuple[int, object]] = field(default_factory=dict[str, tuple[int, object]])
     calls: list[Call] = field(default_factory=list[Call])
     fail: str | None = None   # TransportError 문구 — 있으면 항상 실패(연결 실패)
@@ -74,6 +69,25 @@ class ClientFactory(Protocol):
 def make_client(config: Config) -> ClientFactory:
     def _make(routes: dict[str, tuple[int, object]] | None = None, fail: str | None = None, hang: bool = False) -> tuple[Client, FakeTransport]:
         t = FakeTransport(routes=routes or {}, fail=fail, hang=hang)
+        return Client(config=config, token="test-token-not-real", transport=t), t
+    return _make
+
+
+class ReplayFactory(Protocol):
+    def __call__(self, *specs: FixtureSpec, unchecked: str | None = None) -> tuple[Client, ReplayTransport]: ...
+
+
+@pytest.fixture
+def replay(config: Config) -> ReplayFactory:
+    """fixture replay — 녹화 호출을 순서대로 돌려주고 나간 요청을 녹화 요청과 비교하는 Client. `t.at` 이 녹화 시점이다:
+    `client, t = replay("promql-instant-up.json"); promql_run(client, …, at=t.at)`.
+    spec 은 파일 이름(호출 전부 — traces 는 search → traces/<id> 둘) 또는 (파일 이름, 경로 조각)(그 호출 하나).
+    `unchecked=<이유>` 만이 검사를 끈다 — 공유 fixture(promql-instant-empty.json)처럼 녹화 요청이 이 테스트의 질의와 다를 때."""
+    def _make(*specs: FixtureSpec, unchecked: str | None = None) -> tuple[Client, ReplayTransport]:
+        expected: list[Loaded] = []
+        for spec in specs:
+            expected += load_fixture_calls(spec) if isinstance(spec, str) else [load_call(spec)]
+        t = ReplayTransport(expected=expected, config=config, unchecked=unchecked)
         return Client(config=config, token="test-token-not-real", transport=t), t
     return _make
 
