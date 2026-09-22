@@ -125,7 +125,7 @@ def test_traceql_search_then_trace(make_client: ClientFactory) -> None:
     ev2, _, kind2 = cli.traceql_run(client, cli.TraceqlArgs(cmd="trace", arg=trace_id))
     lines = ev2.value.lines
     assert kind2 == "traceql-trace" and lines[0].startswith("트레이스 %s  총 " % trace_id)
-    assert lines[1].startswith("루트: posting-service /") and lines[3] == "오류 span: 0"
+    assert lines[1].startswith("루트: ngf:careerhub-prod:careerhub-nginx-gateway /") and lines[3] == "오류 span: 0"   # 재녹화(2026-09-22 10:44Z): 게이트웨이 → api-composer → 세 서비스, span 8
     assert t.calls[1].url.endswith("api/traces/" + trace_id)
     _no_physical("\n".join(lines))
 
@@ -141,7 +141,7 @@ def test_traceql_tags(make_client: ClientFactory) -> None:
     """tags — scope 별로 `[resource] a, b, c` 한 줄. 탐색용 명령의 형식."""
     client, _ = make_client({"api/v2/search/tags": (200, load_response("traceql-tags.json"))})
     ev, _, _ = cli.traceql_run(client, cli.TraceqlArgs(cmd="tags"))
-    assert any(l.startswith("[intrinsic] ") and "duration" in l for l in ev.value.lines)   # 재녹화(1h 창)에는 intrinsic scope 만 — 그 창에 trace 가 없었다
+    assert any(l.startswith("[resource] ") and "service.name" in l for l in ev.value.lines)
 
 
 def test_traceql_trace_requires_id(make_client: ClientFactory) -> None:
@@ -155,7 +155,7 @@ def test_parse_spans_error_detection() -> None:
     """span 파서와 오류 표시 — 녹화 트레이스가 Span 으로 옮겨지고(service·오류 아님), 상태를 STATUS_CODE_ERROR 로 바꾸면 `오류 span: 1` 과 ✗ 줄이 나온다.
     fixture dict 를 고치지 않고 dataclasses.replace 로 바꾼다 — Any 없이 쓰는 방식."""
     spans = cli.parse_spans(cli.check_json(load_response("traceql-trace.json", "api/traces/"), "traces"))
-    assert len(spans) == 1 and spans[0].service == "posting-service" and not spans[0].is_error
+    assert len(spans) == 8 and spans[0].service == "posting-service" and not spans[0].is_error   # 재녹화: 8 span — 첫 span 은 posting-service
     errored = [dataclasses.replace(spans[0], status_code="STATUS_CODE_ERROR")]
     lines = cli.trace_lines("abc", errored, top=5)
     assert lines[3] == "오류 span: 1" and lines[4].startswith("  ✗ posting-service /")

@@ -214,11 +214,16 @@ class Unreproducible(Exception):
     """재현할 수 없는 조건 — 이 fixture 는 recorded: manual 예외 후보다."""
 
 
-def record(name: str, recipe: Recipe, at: float, out: Path = FIXTURES) -> Path:
-    """파일 이름 · 호출(전부) · 응답이 한 번에 — recipe 를 Recorder 가 끼워진 Client 로 돌리고 `out/name` 에 쓴다."""
+def record(name: str, recipe: Recipe, at: float, out: Path = FIXTURES) -> list[Path]:
+    """파일 이름 · 호출(전부) · 응답이 한 번에 — recipe 를 Recorder 가 끼워진 Client 로 돌리고 `out/name` 에 쓴다.
+    같은 실행의 호출 하나를 다른 이름으로도 쓰는 파생(DERIVED)이 있으면 그 파일도 쓴다. 쓴 경로 전부를 돌려준다."""
     client, rec = real_client(at)
     recipe(client, at)
-    return rec.save(out / name)
+    written = [rec.save(out / name)]
+    for derived, (source, index) in DERIVED.items():
+        if source == name:
+            written.append(write_fixture(out / derived, [rec.calls[index]]))
+    return written
 
 
 # ── 레시피 — 기존 fixture 13개. 테스트가 보내는 것과 같은 인자로 부른다 ────────────────
@@ -275,6 +280,7 @@ def _error_trace(client: Client, at: float) -> None:
 
 
 RECIPES: dict[str, Recipe] = {
+    # 파일 이름 → 그 파일을 낳는 실행. traceql-search.json 은 DERIVED — traceql-trace.json 실행의 첫 호출과 같은 것이다
     "promql-instant-up.json": _promql(cli.PromqlArgs(query="up")),
     "promql-range-sum-up.json": _promql(cli.PromqlArgs(query="sum(up)", range_="30m")),
     "promql-instant-summarize-cpu-by-pod.json": _metrics(cli.MetricsArgs(cmd="summarize", query=CPU_QUERY)),
@@ -284,11 +290,22 @@ RECIPES: dict[str, Recipe] = {
     "promql-instant-topk-memory-by-pod.json": _metrics(cli.MetricsArgs(cmd="top", query="container_memory_working_set_bytes", by="pod", k=10)),
     "logql-matrix-count-over-time.json": _logql(cli.LogqlArgs(query=LOG_METRIC_QUERY)),
     "logql-streams-careerhub-prod.json": _logql(cli.LogqlArgs(query=LOG_SELECTOR, limit=5)),
-    "traceql-search.json": _traceql(TRACE_SEARCH),
     "traceql-trace.json": _search_then_trace,
     "traceql-tags.json": _traceql(cli.TraceqlArgs(cmd="tags")),
     "traceql-trace-error.json": _error_trace,
 }
+
+
+DERIVED: dict[str, tuple[str, int]] = {
+    # 파생 파일 → (원 실행의 파일, 호출 인덱스). 같은 실행의 호출을 그 이름으로도 쓴다 — 별도 실행이면 Tempo 가 limit 안의
+    # hit 을 호출마다 다르게 고를 수 있어 search 의 첫 hit 과 trace 의 id 가 어긋난다. 같은 실행에서 나오면 정합이 구조로 선다.
+    "traceql-search.json": ("traceql-trace.json", 0),
+}
+
+
+def fixture_names() -> list[str]:
+    """녹화기가 만드는 파일 전부 — 실행의 파일과 파생 파일."""
+    return sorted([*RECIPES, *DERIVED])
 
 
 def _clip(text: str, width: int = 90) -> str:
@@ -304,27 +321,32 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--at", type=float, default=None, help="기준 시각(unix 초). 기본 now — 한 실행의 모든 fixture 가 같은 at 을 받는다")
     a = ap.parse_args(argv)
     if a.list:
-        print("\n".join(RECIPES))
+        print("\n".join("%s%s" % (n, "  (← %s 실행의 호출 %d)" % DERIVED[n] if n in DERIVED else "") for n in fixture_names()))
         return 0
-    names: list[str] = list(RECIPES) if a.all or not a.names else list(a.names)
-    unknown = [n for n in names if n not in RECIPES]
+    names: list[str] = fixture_names() if a.all or not a.names else list(a.names)
+    unknown = [n for n in names if n not in RECIPES and n not in DERIVED]
     if unknown:
         print("모르는 fixture: %s — --list 로 이름을 본다" % ", ".join(unknown), file=sys.stderr)
         return 2
+    runs: list[str] = []
+    for n in names:
+        source = DERIVED[n][0] if n in DERIVED else n
+        if source not in runs:
+            runs.append(source)
     at: float = now() if a.at is None else a.at
     out: Path = a.out
     print("at=%.3f (%s) → %s" % (at, fmt_rfc3339(at), out))
     failed = 0
-    for name in names:
+    for name in runs:
         try:
-            path = record(name, RECIPES[name], at, out)
+            paths = record(name, RECIPES[name], at, out)
         except (ObsError, Unreproducible, ValueError) as e:
             print("  ✗ %s — %s" % (name, e))
             failed += 1
             continue
-        fx = read_fixture(path)
-        for c in fx.calls:
-            print("  ✓ %s — %s %s?%s [%d]" % (name, c.request.backend, c.request.path, _clip(c.request.query_string), c.response.status))
+        for path in paths:
+            for c in read_fixture(path).calls:
+                print("  ✓ %s — %s %s?%s [%d]" % (path.name, c.request.backend, c.request.path, _clip(c.request.query_string), c.response.status))
     return 1 if failed else 0
 
 

@@ -9,7 +9,7 @@ import pytest
 from obs.core import Client, Config
 from tests import record
 from tests.conftest import FIXTURES, FakeTransport
-from tests.record import RECIPES, RECORDED_BY, RECORDED_MANUAL, Fixture, Recorder, read_fixture, response_of, write_fixture
+from tests.record import DERIVED, RECIPES, RECORDED_BY, RECORDED_MANUAL, Fixture, Recorder, fixture_names, read_fixture, response_of, write_fixture
 from tests.test_cli import PHYSICAL   # `_no_physical` 의 단어 목록 — fixture 전체에 같은 규약
 
 FIXTURE_FILES: list[Path] = sorted(FIXTURES.glob("*"))
@@ -29,8 +29,10 @@ def _fixture(name: str) -> Fixture:
 # ── 파일 전부 — 형식 · 물리 비노출 · 출처 표시 ────────────────────────────────────
 
 def test_every_fixture_has_a_recipe_and_vice_versa() -> None:
-    """fixtures/ 의 파일 집합과 RECIPES 의 키 집합이 같다 — 레시피 없는 fixture 도, fixture 없는 레시피도 없다(13개)."""
-    assert NAMES == sorted(RECIPES) and len(NAMES) == 13
+    """fixtures/ 의 파일 집합과 녹화기가 만드는 이름(실행 + 파생)의 집합이 같다 — 레시피 없는 fixture 도, fixture 없는 레시피도 없다(13개).
+    파생은 traceql-search.json 하나 — traceql-trace.json 실행의 첫 호출."""
+    assert NAMES == fixture_names() and len(NAMES) == 13 and not set(RECIPES) & set(DERIVED)
+    assert DERIVED == {"traceql-search.json": ("traceql-trace.json", 0)}
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -85,6 +87,9 @@ def test_trace_fixture_records_search_then_trace_in_order() -> None:
     assert isinstance(first, list) and isinstance(first[0], dict)
     assert paths[1] == "api/traces/%s" % first[0]["traceID"]
     assert "limit" in fx.calls[0].request.params and fx.calls[0].request.at == fx.calls[1].request.at
+    # traceql-search.json 은 같은 실행의 첫 호출 — 그래서 test_cli 가 search 첫 줄에서 뽑는 id 가 trace fixture 의 id 와 같다
+    search = _fixture("traceql-search.json")
+    assert len(search.calls) == 1 and search.calls[0] == fx.calls[0]
 
 
 def test_metrics_fixtures_record_assembled_queries() -> None:

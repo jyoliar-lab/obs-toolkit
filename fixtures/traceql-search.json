@@ -4,14 +4,14 @@
  "calls": [
   {
    "request": {
-    "at": 1790071906.50452,
-    "at_rfc3339": "2026-09-22T10:11:46Z",
+    "at": 1790073894.461181,
+    "at_rfc3339": "2026-09-22T10:44:54Z",
     "backend": "traces",
     "path": "api/search",
-    "query_string": "start=1789985506&end=1790071906&limit=3",
+    "query_string": "start=1789987494&end=1790073894&limit=3",
     "params": {
-     "start": "1789985506",
-     "end": "1790071906",
+     "start": "1789987494",
+     "end": "1790073894",
      "limit": "3"
     }
    },
@@ -20,31 +20,32 @@
     "body": {
      "traces": [
       {
-       "traceID": "179100c2172ff27aea9669e2f3bd36c",
-       "rootServiceName": "posting-service",
-       "rootTraceName": "careerhub.posting_service.provider_grpc.ProviderGrpc/RegisterJobPostingInfo",
-       "startTimeUnixNano": "1790018250944379511",
-       "durationMs": 3
+       "traceID": "5218697c3912d4fe404780fba90d7604",
+       "rootServiceName": "ngf:careerhub-prod:careerhub-nginx-gateway",
+       "rootTraceName": "/api/",
+       "startTimeUnixNano": "1790073655078000000",
+       "durationMs": 105
       },
       {
-       "traceID": "2a2311dce8622da3932fa09dce28062",
-       "rootServiceName": "posting-service",
-       "rootTraceName": "careerhub.posting_service.provider_grpc.ProviderGrpc/RegisterJobPostingInfo",
-       "startTimeUnixNano": "1790018142923889346",
-       "durationMs": 5
+       "traceID": "50f6c33fcec93275c20de3355df96d64",
+       "rootServiceName": "ngf:careerhub-prod:careerhub-nginx-gateway",
+       "rootTraceName": "/api/",
+       "startTimeUnixNano": "1790073653988000000",
+       "durationMs": 98
       },
       {
-       "traceID": "31487be6fec97b6242a1cf5e58b753c",
-       "rootServiceName": "posting-service",
-       "rootTraceName": "careerhub.posting_service.provider_grpc.ProviderGrpc/IsCompanyRegistered",
-       "startTimeUnixNano": "1790017992786827497",
-       "durationMs": 1
+       "traceID": "d09d1f3a0ec6cf7a78723a96f1e6d2a",
+       "rootServiceName": "ngf:careerhub-prod:careerhub-nginx-gateway",
+       "rootTraceName": "/",
+       "startTimeUnixNano": "1790073651045000000",
+       "durationMs": 29
       }
      ],
      "metrics": {
-      "inspectedBytes": "32488",
+      "inspectedTraces": 5,
+      "inspectedBytes": "21485",
       "totalBlocks": 1,
-      "completedJobs": 4,
+      "completedJobs": 3,
       "totalJobs": 4,
       "totalBlockBytes": "81668"
      }
