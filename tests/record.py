@@ -64,6 +64,11 @@ class Request:
     query_string: str   # 나간 그대로(URL 인코딩된 채)
     params: QueryParams
 
+    @property
+    def key(self) -> str:
+        """정규화한 요청 키 — replay(tests/replay.py) 가 나간 요청의 키와 비교한다."""
+        return normalize_key(self.path, self.params)
+
 
 @dataclass(frozen=True)
 class Reply:
@@ -100,6 +105,13 @@ def parse_params(query_string: str) -> QueryParams:
         else:
             out[k] = [prev, v]
     return out
+
+
+def normalize_key(path: str, params: QueryParams) -> str:
+    """요청 키 — `<네이티브 경로>?<키 정렬된 파라미터>`. 같은 키가 여럿이면 값도 정렬한다. 순서만 다른 요청은 같은 키다.
+    값은 문자열 그대로 비교한다 — 녹화와 replay 가 같은 코드로 만드니 표기(1000.0 vs 1000)도 같다."""
+    items = sorted((k, v) for k, vs in params.items() for v in (vs if isinstance(vs, list) else [vs]))
+    return path + ("?" + urllib.parse.urlencode(items) if items else "")
 
 
 def strip_physical(url: str, config: Config, at: float | None) -> Request:
