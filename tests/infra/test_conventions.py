@@ -1,5 +1,6 @@
 """테스트 규약(.claude/rules/python-tests.md)을 CI 에서 지키는 메타테스트 — tests/ 의 파이썬 파일을 AST(tests/infra/test_get_only.py 의
-_imports 방식) 와 tokenize(주석) 로 훑어 다섯 규칙의 위반을 세고, 래칫 ALLOWLIST 와 비교한다.
+_imports 방식) 와 tokenize(주석) 로 훑어 여섯 규칙의 위반을 세고, 래칫 ALLOWLIST 와 비교한다.
+규칙 1~5 는 티켓(ops-workflow#106)의 것, 규칙 6(티어 밖 test_*.py)은 부모 #105 의 완료 조건을 지키려는 구현 판단이다.
 새 위반은 즉시 실패, 기존 위반은 줄어들기만 — 줄었는데 ALLOWLIST 를 안 줄여도 실패한다. 전부 비면 ALLOWLIST 를 지운다."""
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ import pytest
 ROOT: Path = Path(__file__).resolve().parents[2]
 TESTS: Path = ROOT / "tests"
 CONTRACTS: Path = TESTS / "contracts"
+TIERS: frozenset[str] = frozenset({"contracts", "format", "infra"})
 CONFTEST: Path = TESTS / "conftest.py"
 
 RULES: dict[str, str] = {
@@ -25,10 +27,12 @@ RULES: dict[str, str] = {
     "replay": "tests/contracts/ 에서 replay( · load_response( 를 부른다 — contracts 는 손으로 만든 최소 입력만",
     "physical": "PHYSICAL 이 tests/conftest.py 밖에 정의된다 — 목록은 한 곳",
     "date": "주석에 재녹화 · YYYY-MM-DD 꼴 날짜가 있다 — 출처는 커밋 메시지에",
+    "tier": "test_*.py 가 세 티어(tests/contracts · format · infra) 밖에 있다 — 테스트 파일은 티어 안에",
 }
 
 ALLOWLIST: dict[str, dict[str, int]] = {
     "tests/infra/test_get_only.py::test_core_never_sets_http_method": {"and": 1},
+    "tests/test_cli.py": {"tier": 1},
     "tests/test_cli.py::test_doctor_lines_show_url_and_hide_token": {"and": 2},
     "tests/test_cli.py::test_emit_always_writes_even_when_fits": {"and": 1},
     "tests/test_cli.py::test_emit_quiet_writes_files_prints_only_path": {"and": 1},
@@ -45,9 +49,11 @@ ALLOWLIST: dict[str, dict[str, int]] = {
     "tests/test_cli.py::test_shim_finds_plugin_root_from_any_cwd": {"and": 1},
     "tests/test_cli.py::test_trace_error_span_shows_status_message": {"and": 3},
     "tests/test_cli.py::test_traceql_search_then_trace": {"and": 4, "date": 1},
+    "tests/test_config.py": {"tier": 1},
     "tests/test_config.py::test_defaults_when_nothing_set": {"and": 1},
     "tests/test_config.py::test_env_overrides_file": {"and": 2},
     "tests/test_config.py::test_file_overrides_default": {"and": 3},
+    "tests/test_core.py": {"tier": 1},
     "tests/test_core.py::test_dataclasses_are_json_serializable": {"and": 1},
     "tests/test_core.py::test_doctor_shows_physical_and_probes": {"and": 2},
     "tests/test_core.py::test_doctor_without_token_skips_probes": {"and": 1},
@@ -63,6 +69,7 @@ ALLOWLIST: dict[str, dict[str, int]] = {
     "tests/test_core.py::test_transport_never_consults_system_proxy": {"and": 1},
     "tests/test_core.py::test_urllib_read_timeout_maps_to_transport_timeout": {"and": 1},
     "tests/test_core.py::test_window": {"and": 1},
+    "tests/test_fixtures.py": {"tier": 1},
     "tests/test_fixtures.py::test_at_is_explicit_and_not_derived_from_url": {"and": 3},
     "tests/test_fixtures.py::test_every_fixture_has_a_recipe_and_vice_versa": {"and": 1},
     "tests/test_fixtures.py::test_fixture_is_recorded_format_with_request_and_response": {"and": 4},
@@ -71,6 +78,7 @@ ALLOWLIST: dict[str, dict[str, int]] = {
     "tests/test_fixtures.py::test_recorder_strips_physical_keeps_order_and_writes_envelope": {"and": 5},
     "tests/test_fixtures.py::test_trace_fixture_records_search_then_trace_in_order": {"and": 4},
     "tests/test_fixtures.py::test_unmarked_fixtures_come_from_recorder_and_manual_ones_say_why": {"date": 1},
+    "tests/test_metrics.py": {"tier": 1},
     "tests/test_metrics.py::test_auto_step_is_subquery_resolution": {"and": 2},
     "tests/test_metrics.py::test_compare_baseline_out_of_retention_says_so": {"and": 3},
     "tests/test_metrics.py::test_compare_both_empty": {"and": 2, "docstring": 1},
@@ -91,6 +99,7 @@ ALLOWLIST: dict[str, dict[str, int]] = {
     "tests/test_metrics.py::test_top_empty_is_no_data": {"and": 1, "docstring": 1},
     "tests/test_metrics.py::test_top_wraps_query_server_side": {"and": 3, "date": 1},
     "tests/test_metrics.py::test_window_baseline_prev_and_serialization": {"and": 2},
+    "tests/test_replay.py": {"tier": 1},
     "tests/test_replay.py::test_load_call_returns_request_key_and_at": {"and": 2},
     "tests/test_replay.py::test_replay_transport_checks_each_call_in_order_and_shows_both_keys": {"and": 1},
     "tests/test_replay.py::test_replay_transport_fails_on_wrong_query_not_just_path": {"and": 1},
@@ -141,10 +150,18 @@ def _assigned_names(node: ast.Assign | ast.AnnAssign) -> set[str]:
     return {t.id for t in targets if isinstance(t, ast.Name)}
 
 
+def _outside_tiers(path: Path) -> bool:
+    """tests/ 아래 test_*.py 인데 첫 디렉터리가 세 티어 중 하나가 아니다(tests/ 직속 포함)."""
+    rel = path.relative_to(TESTS)
+    return path.name.startswith("test_") and rel.parts[0] not in TIERS
+
+
 def scan(path: Path, source: str) -> list[Violation]:
-    """파일 하나의 위반 전부 — 규칙 1~4 는 AST, 규칙 5 는 주석 토큰."""
+    """파일 하나의 위반 전부 — 규칙 1~4 는 AST, 규칙 5 는 주석 토큰, 규칙 6 은 경로."""
     tree = ast.parse(source)
     out: list[Violation] = []
+    if _outside_tiers(path):
+        out.append(Violation(path.relative_to(ROOT).as_posix(), "tier"))
     in_contracts = CONTRACTS in path.parents
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -205,21 +222,28 @@ def test_allowlist_is_not_looser_than_reality() -> None:
     assert not shrunk, "위반이 줄었다 — ALLOWLIST 를 줄인다:\n%s\n\n지금 상태 전체:\n%s" % (_explain(shrunk), _as_allowlist(actual))
 
 
+INFRA: Path = TESTS / "infra"
 SAMPLES: dict[str, tuple[Path, str]] = {
-    # 규칙 → (파일 자리, 그 규칙 하나만 어기는 소스)
-    "docstring": (TESTS / "test_x.py", 'def test_a() -> None:\n    assert 1\n'),
-    "and": (TESTS / "test_x.py", 'def test_a() -> None:\n    """a."""\n    assert 1 and 2\n'),
+    # 규칙 → (파일 자리, 그 규칙 하나만 어기는 소스). 자리는 티어 안 — 규칙 6 에 걸리지 않게
+    "docstring": (INFRA / "test_x.py", 'def test_a() -> None:\n    assert 1\n'),
+    "and": (INFRA / "test_x.py", 'def test_a() -> None:\n    """a."""\n    assert 1 and 2\n'),
     "replay": (CONTRACTS / "test_x.py", 'def test_a(replay: object) -> None:\n    """a."""\n    replay("f.json")\n'),
-    "physical": (TESTS / "test_x.py", 'PHYSICAL: tuple[str, ...] = ("a",)\n'),
-    "date": (TESTS / "test_x.py", 'x = 1  # 1999-12-31 에 봤다\n'),
+    "physical": (INFRA / "test_x.py", 'PHYSICAL: tuple[str, ...] = ("a",)\n'),
+    "date": (INFRA / "test_x.py", 'x = 1  # 1999-12-31 에 봤다\n'),
+    "tier": (TESTS / "test_x.py", 'def test_a() -> None:\n    """a."""\n'),
 }
 
 
 @pytest.mark.parametrize("rule", sorted(RULES))
 def test_each_rule_detects_its_sample(rule: str) -> None:
-    """다섯 규칙이 각각 자기 표본을 잡고 다른 규칙은 잡지 않는다 — 메타테스트가 실제로 보는지의 확인."""
+    """여섯 규칙이 각각 자기 표본을 잡고 다른 규칙은 잡지 않는다 — 메타테스트가 실제로 보는지의 확인."""
     path, source = SAMPLES[rule]
     assert [v.rule for v in scan(path, source)] == [rule]
+
+
+def test_nested_directory_outside_tiers_is_a_violation() -> None:
+    """규칙 6 은 tests/ 직속만이 아니다 — 티어가 아닌 하위 디렉터리의 test_*.py 도 위반이다."""
+    assert [v.rule for v in scan(TESTS / "misc" / "test_x.py", 'def test_a() -> None:\n    """a."""\n')] == ["tier"]
 
 
 def test_conftest_may_define_physical() -> None:
