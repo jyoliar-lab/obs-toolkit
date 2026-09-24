@@ -93,10 +93,11 @@ def test_summaries_of_requires_n_and_marks_missing_as_nan() -> None:
 # ── 거부 · 판정 ──────────────────────────────────────────────────────────────────
 
 def test_summarize_requires_query(make_client: ClientFactory) -> None:
-    """빈 질의는 summarize 가 질의 전에 거부한다."""
-    client, _ = make_client()
-    with pytest.raises(ObsError):
+    """빈 질의는 summarize 가 질의 전에 거부한다 — 문구가 PromQL 을 말하고 transport 는 불리지 않는다."""
+    client, t = make_client()
+    with pytest.raises(ObsError, match="PromQL 이 필요하다"):
         metrics.summarize(client, "  ", Window.last("1h", at=AT))
+    assert t.calls == []
 
 
 def test_compare_rejects_baseline_not_expressible_as_offset(make_client: ClientFactory) -> None:

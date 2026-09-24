@@ -15,10 +15,11 @@ from tests.conftest import AT, MINUTE, ClientFactory, _no_physical, _vector
 # ── 거부 · 오류 ──────────────────────────────────────────────────────────────────
 
 def test_promql_requires_query(make_client: ClientFactory) -> None:
-    """질의 없는 즉시 조회는 *_run 이 ObsError 로 거부한다 — argparse 가 아니라서 MCP 경로에서도 같은 검사가 산다."""
-    client, _ = make_client()
-    with pytest.raises(cli.ObsError):
+    """질의 없는 즉시 조회는 *_run 이 질의 전에 ObsError 로 거부한다 — argparse 가 아니라서 MCP 경로에서도 같은 검사가 산다."""
+    client, t = make_client()
+    with pytest.raises(cli.ObsError, match="PromQL 이 필요하다"):
         cli.promql_run(client, cli.PromqlArgs())
+    assert t.calls == []
 
 
 def test_promql_backend_error_status(make_client: ClientFactory) -> None:
@@ -37,10 +38,11 @@ def test_traceql_search_empty_hints_wider_window(make_client: ClientFactory) -> 
 
 
 def test_traceql_trace_requires_id(make_client: ClientFactory) -> None:
-    """trace 명령에 ID 가 없으면 ObsError 다."""
-    client, _ = make_client()
-    with pytest.raises(cli.ObsError):
+    """trace 명령에 ID 가 없으면 질의 전에 ObsError 다."""
+    client, t = make_client()
+    with pytest.raises(cli.ObsError, match="traceID 가 필요하다"):
         cli.traceql_run(client, cli.TraceqlArgs(cmd="trace"))
+    assert t.calls == []
 
 
 # ── 출력 절제 ────────────────────────────────────────────────────────────────────

@@ -1,8 +1,9 @@
-"""FakeTransport 의 라우팅 — (backend, native_path) 정확 일치 · query string 무관 · 미등록 요청은 등록된 키를 나열하며 실패."""
+"""FakeTransport 의 라우팅 — (backend, native_path) 정확 일치 · query string 무관 · 미등록 요청은 등록된 키를 나열하며 실패 · 모든 호출이 기록된다."""
 from __future__ import annotations
 
 import pytest
 
+from obs.core import ObsError
 from tests.conftest import ClientFactory
 
 
@@ -32,3 +33,28 @@ def test_unregistered_request_fails_listing_registered_keys(make_client: ClientF
     client, _ = make_client({("metrics", "api/v1/query"): (200, {})})
     with pytest.raises(AssertionError, match=r"\('metrics', 'api/v1/query'\)"):
         client.get("metrics", "api/v1/query_range")
+
+
+def test_every_call_is_recorded_even_when_it_fails(make_client: ClientFactory) -> None:
+    """미등록 요청도 calls 에 기록된다 — 그래서 `t.calls == []` 는 "transport 전에 거부됐다" 를 뜻한다."""
+    client, t = make_client()
+    with pytest.raises(AssertionError):
+        client.get("metrics", "api/v1/query")
+    assert len(t.calls) == 1
+    assert t.calls[0].url.endswith("api/v1/query")
+
+
+def test_connection_failure_is_recorded_too(make_client: ClientFactory) -> None:
+    """연결 실패(fail=)로 끝난 호출도 calls 에 기록된다."""
+    client, t = make_client(fail="connection refused")
+    with pytest.raises(ObsError):
+        client.get("metrics", "api/v1/query")
+    assert len(t.calls) == 1
+
+
+def test_read_timeout_is_recorded_too(make_client: ClientFactory) -> None:
+    """읽기 시간 초과(hang=)로 끝난 호출도 calls 에 기록된다."""
+    client, t = make_client(hang=True)
+    with pytest.raises(ObsError):
+        client.get("metrics", "api/v1/query")
+    assert len(t.calls) == 1
