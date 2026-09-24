@@ -1,0 +1,7 @@
+트레이스 d47871cc20408ed84a7506ccf306200d  총 73.3ms  span 1개  시작 09-13 19:14:49Z
+루트: posting-service / careerhub.posting_service.provider_grpc.ProviderGrpc/GetAllHiring
+서비스: posting-service(1)
+오류 span: 1
+  ✗ posting-service / careerhub.posting_service.provider_grpc.ProviderGrpc/GetAllHiring  73.3ms  connection(careerhub-mongodb-1.careerhub-mongodb-svc.careerhub-prod.svc.cluster.local:27017[-787333]) incomplete read of message header: connection closed unex…
+느린 span top 15:
+      73.3ms  +    0.0ms  posting-service / careerhub.posting_service.provider_grpc.ProviderGrpc/GetAllHiring

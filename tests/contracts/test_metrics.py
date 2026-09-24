@@ -1,31 +1,20 @@
 """메트릭 환원 연산의 약속 — 질의 조립 · 응답 → 계약 · 없음/0 판정 · 거부. 손 입력(_vector)과 성질 단언만. 렌더링의 모양은 format/test_metrics_lines.py."""
 from __future__ import annotations
 
+import json
 import math
 
 import pytest
 
 from obs import metrics
 from obs.adapters import cli
-from obs.core import JSON, ObsError, Window
-from tests.conftest import ClientFactory
+from obs.core import Client, Evidence, Lines, ObsError, Window, to_json
+from tests.conftest import AT, ClientFactory, _stat, _vector
 from tests.record import CPU_QUERY
-
-
-AT: float = 100000.0          # 질의 조립 · 손으로 만든 응답 테스트의 now — fixture replay 는 녹화 at(t.at)을 쓴다
 
 
 SQ: str = "(%s)[3600s:60s]" % CPU_QUERY
 
-
-def _vector(*items: tuple[dict[str, str], str]) -> dict[str, JSON]:
-    """Prometheus 즉시 조회 응답 모양을 손으로 — (레이블, 값) 목록."""
-    result: list[JSON] = [{"metric": dict(labels), "value": [AT, v]} for labels, v in items]
-    return {"status": "success", "data": {"resultType": "vector", "result": result}}
-
-
-def _stat(pod: str, stat: str, v: str) -> tuple[dict[str, str], str]:
-    return {"pod": pod, "stat": stat}, v
 
 
 # ── 질의 조립 — 계산은 이 문자열로 서버에 넘어간다 ─────────────────────────────────
@@ -117,7 +106,7 @@ def test_compare_rejects_baseline_not_expressible_as_offset(make_client: ClientF
 
 
 def test_compare_missing_series_and_zero_do_not_divide(make_client: ClientFactory) -> None:
-    """기준선에 없는 시계열은 base None, 기준선 0 은 비율 없음, 지금에 없는 시계열은 now None 이며 어느 경우도 나누지 않는다."""
+    """기준선에 없는 시계열은 base None, 기준선 0 은 비율 없음(base 는 있다), 지금에 없는 시계열은 now None 이며 어느 경우도 나누지 않는다 — 순서는 비율 → 기준선 0 → 기준선 없음 → 지금 없음."""
     body = _vector(_stat("a", "now", "0.4"), _stat("a", "base", "0"), _stat("b", "now", "1"), _stat("c", "base", "3"),
                    _stat("d", "now", "3.9"), _stat("d", "base", "1"))
     client, _ = make_client({("metrics", "api/v1/query"): (200, body)})
@@ -128,17 +117,12 @@ def test_compare_missing_series_and_zero_do_not_divide(make_client: ClientFactor
     def fields(d: metrics.Delta) -> tuple[float | None, float | None, float | None, float | None, bool]:
         return d.now, d.base, d.ratio, d.delta, d.base_is_zero
 
-    assert fields(by["a"]) == (0.4, 0.0, None, pytest.approx(0.4), True)     # 기준선 0 — 비율 없음, Δ 는 남는다
-    assert fields(by["b"]) == (1.0, None, None, None, False)                 # 기준선 없음
-    assert fields(by["c"]) == (None, 3.0, None, None, False)                 # 지금 없음
-    assert fields(by["d"]) == (3.9, 1.0, pytest.approx(3.9), pytest.approx(2.9), False)   # 보통 — 비율·Δ
+    assert fields(by["a"]) == (0.4, 0.0, None, pytest.approx(0.4), True)
+    assert fields(by["b"]) == (1.0, None, None, None, False)
+    assert fields(by["c"]) == (None, 3.0, None, None, False)
+    assert fields(by["d"]) == (3.9, 1.0, pytest.approx(3.9), pytest.approx(2.9), False)
     assert not ev.value.now_empty
     assert not ev.value.baseline_empty
-    lines = cli.compare_lines(ev.value, ev.window or Window(0, 0))
-    assert lines[1].startswith("×3.9  Δ+2.9  now p95=3.9  base p95=1  {pod=d}")
-    assert lines[2].startswith("×—  Δ+0.4  now p95=0.4  base p95=0  (기준선 0)  {pod=a}")
-    assert lines[3] == "기준선 없음  now p95=1  {pod=b}"
-    assert lines[4] == "지금 없음  base p95=3  {pod=c}"
 
 
 def test_top_query_wraps_topk_over_aggregation_by_axes() -> None:
@@ -151,3 +135,128 @@ def test_top_query_rejects_bad_k_agg_or_empty_axis(k: int, by: list[str], agg: s
     """k < 1 · 정해지지 않은 집계 · 빈 축은 질의 전에 거부한다."""
     with pytest.raises(ObsError):
         metrics.top_query("up", k, by, agg)
+
+
+# ── 연산의 약속 — 손 입력으로 ─────────────────────────────────────────────────────
+
+W: Window = Window.last("1h", at=AT)
+
+
+def _run(client: Client, op: str) -> Evidence[metrics.Summary] | Evidence[metrics.Comparison] | Evidence[metrics.Top]:
+    """세 연산을 같은 창으로 부른다 — 약속 검사의 공통 입구."""
+    if op == "summarize":
+        return metrics.summarize(client, CPU_QUERY, W)[0]
+    if op == "compare":
+        return metrics.compare(client, CPU_QUERY, W.with_baseline("1d"))[0]
+    return metrics.top(client, "up", W, k=3, by=["pod"])[0]
+
+
+@pytest.mark.parametrize("op", ["summarize", "compare", "top"])
+def test_each_operation_makes_one_get(make_client: ClientFactory, op: str) -> None:
+    """연산당 GET 은 1회다 — 계산은 서버가 한다."""
+    client, t = make_client({("metrics", "api/v1/query"): (200, _vector())})
+    _run(client, op)
+    assert len(t.calls) == 1
+
+
+@pytest.mark.parametrize("op", ["summarize", "compare", "top"])
+def test_each_operation_serializes_to_json(make_client: ClientFactory, op: str) -> None:
+    """환원물이 든 Evidence 는 to_json 으로 직렬화된다."""
+    client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
+    json.loads(to_json(_run(client, op)))
+
+
+def test_summarize_evidence_carries_assembled_query_window_and_step(make_client: ClientFactory) -> None:
+    """summarize 의 Evidence.query 는 조립 질의(재실행 가능)이고 window 는 받은 창, step 은 자동값이다."""
+    client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
+    ev, _ = metrics.summarize(client, CPU_QUERY, W)
+    assert ev.backend == "metrics"
+    assert ev.query == metrics.summarize_query(CPU_QUERY, W, "60s")
+    assert ev.window == W
+    assert ev.value.step == "60s"
+
+
+def test_summarize_sorts_series_by_labels(make_client: ClientFactory) -> None:
+    """summarize 의 시계열은 레이블 순이다 — 서버가 준 순서가 아니다."""
+    client, _ = make_client({("metrics", "api/v1/query"): (200, _vector(_stat("b", "n", "1"), _stat("a", "n", "1")))})
+    ev, _ = metrics.summarize(client, CPU_QUERY, W)
+    assert [s.labels["pod"] for s in ev.value.series] == ["a", "b"]
+
+
+def test_summarize_empty_response_has_no_series(make_client: ClientFactory) -> None:
+    """빈 응답의 summarize 는 series 가 빈 목록이다 — 0 이 아니다."""
+    client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
+    ev, _ = metrics.summarize(client, CPU_QUERY, W)
+    assert ev.value.series == []
+
+
+def test_compare_default_baseline_is_one_day(make_client: ClientFactory) -> None:
+    """기준선 없는 Window 를 주면 DEFAULT_BASELINE(1d) — Evidence.window 에 하루 앞 창이 달리고 offset 86400s 가 나간다."""
+    client, t = make_client({("metrics", "api/v1/query"): (200, _vector())})
+    ev, _ = metrics.compare(client, CPU_QUERY, W)
+    assert ev.window is not None
+    assert ev.window.baseline == Window(AT - 3600 - 86400, AT - 86400)
+    assert ev.value.offset == "86400s"
+    assert "offset+86400s" in t.calls[0].url
+
+
+def test_compare_prev_baseline(make_client: ClientFactory) -> None:
+    """--baseline prev 는 직전 창 — offset 이 창 길이(3600s)다."""
+    client, t = make_client({("metrics", "api/v1/query"): (200, _vector())})
+    ev, _ = metrics.compare(client, CPU_QUERY, W.with_baseline("prev"))
+    assert ev.window is not None
+    assert ev.window.baseline == Window(AT - 7200, AT - 3600)
+    assert ev.value.offset == "3600s"
+    assert "offset+3600s" in t.calls[0].url
+
+
+def test_compare_both_empty(make_client: ClientFactory) -> None:
+    """양쪽 다 비면 now_empty · baseline_empty 이고 deltas 는 빈 목록이다."""
+    client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
+    ev, _ = metrics.compare(client, CPU_QUERY, W)
+    assert ev.value.now_empty
+    assert ev.value.baseline_empty
+    assert ev.value.deltas == []
+
+
+def test_top_wraps_query_and_uses_window_end(make_client: ClientFactory) -> None:
+    """top 의 Evidence.query 는 topk 로 감싼 질의이고 창은 끝 시각 한 점이다."""
+    client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
+    ev, _ = metrics.top(client, "up", W, k=10, by=["pod"])
+    assert ev.query == "topk(10, sum by (pod) (up))"
+    assert ev.window == Window(AT, AT)
+    assert (ev.value.k, ev.value.by, ev.value.agg) == (10, ["pod"], "sum")
+
+
+def test_top_clips_to_k_even_if_server_returns_more(make_client: ClientFactory) -> None:
+    """서버가 k 보다 많이 돌려줘도 top 이 k 로 자른다 — 상한은 함수의 것."""
+    body = _vector(({"pod": "a"}, "4"), ({"pod": "b"}, "3"), ({"pod": "c"}, "2"), ({"pod": "d"}, "1"))
+    client, _ = make_client({("metrics", "api/v1/query"): (200, body)})
+    ev, _ = metrics.top(client, "up", W, k=3, by=["pod"])
+    assert len(ev.value.entries) == 3
+
+
+def test_top_sorts_entries_by_value_descending(make_client: ClientFactory) -> None:
+    """top 의 항목은 값 내림차순이다 — 서버가 준 순서가 아니다."""
+    body = _vector(({"pod": "a"}, "1"), ({"pod": "b"}, "3"), ({"pod": "c"}, "2"))
+    client, _ = make_client({("metrics", "api/v1/query"): (200, body)})
+    ev, _ = metrics.top(client, "up", W, k=3, by=["pod"])
+    assert [e.value for e in ev.value.entries] == [3.0, 2.0, 1.0]
+
+
+def test_top_empty_response_has_no_entries(make_client: ClientFactory) -> None:
+    """빈 응답의 top 은 entries 가 빈 목록이다."""
+    client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
+    ev, _ = metrics.top(client, "nothing", W)
+    assert ev.value.entries == []
+
+
+def test_metrics_run_dispatches_by_subcommand(make_client: ClientFactory) -> None:
+    """metrics_run 은 세 서브커맨드를 Evidence[Lines] 와 kind 로 내고 모르는 서브커맨드는 ObsError 다."""
+    client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
+    for cmd, kind in (("summarize", "promql-summarize"), ("compare", "promql-compare"), ("top", "promql-top")):
+        ev, _, got = cli.metrics_run(client, cli.MetricsArgs(cmd=cmd, query="up"), at=AT)
+        assert got == kind
+        assert isinstance(ev.value, Lines)
+    with pytest.raises(ObsError):
+        cli.metrics_run(client, cli.MetricsArgs(cmd="red", query="x"), at=AT)

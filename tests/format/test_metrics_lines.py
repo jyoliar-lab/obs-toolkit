@@ -1,209 +1,95 @@
-"""메트릭 환원 연산의 출력 — 녹화 fixture replay 로 summarize · compare · top 의 렌더링과 CLI 서브커맨드의 stdout · summary.txt 를 본다."""
+"""메트릭 환원 연산의 출력 — 녹화 fixture 의 replay 로 summarize · compare · top 의 렌더링과 CLI 의 stdout · summary.txt 를 본다.
+compare_lines 의 예외 행(기준선 없음 · 기준선 0 · 지금 없음)은 실환경이 한 번에 만들 수 없어 손 입력으로 스냅샷을 뜬다."""
 from __future__ import annotations
 
-import json
-import math
-import re
 from pathlib import Path
 
 import pytest
 
 from obs import metrics
 from obs.adapters import cli
-from obs.core import Evidence, Lines, ObsError, Window, fmt_rfc3339
-from tests.conftest import UNCHECKED_SHARED_EMPTY, ClientFactory, ReplayFactory, _no_physical, load_call, load_response
+from obs.core import Window, fmt_rfc3339, json_list, json_obj
+from tests.conftest import AT, UNCHECKED_SHARED_EMPTY, ClientFactory, ReplayFactory, _stat, _vector, assert_snapshot, load_response, window_of
 from tests.record import CPU_QUERY
+
+
+def _pods_in(name: str) -> set[str]:
+    """fixture 응답의 pod 레이블 집합 — 시계열 수의 기대값을 fixture 에서 유도한다."""
+    body = cli.check_status(load_response(name), "metrics")
+    return {str(json_obj(json_obj(item).get("metric")).get("pod")) for item in json_list(json_obj(body.get("data")).get("result"))}
 
 
 # ── summarize ────────────────────────────────────────────────────────────────────
 
-def test_summarize_fixture_one_query(replay: ReplayFactory) -> None:
-    """summarize 는 녹화 응답을 시계열별 일곱 통계로 옮기고 GET 1회 · 창 · step 을 Evidence 에 남기며 렌더링에 물리 정보가 없다."""
+def test_summary_lines(replay: ReplayFactory, request: pytest.FixtureRequest) -> None:
+    """summarize 의 렌더링은 창 헤더 한 줄 뒤에 시계열마다 일곱 통계 한 줄이다 — 시계열 수는 fixture 의 pod 수이고 min ≤ p50 ≤ p95 ≤ max 다."""
     client, t = replay("promql-instant-summarize-cpu-by-pod.json")
-    ev, raw = metrics.summarize(client, CPU_QUERY, Window.last("1h", at=t.at))
-    assert len(t.calls) == 1
-    assert "api/v1/query?" in t.calls[0].url
-    assert "time=%s" % t.at in t.calls[0].url
-    assert "query_range" not in t.calls[0].url
-    assert "count_over_time" in t.calls[0].url
-    assert "deriv" in t.calls[0].url
-    assert ev.backend == "metrics"
-    assert ev.query.startswith("label_replace(count_over_time(")
-    assert ev.window == Window(t.at - 3600.0, t.at)
-    assert ev.value.step == "60s"
-    assert len(ev.value.series) == 20
+    ev, _ = metrics.summarize(client, CPU_QUERY, Window.last("1h", at=t.at))
+    assert len(ev.value.series) == len(_pods_in("promql-instant-summarize-cpu-by-pod.json"))
     for s in ev.value.series:
-        assert s.n == 60
         assert s.min <= s.p50 <= s.p95 <= s.max
-        assert math.isfinite(s.slope)
-        assert "pod" in s.labels
-    assert [s.labels["pod"] for s in ev.value.series] == sorted(s.labels["pod"] for s in ev.value.series)
-    assert isinstance(raw, dict)
-    assert raw.get("status") == "success"
-    json.loads(cli.to_json(ev))   # 환원물이 직렬화된다(MCP outputSchema 대비)
-    lines = cli.summary_lines(ev.value, ev.window or Window(0, 0))
-    assert len(lines) == 21
-    assert lines[0].startswith("창 ")
-    assert "step=60s" in lines[0]   # 헤더 — 언제 · 어떤 해상도인가
-    assert re.match(r"^창 \d\d-\d\d \d\d:\d\d:\d\dZ ~ \d\d-\d\d \d\d:\d\d:\d\dZ  step=", lines[0])   # 스킬이 약속한 시각 표기
-    assert all(re.match(r"^n=60  min=\S+  p50=\S+  p95=\S+  max=\S+  last=\S+  slope=[+-]\S+/s  \{pod=", l) for l in lines[1:])
-    _no_physical("\n".join(lines))
+    assert_snapshot(request, cli.summary_lines(ev.value, window_of(ev)))
 
 
-def test_summarize_empty_is_no_data_not_zero(replay: ReplayFactory) -> None:
-    """빈 응답의 summarize 는 series 가 비고 렌더링은 "데이터 없음" 이지 0 이 아니다."""
+def test_summary_lines_empty(replay: ReplayFactory, request: pytest.FixtureRequest) -> None:
+    """빈 응답의 summarize 렌더링은 "데이터 없음" 한 줄이다."""
     client, t = replay("promql-instant-empty.json", unchecked=UNCHECKED_SHARED_EMPTY)
     ev, _ = metrics.summarize(client, CPU_QUERY, Window.last("1h", at=t.at))
-    assert ev.value.series == []
-    lines = cli.summary_lines(ev.value, Window.last("1h", at=t.at))
-    assert len(lines) == 1
-    assert lines[0].startswith("(데이터 없음")
-    assert "n=0" not in lines[0]
+    assert_snapshot(request, cli.summary_lines(ev.value, window_of(ev)))
 
 
 # ── compare ──────────────────────────────────────────────────────────────────────
 
-def test_compare_fixture_one_query_offset(replay: ReplayFactory) -> None:
-    """compare 는 녹화한 now · base 값을 비율 내림차순의 Delta 로 옮기고 Evidence.window 에 기준선을 달며 렌더링에 물리 정보가 없다."""
+def test_compare_lines(replay: ReplayFactory, request: pytest.FixtureRequest) -> None:
+    """compare 의 렌더링은 헤더 한 줄 뒤에 시계열마다 비율 · Δ · now · base 한 줄이 비율 내림차순이다 — Δ 는 now − base 다."""
     client, t = replay("promql-instant-compare-cpu-by-pod-1d.json")
-    ev, raw = metrics.compare(client, CPU_QUERY, Window.last("1h", at=t.at).with_baseline("1d"))
-    assert len(t.calls) == 1
-    assert "offset+86400s" in t.calls[0].url
-    assert "time=%s" % t.at in t.calls[0].url
-    assert ev.window is not None
-    assert ev.window.baseline == Window(t.at - 3600.0 - 86400.0, t.at - 86400.0)
-    v = ev.value
-    assert (v.step, v.offset) == ("60s", "86400s")
-    assert not v.now_empty
-    assert not v.baseline_empty
-    assert len(v.deltas) == 20
-    ratios = [d.ratio for d in v.deltas]
-    assert all(r is not None for r in ratios)
+    ev, _ = metrics.compare(client, CPU_QUERY, Window.last("1h", at=t.at).with_baseline("1d"))
+    assert len(ev.value.deltas) == len(_pods_in("promql-instant-compare-cpu-by-pod-1d.json"))
+    ratios = [d.ratio for d in ev.value.deltas]
     assert ratios == sorted((r for r in ratios if r is not None), reverse=True)
-    for d in v.deltas:
+    for d in ev.value.deltas:
         assert d.now is not None
         assert d.base is not None
         assert d.delta == pytest.approx(d.now - d.base)
-    assert isinstance(raw, dict)
-    assert raw.get("status") == "success"
-    lines = cli.compare_lines(v, ev.window)
-    assert len(lines) == 21
-    assert lines[0].startswith("지금 ")
-    assert "(offset 86400s)" in lines[0]
-    assert "step=60s" in lines[0]
-    assert "T" not in lines[0].split("(offset")[0]   # 창 표기는 fmt_ts(`MM-DD HH:MM:SSZ`) — RFC3339 는 summary.txt 머리에만
-    assert all(re.match(r"^×[\d.e+-]+  Δ[+-]\S+  now p95=\S+  base p95=\S+  \{pod=", l) for l in lines[1:])
-    _no_physical("\n".join(lines))
+    assert_snapshot(request, cli.compare_lines(ev.value, window_of(ev)))
 
 
-def test_compare_default_baseline_is_one_day(replay: ReplayFactory) -> None:
-    """기준선 없는 Window 를 주면 DEFAULT_BASELINE(1d) 의 offset 86400s 가 나간다."""
-    client, t = replay("promql-instant-empty.json", unchecked=UNCHECKED_SHARED_EMPTY)
-    ev, _ = metrics.compare(client, CPU_QUERY, Window.last("1h", at=t.at))
-    assert ev.window is not None
-    assert ev.window.baseline == Window(t.at - 3600 - 86400, t.at - 86400)
-    assert ev.value.offset == "86400s"
-    assert "offset+86400s" in t.calls[0].url
-
-
-def test_compare_prev_baseline(replay: ReplayFactory) -> None:
-    """--baseline prev 는 직전 창 — offset 이 창 길이(3600s)다."""
-    client, t = replay("promql-instant-empty.json", unchecked=UNCHECKED_SHARED_EMPTY)
-    ev, _ = metrics.compare(client, CPU_QUERY, Window.last("1h", at=t.at).with_baseline("prev"))
-    assert ev.window is not None
-    assert ev.window.baseline == Window(t.at - 7200, t.at - 3600)
-    assert ev.value.offset == "3600s"
-    assert "offset+3600s" in t.calls[0].url
-
-
-def test_compare_baseline_out_of_retention_says_so(replay: ReplayFactory) -> None:
-    """보존 밖 offset 으로 base 시계열이 부재면 baseline_empty 이고 렌더링이 "기준선 없음" 을 말하며 비율은 어디에도 없다."""
+def test_compare_lines_without_baseline(replay: ReplayFactory, request: pytest.FixtureRequest) -> None:
+    """보존 밖 offset 으로 base 가 부재면 렌더링이 "기준선 없음" 을 말하고 비율은 어디에도 없다."""
     client, t = replay("promql-instant-compare-cpu-by-pod-no-baseline.json")
     ev, _ = metrics.compare(client, CPU_QUERY, Window.last("1h", at=t.at).with_baseline("60d"))
-    v = ev.value
-    assert v.offset == "5184000s"
-    assert v.baseline_empty
-    assert not v.now_empty
-    assert len(v.deltas) == 20
-    assert all(d.ratio is None and d.base is None and d.now is not None for d in v.deltas)
-    lines = cli.compare_lines(v, ev.window or Window(0, 0))
-    assert lines[1].startswith("기준선 없음 — ")
-    assert "0 으로 나누지 않는다" in lines[1]
-    assert all(l.startswith("기준선 없음  now p95=") for l in lines[2:])
-    assert not any("×" in l for l in lines[1:])
-
-
-def test_compare_both_empty(replay: ReplayFactory) -> None:
-    """양쪽 다 비면 now_empty · baseline_empty 이고 렌더링은 "데이터 없음" 한 줄이다."""
-    client, t = replay("promql-instant-empty.json", unchecked=UNCHECKED_SHARED_EMPTY)
-    ev, _ = metrics.compare(client, CPU_QUERY, Window.last("1h", at=t.at))
-    assert ev.value.now_empty
     assert ev.value.baseline_empty
-    assert ev.value.deltas == []
-    lines = cli.compare_lines(ev.value, ev.window or Window(0, 0))
-    assert len(lines) == 1
-    assert lines[0].startswith("(데이터 없음")
+    assert all(d.ratio is None for d in ev.value.deltas)
+    assert_snapshot(request, cli.compare_lines(ev.value, window_of(ev)))
+
+
+def test_compare_lines_mark_missing_baseline_zero_and_missing_now(make_client: ClientFactory, request: pytest.FixtureRequest) -> None:
+    """시계열별 예외 행 — 기준선 0 은 `×—` 와 "(기준선 0)", 기준선 없음 · 지금 없음은 그 말로 시작한다."""
+    body = _vector(_stat("a", "now", "0.4"), _stat("a", "base", "0"), _stat("b", "now", "1"), _stat("c", "base", "3"),
+                   _stat("d", "now", "3.9"), _stat("d", "base", "1"))
+    client, _ = make_client({("metrics", "api/v1/query"): (200, body)})
+    ev, _ = metrics.compare(client, "q", Window.last("1h", at=AT).with_baseline("1d"))
+    assert_snapshot(request, cli.compare_lines(ev.value, window_of(ev)))
 
 
 # ── top ──────────────────────────────────────────────────────────────────────────
 
-def test_top_wraps_query_server_side(replay: ReplayFactory) -> None:
-    """top 은 질의를 topk 로 감싸 서버가 k 개만 돌려주게 하고 항목은 값 내림차순이며 줄도 k 개 이하다."""
+def test_top_lines(replay: ReplayFactory, request: pytest.FixtureRequest) -> None:
+    """top 의 렌더링은 값 내림차순으로 항목마다 `값  {레이블}` 한 줄이다."""
     client, t = replay("promql-instant-topk-memory-by-pod.json")
     ev, _ = metrics.top(client, "container_memory_working_set_bytes", Window.last("1h", at=t.at), k=10, by=["pod"])
-    assert ev.query == "topk(10, sum by (pod) (container_memory_working_set_bytes))"
-    assert "query=topk%2810%2C+sum+by+%28pod%29" in t.calls[0].url
-    assert "time=%s" % t.at in t.calls[0].url
-    assert ev.window == Window(t.at, t.at)
-    v = ev.value
-    assert (v.k, v.by, v.agg) == (10, ["pod"], "sum")
-    assert len(v.entries) == 10
-    assert [e.value for e in v.entries] == sorted((e.value for e in v.entries), reverse=True)
-    assert v.entries[0].labels["pod"].startswith("kube-apiserver-")
-    lines = cli.top_lines(v, ev.window or Window(0, 0))
-    assert len(lines) <= 10
-    assert all(re.match(r"^\d+  \{pod=", l) for l in lines)
-    _no_physical("\n".join(lines))
+    assert [e.value for e in ev.value.entries] == sorted((e.value for e in ev.value.entries), reverse=True)
+    assert_snapshot(request, cli.top_lines(ev.value, window_of(ev)))
 
 
-def test_top_clips_to_k_even_if_server_returns_more(make_client: ClientFactory) -> None:
-    """서버가 k 보다 많이 돌려줘도 top 이 k 로 자른다."""
-    at = load_call("promql-instant-topk-memory-by-pod.json").call.request.at   # FakeTransport 그대로 — k=3 요청에 k=10 녹화를 돌려주는 조건은 실환경이 만들 수 없다
-    assert at is not None
-    client, _ = make_client({("metrics", "api/v1/query"): (200, load_response("promql-instant-topk-memory-by-pod.json"))})
-    ev, _ = metrics.top(client, "container_memory_working_set_bytes", Window.last("1h", at=at), k=3, by=["pod"])
-    assert len(ev.value.entries) == 3
-    assert ev.query.startswith("topk(3, ")
-
-
-def test_top_empty_is_no_data(replay: ReplayFactory) -> None:
-    """빈 응답의 top 은 entries 가 비고 렌더링은 "데이터 없음" 한 줄이다."""
+def test_top_lines_empty(replay: ReplayFactory, request: pytest.FixtureRequest) -> None:
+    """빈 응답의 top 렌더링은 "데이터 없음" 한 줄이다."""
     client, t = replay("promql-instant-empty.json", unchecked=UNCHECKED_SHARED_EMPTY)
     ev, _ = metrics.top(client, "nothing", Window.last("1h", at=t.at))
-    assert ev.value.entries == []
-    lines = cli.top_lines(ev.value, ev.window or Window(0, 0))
-    assert len(lines) == 1
-    assert lines[0].startswith("(데이터 없음")
+    assert_snapshot(request, cli.top_lines(ev.value, window_of(ev)))
 
 
-# ── CLI 서브커맨드 ────────────────────────────────────────────────────────────────
-
-def test_metrics_run_dispatch(replay: ReplayFactory) -> None:
-    """metrics_run 은 세 서브커맨드를 Evidence[Lines] 와 kind 로 내고 모르는 서브커맨드는 ObsError 다."""
-    client, t = replay("promql-instant-summarize-cpu-by-pod.json", "promql-instant-compare-cpu-by-pod-1d.json",
-                       "promql-instant-topk-memory-by-pod.json")   # 순서대로 세 호출 — 같은 녹화 실행이라 at 이 하나다
-    ev, _, kind = cli.metrics_run(client, cli.MetricsArgs(cmd="summarize", query=CPU_QUERY), at=t.at)
-    assert kind == "promql-summarize"
-    assert isinstance(ev, Evidence)
-    assert isinstance(ev.value, Lines)
-    ev, _, kind = cli.metrics_run(client, cli.MetricsArgs(cmd="compare", query=CPU_QUERY, baseline="1d"), at=t.at)
-    assert kind == "promql-compare"
-    ev, _, kind = cli.metrics_run(client, cli.MetricsArgs(cmd="top", query="container_memory_working_set_bytes", by="pod", k=10), at=t.at)
-    assert kind == "promql-top"
-    t.assert_exhausted()
-    with pytest.raises(ObsError):
-        cli.metrics_run(client, cli.MetricsArgs(cmd="red", query="x"), at=t.at)
-
+# ── CLI — stdout 절제 · summary.txt 머리 ───────────────────────────────────────────
 
 def test_promql_main_top_prints_table_and_call_dir_only(replay: ReplayFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
                                                         capsys: pytest.CaptureFixture[str]) -> None:
@@ -251,4 +137,3 @@ def test_compare_summary_preamble_has_query_window_baseline(replay: ReplayFactor
     assert summary[2] == "# 기준선  %s ~ %s  (start=%.3f end=%.3f)" % (fmt_rfc3339(t.at - 3600 - 86400), fmt_rfc3339(t.at - 86400), t.at - 3600 - 86400, t.at - 86400)
     assert summary[3] == ""
     assert summary[4:] == out[:-1]
-    assert len(out) == 22

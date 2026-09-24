@@ -1,0 +1,21 @@
+지금 09-22 09:11:46Z ~ 09-22 10:11:46Z  기준선 09-21 09:11:46Z ~ 09-21 10:11:46Z (offset 86400s)  step=60s  (p95 비교)
+×1.29  Δ+3.26714e-05  now p95=0.000145735  base p95=0.000113064  {pod=api-composer-5cd4748b88-4w5hc}
+×1.08  Δ+6.97854e-05  now p95=0.0009848  base p95=0.000915015  {pod=posting-service-697c7c9468-nb6c8}
+×1.07  Δ+6.99818e-05  now p95=0.0010082  base p95=0.000938218  {pod=userinfo-service-5856d5d7bc-nh74j}
+×1.06  Δ+6.77884e-06  now p95=0.00011607  base p95=0.000109291  {pod=api-composer-5cd4748b88-5scd5}
+×1.04  Δ+4.28978e-05  now p95=0.00101809  base p95=0.000975191  {pod=posting-service-697c7c9468-2b45b}
+×1.04  Δ+1.27525e-05  now p95=0.000328209  base p95=0.000315457  {pod=careerhub-postgresql-pooler-54dcf6c55b-2rgcv}
+×1.02  Δ+0.000267377  now p95=0.0111567  base p95=0.0108894  {pod=zitadel-f65b884bd-jm9zg}
+×1.01  Δ+4.14484e-05  now p95=0.00354167  base p95=0.00350023  {pod=careerhub-nginx-gateway-nginx-6b74ff84d5-7hngr}
+×1.01  Δ+0.000141575  now p95=0.0238587  base p95=0.0237171  {pod=zitadel-login-5f84b58446-9pn4q}
+×1  Δ+0.000163282  now p95=0.0514078  base p95=0.0512445  {pod=careerhub-mongodb-arb-0}
+×0.999  Δ-3.68908e-05  now p95=0.0360153  base p95=0.0360522  {pod=careerhub-postgresql-1}
+×0.993  Δ-0.000508716  now p95=0.0757208  base p95=0.0762295  {pod=careerhub-mongodb-0}
+×0.991  Δ-0.000705485  now p95=0.0793862  base p95=0.0800917  {pod=careerhub-mongodb-1}
+×0.991  Δ-0.00013212  now p95=0.0141198  base p95=0.0142519  {pod=careerhub-postgresql-2}
+×0.978  Δ-2.16401e-05  now p95=0.000956552  base p95=0.000978193  {pod=review-service-599858944c-trqvx}
+×0.968  Δ-2.98489e-05  now p95=0.000896403  base p95=0.000926252  {pod=review-service-599858944c-ht9m8}
+×0.965  Δ-3.41186e-05  now p95=0.000942336  base p95=0.000976455  {pod=userinfo-service-5856d5d7bc-4m4pp}
+×0.963  Δ-1.717e-07  now p95=4.47031e-06  base p95=4.64201e-06  {pod=frontend-5b9cb468cd-xnpvq}
+×0.832  Δ-2.14355e-05  now p95=0.000106303  base p95=0.000127739  {pod=auth-service-869c7d45b9-2j48w}
+×0.813  Δ-2.16363e-05  now p95=9.37649e-05  base p95=0.000115401  {pod=auth-service-869c7d45b9-bsrqg}

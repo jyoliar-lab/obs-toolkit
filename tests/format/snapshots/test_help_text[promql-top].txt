@@ -1,0 +1,26 @@
+usage: promql.py top [-h] [--end END] [--max-lines MAX_LINES] [--json] [--by BY] [--k K]
+                     [--agg {sum,max,min,avg,count}]
+                     query
+
+promql.py top '<PromQL>' --by pod [--k 10] [--agg sum] [--end <시각>]
+
+레이블 축 상위 k — `topk(k, agg by (by) (query))` 로 감싸 --end 시각에 즉시 조회한다. 창이 없다(--since 를 받지 않는다).
+서버가 k 개만 돌려주므로 카디널리티 폭발이 없고, 출력은 k 줄 이하(헤더 없음).
+--by 는 쉼표로 여러 축(namespace,pod). --agg: sum(기본) · max · min · avg · count — 축으로 접는 집계.
+
+계산은 백엔드가 한다 — 코어는 질의를 조립해 결과만 받는다(연산당 질의 1회). 조립된 질의와 창은 호출 디렉터리의
+summary.txt 머리에 남는다(그대로 재실행 가능). stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만.
+
+positional arguments:
+  query                 PromQL
+
+options:
+  -h, --help            show this help message and exit
+  --end END             평가 시각 (now · -10m · unix초 · RFC3339). 기본 now — top 은 창이 없다
+  --max-lines MAX_LINES
+                        stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
+  --json                stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 항상 남는다)
+  --by BY               레이블 축. 쉼표로 여러 개. 기본 pod
+  --k K                 상위 k. 기본 10
+  --agg {sum,max,min,avg,count}
+                        축으로 접는 집계. 기본 sum
