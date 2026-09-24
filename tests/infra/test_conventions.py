@@ -1,12 +1,10 @@
-"""테스트 규약(.claude/rules/python-tests.md)을 CI 에서 지키는 메타테스트 — tests/ 의 파이썬 파일을 AST(tests/infra/test_get_only.py 의
-_imports 방식) 와 tokenize(주석) 로 훑어 여섯 규칙의 위반을 세고, 래칫 ALLOWLIST 와 비교한다.
-규칙 1~5 는 티켓(ops-workflow#106)의 것, 규칙 6(티어 밖 test_*.py)은 부모 #105 의 완료 조건을 지키려는 구현 판단이다.
-새 위반은 즉시 실패, 기존 위반은 줄어들기만 — 줄었는데 ALLOWLIST 를 안 줄여도 실패한다. 전부 비면 ALLOWLIST 를 지운다."""
+"""테스트 규약(.claude/rules/python-tests.md)을 CI 에서 지키는 메타테스트 — tests/ 의 파이썬 파일을 AST(tests/contracts/test_get_only.py 의
+_imports 방식) 와 tokenize(주석) 로 훑어 여섯 규칙의 위반을 센다. 위반은 0 이 기준이다 — 재편(ops-workflow#107)으로 래칫 allowlist 가
+비어 삭제됐다. 실패 문구가 위반을 자리 · 규칙별로 찍는다."""
 from __future__ import annotations
 
 import ast
 import io
-import json
 import re
 import tokenize
 from collections import Counter
@@ -29,11 +27,6 @@ RULES: dict[str, str] = {
     "date": "주석에 재녹화 · YYYY-MM-DD 꼴 날짜가 있다 — 출처는 커밋 메시지에",
     "tier": "test_*.py 가 세 티어(tests/contracts · format · infra) 밖에 있다 — 테스트 파일은 티어 안에",
 }
-
-ALLOWLIST: dict[str, dict[str, int]] = {
-}
-"""래칫 — 현재 위반. 키는 `<tests/ 상대 경로>::<최상위 함수 이름>`(함수 밖이면 경로만), 값은 규칙별 개수.
-위반을 고치면 여기서 그만큼 뺀다(안 빼면 실패). 실패 문구가 지금 상태를 이 꼴로 찍어 준다. 전부 비면 이 상수를 지운다."""
 
 DATE_COMMENT: re.Pattern[str] = re.compile(r"재녹화|\d{4}-\d{2}-\d{2}")
 REPLAY_CALLS: frozenset[str] = frozenset({"replay", "load_response"})
@@ -117,36 +110,14 @@ def _violations() -> Counter[tuple[str, str]]:
     return counts
 
 
-def _allowed() -> Counter[tuple[str, str]]:
-    return Counter({(key, rule): n for key, rules in ALLOWLIST.items() for rule, n in rules.items()})
+def _explain(counts: Counter[tuple[str, str]]) -> str:
+    return "\n".join("  %s  [%s] ×%d — %s" % (key, rule, n, RULES[rule]) for (key, rule), n in sorted(counts.items()))
 
 
-def _as_allowlist(counts: Counter[tuple[str, str]]) -> str:
-    """ALLOWLIST 꼴로 찍는다 — 실패 문구에서 그대로 복사한다."""
-    by_key: dict[str, dict[str, int]] = {}
-    for (key, rule), n in sorted(counts.items()):
-        by_key.setdefault(key, {})[rule] = n
-    body = "".join("    %s: %s,\n" % (json.dumps(k, ensure_ascii=False), json.dumps(v, ensure_ascii=False)) for k, v in by_key.items())
-    return "{\n%s}" % body
-
-
-def _explain(pairs: dict[tuple[str, str], tuple[int, int]]) -> str:
-    return "\n".join("  %s  [%s] 실제 %d · allowlist %d — %s" % (key, rule, actual, allowed, RULES[rule])
-                     for (key, rule), (actual, allowed) in sorted(pairs.items()))
-
-
-def test_no_violation_beyond_allowlist() -> None:
-    """tests/ 의 규약 위반이 ALLOWLIST 에 적힌 수를 넘지 않는다 — 넘는 항목은 새 위반이고, 고치는 것이 답이다(ALLOWLIST 를 늘리지 않는다)."""
-    actual, allowed = _violations(), _allowed()
-    grown = {kr: (actual[kr], allowed[kr]) for kr in actual if actual[kr] > allowed[kr]}
-    assert not grown, "새 규약 위반(.claude/rules/python-tests.md):\n%s\n\n지금 상태 전체:\n%s" % (_explain(grown), _as_allowlist(actual))
-
-
-def test_allowlist_is_not_looser_than_reality() -> None:
-    """ALLOWLIST 의 항목이 실제 위반보다 크지 않다 — 위반을 고쳤으면 ALLOWLIST 도 그만큼 줄인다. 느슨한 allowlist 는 래칫이 아니다."""
-    actual, allowed = _violations(), _allowed()
-    shrunk = {kr: (actual[kr], allowed[kr]) for kr in allowed if actual[kr] < allowed[kr]}
-    assert not shrunk, "위반이 줄었다 — ALLOWLIST 를 줄인다:\n%s\n\n지금 상태 전체:\n%s" % (_explain(shrunk), _as_allowlist(actual))
+def test_no_convention_violations() -> None:
+    """tests/ 에 규약 위반이 없다 — 있으면 자리 · 규칙 · 개수를 말한다. 고치는 것이 답이다."""
+    actual = _violations()
+    assert not actual, "규약 위반(.claude/rules/python-tests.md):\n%s" % _explain(actual)
 
 
 INFRA: Path = TESTS / "infra"
