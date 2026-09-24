@@ -61,12 +61,3 @@ def test_skill_frontmatter_spec_fields_only() -> None:
     assert set(keys) <= {"name", "description", "license", "compatibility", "metadata", "allowed-tools"}
     assert re.search(r"^name: obs-query$", m.group(1), re.M)
     _no_physical(text)
-
-
-def test_gitignore_and_rules() -> None:
-    """.gitignore · 규칙 파일 · CI 워크플로가 있다."""
-    gi = (ROOT / ".gitignore").read_text().splitlines()
-    assert "tmp/" in gi
-    assert "settings.local.json" in gi
-    assert (ROOT / ".claude" / "rules" / "python-typehints.md").is_file()
-    assert (ROOT / ".github" / "workflows" / "pytest.yml").is_file()

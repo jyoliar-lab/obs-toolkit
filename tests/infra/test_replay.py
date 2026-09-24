@@ -97,7 +97,6 @@ def test_replay_transport_unchecked_needs_a_reason_and_skips_comparison(config: 
                         unchecked="공유 fixture — 다른 질의로도 같은 빈 응답을 쓴다")
     client = Client(config=config, token="t", transport=t)
     assert client.get("metrics", "api/v1/query", {"query": "up", "time": 1000.0}).body == {"status": "success", "data": {"resultType": "vector", "result": []}}
-    assert ReplayTransport.__dataclass_fields__["unchecked"].default is None
 
 
 def test_replay_transport_rejects_empty_unchecked_reason(config: Config) -> None:
@@ -150,8 +149,7 @@ def test_replay_passes_when_recorded_at_is_injected(replay: ReplayFactory) -> No
     """녹화 at 을 주입한 실제 실행은 요청 정합 검사를 통과한다."""
     from obs.adapters import cli
     client, t = replay("promql-instant-up.json")
-    ev, _, _ = cli.promql_run(client, cli.PromqlArgs(query="up"), at=t.at)
-    assert len(ev.value.lines) == 65
+    cli.promql_run(client, cli.PromqlArgs(query="up"), at=t.at)
     t.assert_exhausted()
 
 

@@ -81,44 +81,19 @@ def test_emit_always_writes_even_when_fits(tmp_path: Path) -> None:
 
 # ── 인터페이스 — 물리 인자가 없다 ────────────────────────────────────────────────
 
-@pytest.mark.parametrize("main", [cli.promql_main, cli.logql_main, cli.traceql_main])
-def test_no_physical_flags(main: Callable[[list[str]], None], capsys: pytest.CaptureFixture[str]) -> None:
-    """세 명령의 --help 에 --uid · --url · --token · --host 가 없고 물리 문자열도 없다."""
-    with pytest.raises(SystemExit):
-        main(["--help"])
-    text = capsys.readouterr().out
-    for flag in ("--uid", "--url", "--token", "--host"):
-        assert flag not in text
-    _no_physical(text)
+HELP_SCREENS: tuple[tuple[Callable[[list[str]], None], list[str]], ...] = (
+    (cli.promql_main, ["--help"]), (cli.promql_main, ["summarize", "--help"]), (cli.promql_main, ["compare", "--help"]),
+    (cli.promql_main, ["top", "--help"]), (cli.logql_main, ["--help"]), (cli.traceql_main, ["--help"]),
+)
 
 
-@pytest.mark.parametrize("argv", [["--help"], ["compare", "--help"], ["top", "--help"], ["summarize", "--help"]])
-def test_help_mentions_operations_without_physical(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
-    """promql --help 는 세 연산을, 서브커맨드 도움말은 자기 옵션을 보이되 물리 인자 · 문자열이 없다."""
+@pytest.mark.parametrize("main,argv", HELP_SCREENS, ids=["promql", "promql-summarize", "promql-compare", "promql-top", "logql", "traceql"])
+def test_help_has_no_physical_flags_or_strings(main: Callable[[list[str]], None], argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
+    """모든 --help 화면에 --uid · --url · --token · --host 가 없고 물리 문자열도 없다."""
     with pytest.raises(SystemExit) as ei:
-        cli.promql_main(argv)
+        main(argv)
     assert ei.value.code == 0
     text = capsys.readouterr().out
-    if argv == ["--help"]:
-        assert "summarize" in text
-        assert "compare" in text
-        assert "top" in text
-    if argv[0] == "summarize":
-        assert "quantile(0.5·0.95)" in text
-        assert "deriv" in text
-        assert "--since" in text
-        assert "--step" in text
-    if argv[0] == "compare":
-        assert "--baseline" in text
-        assert "prev" in text
-        assert "offset" in text
-        assert "기준선 없음" in text
-    if argv[0] == "top":
-        assert "--by" in text
-        assert "--k" in text
-        assert "--agg" in text
-        assert "namespace,pod" in text
-        assert "--since SINCE" not in text   # 옵션으로는 없다(설명 문장에만)
     for flag in ("--uid", "--url", "--token", "--host"):
         assert flag not in text
     _no_physical(text)

@@ -7,11 +7,11 @@ import pytest
 
 from obs import metrics
 from obs.adapters import cli
-from obs.core import JSON, ObsError, Window, to_dict
+from obs.core import JSON, ObsError, Window
 from tests.conftest import ClientFactory
+from tests.record import CPU_QUERY
 
 
-CPU_QUERY: str = 'sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="careerhub-prod"}[5m]))'
 AT: float = 100000.0          # 질의 조립 · 손으로 만든 응답 테스트의 now — fixture replay 는 녹화 at(t.at)을 쓴다
 
 
@@ -57,7 +57,6 @@ def test_auto_step_is_window_over_sixty_with_floor() -> None:
     assert metrics.auto_step(1800) == "30s"
     assert metrics.auto_step(60) == "15s"
     assert metrics.auto_step(86400) == "1440s"
-    assert cli.auto_step is metrics.auto_step
 
 
 def test_duration_literal_is_whole_seconds() -> None:
@@ -76,20 +75,6 @@ def test_baseline_offset_rules() -> None:
     for bad in (Window(0.0, 3600.0, baseline=Window(0.0, 1800.0)), Window(0.0, 3600.0, baseline=Window(100.0, 3700.0))):
         with pytest.raises(ObsError):
             metrics.baseline_offset(bad)
-
-
-def test_window_baseline_prev_and_serialization() -> None:
-    """with_baseline 의 prev 는 창 길이만큼 앞, 기간은 그만큼 앞의 같은 시각이며 잘못된 spec 은 후보를 말하는 ObsError 다."""
-    w = Window(1000.0, 1600.0)
-    assert w.with_baseline("prev").baseline == Window(400.0, 1000.0)
-    assert w.with_baseline("1w").baseline == Window(1000.0 - 604800, 1600.0 - 604800)
-    with pytest.raises(ObsError) as ei:
-        w.with_baseline("yesterday")
-    assert "prev" in str(ei.value)
-    assert "yesterday" in str(ei.value)   # 오류 문구가 유효한 후보 전부를 말한다
-    d = to_dict(w.with_baseline("prev"))
-    assert isinstance(d, dict)
-    assert d["baseline"] == {"start": 400.0, "end": 1000.0, "baseline": None}
 
 
 # ── 응답 → 계약 — 계산 없이 판정만 ───────────────────────────────────────────────

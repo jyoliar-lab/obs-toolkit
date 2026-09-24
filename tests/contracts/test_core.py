@@ -64,6 +64,21 @@ def test_window_with_baseline_keeps_own_window_and_attaches_shifted_copy() -> No
     assert (b.baseline.start, b.baseline.end) == (w.start - 86400, w.end - 86400)
 
 
+def test_window_with_baseline_prev_and_period_specs() -> None:
+    """with_baseline 의 prev 는 창 길이만큼 앞의 직전 창이고, 기간 표기(1w)는 그만큼 앞의 같은 창이다."""
+    w = Window(1000.0, 1600.0)
+    assert w.with_baseline("prev").baseline == Window(400.0, 1000.0)
+    assert w.with_baseline("1w").baseline == Window(1000.0 - 604800, 1600.0 - 604800)
+
+
+def test_window_with_baseline_rejects_unknown_spec_naming_candidates() -> None:
+    """잘못된 기준선 spec 은 ObsError 이고 문구가 유효한 후보(prev)와 받은 값을 말한다."""
+    with pytest.raises(ObsError) as ei:
+        Window(1000.0, 1600.0).with_baseline("yesterday")
+    assert "prev" in str(ei.value)
+    assert "yesterday" in str(ei.value)
+
+
 def test_window_label_is_two_rfc3339_times() -> None:
     """label 은 시작 ~ 끝을 RFC3339 로 말한다."""
     assert Window(4600.0, 8200.0).label() == "%s ~ %s" % (fmt_rfc3339(4600.0), fmt_rfc3339(8200.0))

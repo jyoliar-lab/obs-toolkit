@@ -238,9 +238,3 @@ def test_decode_body_matches_client_get_rules() -> None:
     assert record.decode_body(b"") == {}
     assert record.decode_body(b"echo") == "echo"
     assert record.decode_body(b'{"a":1}') == {"a": 1}
-
-
-def test_recipes_send_what_tests_send() -> None:
-    """레시피의 질의가 테스트가 보내는 것과 같다."""
-    from tests.contracts.test_metrics import CPU_QUERY
-    assert record.CPU_QUERY == CPU_QUERY
