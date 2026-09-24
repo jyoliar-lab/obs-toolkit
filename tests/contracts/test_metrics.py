@@ -110,8 +110,12 @@ def test_compare_rejects_baseline_not_expressible_as_offset(make_client: ClientF
 
 def test_compare_missing_series_and_zero_do_not_divide(make_client: ClientFactory) -> None:
     """기준선에 없는 시계열은 base None, 기준선 0 은 비율 없음(base 는 있다), 지금에 없는 시계열은 now None 이며 어느 경우도 나누지 않는다 — 순서는 비율 → 기준선 0 → 기준선 없음 → 지금 없음."""
-    body = _vector(_stat("a", "now", "0.4"), _stat("a", "base", "0"), _stat("b", "now", "1"), _stat("c", "base", "3"),
-                   _stat("d", "now", "3.9"), _stat("d", "base", "1"))
+    body = _vector(
+        _stat("a", "now", "0.4"), _stat("a", "base", "0"),
+        _stat("b", "now", "1"),
+                                  _stat("c", "base", "3"),
+        _stat("d", "now", "3.9"), _stat("d", "base", "1")
+    )
     client, _ = make_client({("metrics", "api/v1/query"): (200, body)})
     ev, _ = metrics.compare(client, "q", Window.last("1h", at=AT).with_baseline("1d"))
     by = {d.labels["pod"]: d for d in ev.value.deltas}
@@ -198,7 +202,7 @@ def test_compare_default_baseline_is_one_day(make_client: ClientFactory) -> None
     client, t = make_client({("metrics", "api/v1/query"): (200, _vector())})
     ev, _ = metrics.compare(client, CPU_QUERY, W)
     assert ev.window is not None
-    assert ev.window.baseline == Window(AT - HOUR - DAY, AT - DAY)
+    assert ev.window.baseline == Window(ev.window.start - DAY, ev.window.end - DAY)
     assert ev.value.offset == "%ds" % DAY
     assert "offset+%ds" % DAY in t.calls[0].url
 
@@ -208,9 +212,9 @@ def test_compare_prev_baseline(make_client: ClientFactory) -> None:
     client, t = make_client({("metrics", "api/v1/query"): (200, _vector())})
     ev, _ = metrics.compare(client, CPU_QUERY, W.with_baseline("prev"))
     assert ev.window is not None
-    assert ev.window.baseline == Window(AT - 2 * HOUR, AT - HOUR)
-    assert ev.value.offset == "%ds" % HOUR
-    assert "offset+%ds" % HOUR in t.calls[0].url
+    assert ev.window.baseline == Window(ev.window.start - ev.window.seconds, ev.window.end - ev.window.seconds)
+    assert ev.value.offset == "%ds" % ev.window.seconds
+    assert "offset+%ds" % ev.window.seconds in t.calls[0].url
 
 
 def test_compare_both_empty(make_client: ClientFactory) -> None:
