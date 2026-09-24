@@ -34,10 +34,15 @@ def test_summarize_query_is_seven_stats_in_one_expression() -> None:
     """일곱 통계가 서브쿼리 `(Q)[창:step]` 위의 *_over_time · deriv 로, `stat` 이름표(label_replace)를 달고 `or` 로 한 식이다."""
     q = metrics.summarize_query(CPU_QUERY, Window.last("1h", at=AT), "60s")
     parts = q.split(" or ")
-    assert len(parts) == 7 and all(p.startswith('label_replace(') and p.endswith('"stat", "%s", "", "")' % s)
+    assert len(parts) == 7
+    assert all(p.startswith('label_replace(') and p.endswith('"stat", "%s", "", "")' % s)
                                    for p, s in zip(parts, metrics.SUMMARY_STATS))
-    assert "count_over_time(%s)" % SQ in q and "quantile_over_time(0.95, %s)" % SQ in q and "deriv(%s)" % SQ in q
-    assert "last_over_time(%s)" % SQ in q and "min_over_time(%s)" % SQ in q and "max_over_time(%s)" % SQ in q
+    assert "count_over_time(%s)" % SQ in q
+    assert "quantile_over_time(0.95, %s)" % SQ in q
+    assert "deriv(%s)" % SQ in q
+    assert "last_over_time(%s)" % SQ in q
+    assert "min_over_time(%s)" % SQ in q
+    assert "max_over_time(%s)" % SQ in q
 
 
 def test_compare_query_uses_offset_of_same_expression() -> None:
@@ -47,11 +52,18 @@ def test_compare_query_uses_offset_of_same_expression() -> None:
                  'label_replace(quantile_over_time(0.95, %s offset 86400s), "stat", "base", "", "")' % (SQ, SQ))
 
 
-def test_auto_step_is_subquery_resolution() -> None:
-    """step 자동 — 창 길이/60, 최소 15s. 서브쿼리 해상도로 쓰이고 promql --range 와 같은 함수다."""
-    assert metrics.auto_step(1800) == "30s" and metrics.auto_step(60) == "15s" and metrics.auto_step(86400) == "1440s"
-    assert metrics.duration_literal(3600.0) == "3600s" and metrics.duration_literal(0.4) == "0s"
+def test_auto_step_is_window_over_sixty_with_floor() -> None:
+    """step 자동 — 창 길이/60, 최소 15s. promql --range 와 같은 함수다."""
+    assert metrics.auto_step(1800) == "30s"
+    assert metrics.auto_step(60) == "15s"
+    assert metrics.auto_step(86400) == "1440s"
     assert cli.auto_step is metrics.auto_step
+
+
+def test_duration_literal_is_whole_seconds() -> None:
+    """duration_literal 은 초를 PromQL 기간 표기로 — 1초 미만은 0s."""
+    assert metrics.duration_literal(3600.0) == "3600s"
+    assert metrics.duration_literal(0.4) == "0s"
 
 
 def test_baseline_offset_rules() -> None:
@@ -73,9 +85,11 @@ def test_window_baseline_prev_and_serialization() -> None:
     assert w.with_baseline("1w").baseline == Window(1000.0 - 604800, 1600.0 - 604800)
     with pytest.raises(ObsError) as ei:
         w.with_baseline("yesterday")
-    assert "prev" in str(ei.value) and "yesterday" in str(ei.value)   # 오류 문구가 유효한 후보 전부를 말한다
+    assert "prev" in str(ei.value)
+    assert "yesterday" in str(ei.value)   # 오류 문구가 유효한 후보 전부를 말한다
     d = to_dict(w.with_baseline("prev"))
-    assert isinstance(d, dict) and d["baseline"] == {"start": 400.0, "end": 1000.0, "baseline": None}
+    assert isinstance(d, dict)
+    assert d["baseline"] == {"start": 400.0, "end": 1000.0, "baseline": None}
 
 
 # ── 응답 → 계약 — 계산 없이 판정만 ───────────────────────────────────────────────
@@ -92,8 +106,12 @@ def test_summaries_of_requires_n_and_marks_missing_as_nan() -> None:
     """n 이 없는 시계열은 부재(목록에서 빠진다). 있는데 다른 통계가 부재면 그 값은 NaN — 0 이 아니다."""
     res = metrics.parse_metric(_vector(_stat("a", "n", "60"), _stat("a", "p95", "0.4"), _stat("b", "p95", "1")))
     out = metrics.summaries_of(res)
-    assert len(out) == 1 and out[0].labels == {"pod": "a"} and out[0].n == 60 and out[0].p95 == 0.4
-    assert math.isnan(out[0].min) and math.isnan(out[0].slope)
+    assert len(out) == 1
+    assert out[0].labels == {"pod": "a"}
+    assert out[0].n == 60
+    assert out[0].p95 == 0.4
+    assert math.isnan(out[0].min)
+    assert math.isnan(out[0].slope)
 
 
 # ── 거부 · 판정 ──────────────────────────────────────────────────────────────────
@@ -129,17 +147,22 @@ def test_compare_missing_series_and_zero_do_not_divide(make_client: ClientFactor
     assert fields(by["b"]) == (1.0, None, None, None, False)                 # 기준선 없음
     assert fields(by["c"]) == (None, 3.0, None, None, False)                 # 지금 없음
     assert fields(by["d"]) == (3.9, 1.0, pytest.approx(3.9), pytest.approx(2.9), False)   # 보통 — 비율·Δ
-    assert not ev.value.now_empty and not ev.value.baseline_empty
+    assert not ev.value.now_empty
+    assert not ev.value.baseline_empty
     lines = cli.compare_lines(ev.value, ev.window or Window(0, 0))
     assert lines[1].startswith("×3.9  Δ+2.9  now p95=3.9  base p95=1  {pod=d}")
     assert lines[2].startswith("×—  Δ+0.4  now p95=0.4  base p95=0  (기준선 0)  {pod=a}")
-    assert lines[3] == "기준선 없음  now p95=1  {pod=b}" and lines[4] == "지금 없음  base p95=3  {pod=c}"
+    assert lines[3] == "기준선 없음  now p95=1  {pod=b}"
+    assert lines[4] == "지금 없음  base p95=3  {pod=c}"
 
 
-def test_top_query_axes_and_validation() -> None:
-    """--by 는 쉼표로 여러 축, 집계는 정해진 것만, k ≥ 1. 빈 축은 거부."""
+def test_top_query_wraps_topk_over_aggregation_by_axes() -> None:
+    """top_query 는 topk(k, <agg> by (<축들>) (q)) — 축은 여럿이고 공백은 다듬는다."""
     assert metrics.top_query("up", 5, ["namespace", " pod "], "max") == "topk(5, max by (namespace, pod) (up))"
-    for bad in (lambda: metrics.top_query("up", 0, ["pod"], "sum"), lambda: metrics.top_query("up", 5, ["pod"], "p95"),
-                lambda: metrics.top_query("up", 5, [" "], "sum")):
-        with pytest.raises(ObsError):
-            bad()
+
+
+@pytest.mark.parametrize("k,by,agg", [(0, ["pod"], "sum"), (5, ["pod"], "p95"), (5, [" "], "sum")])
+def test_top_query_rejects_bad_k_agg_or_empty_axis(k: int, by: list[str], agg: str) -> None:
+    """k < 1 · 정해지지 않은 집계 · 빈 축은 질의 전에 거부한다."""
+    with pytest.raises(ObsError):
+        metrics.top_query("up", k, by, agg)

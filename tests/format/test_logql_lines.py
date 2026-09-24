@@ -13,14 +13,19 @@ def test_logql_streams(replay: ReplayFactory) -> None:
     client, t = replay("logql-streams-careerhub-prod.json")
     ev, _, kind = cli.logql_run(client, cli.LogqlArgs(query='{namespace="careerhub-prod"}', limit=5), at=t.at)
     lines = ev.value.lines
-    assert kind == "logql" and lines[0].startswith("공통 레이블 {") and "namespace=careerhub-prod" in lines[0]
+    assert kind == "logql"
+    assert lines[0].startswith("공통 레이블 {")
+    assert "namespace=careerhub-prod" in lines[0]
     parsed = cli.parse_logs(cli.check_json(load_response("logql-streams-careerhub-prod.json"), "logs"))
     expected = sum(len(st.values) for st in parsed.streams)
-    assert len(parsed.streams) == 1 and expected == 5 and len(lines) == 1 + expected   # 재녹화: limit=5 가 한 스트림(mongodb)에서 찼다
+    assert len(parsed.streams) == 1
+    assert expected == 5
+    assert len(lines) == 1 + expected   # 재녹화: limit=5 가 한 스트림(mongodb)에서 찼다
     assert re.match(r"^\d\d-\d\d \d\d:\d\d:\d\dZ ", lines[1])   # 시각은 UTC 이고 Z 로 표기한다(마찰 2)
     # backward: 최신이 먼저
     assert lines[1][:14] >= lines[-1][:14]
-    assert "limit=5" in t.calls[0].url and "direction=backward" in t.calls[0].url
+    assert "limit=5" in t.calls[0].url
+    assert "direction=backward" in t.calls[0].url
     assert "start=%d" % int((t.at - 3600) * 1e9) in t.calls[0].url
     _no_physical("\n".join(lines))
 

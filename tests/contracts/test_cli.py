@@ -51,7 +51,10 @@ def test_emit_truncates_and_spills(tmp_path: Path) -> None:
     out: list[str] = []
     lines = ["l%d" % i for i in range(10)]
     res = cli.emit(lines, {"full": True}, "k", max_lines=3, env=env, out=out.append)
-    assert res.lines == ["l0", "l1", "l2"] and res.cut == 7 and res.ref.startswith("tmp/obs/") and res.ref.endswith("-k")
+    assert res.lines == ["l0", "l1", "l2"]
+    assert res.cut == 7
+    assert res.ref.startswith("tmp/obs/")
+    assert res.ref.endswith("-k")
     assert out[-1] == "… 7줄 더 있음 (총 10줄). 원본·요약: %s/ (raw.json · summary.txt)" % res.ref
     assert json.loads((tmp_path / res.ref / "raw.json").read_text()) == {"full": True}
     assert (tmp_path / res.ref / "summary.txt").read_text().splitlines() == lines
@@ -62,7 +65,8 @@ def test_emit_quiet_writes_files_prints_only_path(tmp_path: Path) -> None:
     env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     out: list[str] = []
     res = cli.emit(["a", "b"], {"x": 1}, "k", max_lines=3, quiet=True, env=env, out=out.append)
-    assert res.lines == [] and out == ["원본·요약: %s/ (raw.json · summary.txt)" % res.ref]
+    assert res.lines == []
+    assert out == ["원본·요약: %s/ (raw.json · summary.txt)" % res.ref]
     assert (tmp_path / res.ref / "summary.txt").read_text() == "a\nb\n"
 
 
@@ -71,7 +75,8 @@ def test_emit_always_writes_even_when_fits(tmp_path: Path) -> None:
     env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     out: list[str] = []
     res = cli.emit(["a", "b"], {"x": 1}, "k", max_lines=3, env=env, out=out.append)
-    assert res.cut == 0 and out == ["a", "b", "원본·요약: %s/ (raw.json · summary.txt)" % res.ref]
+    assert res.cut == 0
+    assert out == ["a", "b", "원본·요약: %s/ (raw.json · summary.txt)" % res.ref]
     assert sorted(q.name for q in (tmp_path / res.ref).iterdir()) == ["raw.json", "summary.txt"]
 
 
@@ -96,13 +101,46 @@ def test_help_mentions_operations_without_physical(argv: list[str], capsys: pyte
     assert ei.value.code == 0
     text = capsys.readouterr().out
     if argv == ["--help"]:
-        assert "summarize" in text and "compare" in text and "top" in text
+        assert "summarize" in text
+        assert "compare" in text
+        assert "top" in text
     if argv[0] == "summarize":
-        assert "quantile(0.5·0.95)" in text and "deriv" in text and "--since" in text and "--step" in text
+        assert "quantile(0.5·0.95)" in text
+        assert "deriv" in text
+        assert "--since" in text
+        assert "--step" in text
     if argv[0] == "compare":
-        assert "--baseline" in text and "prev" in text and "offset" in text and "기준선 없음" in text
+        assert "--baseline" in text
+        assert "prev" in text
+        assert "offset" in text
+        assert "기준선 없음" in text
     if argv[0] == "top":
-        assert "--by" in text and "--k" in text and "--agg" in text and "namespace,pod" in text and "--since SINCE" not in text   # 옵션으로는 없다(설명 문장에만)
+        assert "--by" in text
+        assert "--k" in text
+        assert "--agg" in text
+        assert "namespace,pod" in text
+        assert "--since SINCE" not in text   # 옵션으로는 없다(설명 문장에만)
     for flag in ("--uid", "--url", "--token", "--host"):
         assert flag not in text
     _no_physical(text)
+
+
+# ── 파서 — 손으로 만든 형태 ───────────────────────────────────────────────────────
+
+def test_parse_metric_scalar_goes_to_scalar_field() -> None:
+    """scalar 응답은 scalar 필드로 옮겨지고 한 줄로 렌더링된다."""
+    scalar = cli.parse_metric({"data": {"resultType": "scalar", "result": [1.0, "42"]}})
+    assert scalar.scalar == "42"
+    assert cli.instant_lines(scalar) == ["42"]
+
+
+def test_parse_metric_broken_result_is_empty() -> None:
+    """형태가 깨진 result 는 예외가 아니라 빈 시계열 목록이다."""
+    assert cli.parse_metric({"data": {"resultType": "vector", "result": "garbage"}}).series == []
+
+
+def test_promql_main_top_rejects_since() -> None:
+    """top 은 창이 없으므로 --since 를 받지 않는다 — argparse 가 거부한다(exit 2)."""
+    with pytest.raises(SystemExit) as ei:
+        cli.promql_main(["top", "x", "--since", "1h"])
+    assert ei.value.code == 2

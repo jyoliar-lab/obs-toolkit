@@ -20,7 +20,9 @@ def test_scripts_are_thin_executable_shims() -> None:
         p = ROOT / "bin" / name
         assert p.stat().st_mode & stat.S_IXUSR, "%s 는 실행 가능해야 한다" % name
         src = p.read_text(encoding="utf-8")
-        assert src.startswith("#!/usr/bin/env python3") and fn in src and len(src.splitlines()) < 20
+        assert src.startswith("#!/usr/bin/env python3")
+        assert fn in src
+        assert len(src.splitlines()) < 20
 
 
 def test_shim_finds_plugin_root_from_any_cwd(tmp_path: Path) -> None:
@@ -28,7 +30,8 @@ def test_shim_finds_plugin_root_from_any_cwd(tmp_path: Path) -> None:
     import subprocess
     import sys as _sys
     out = subprocess.run([_sys.executable, str(ROOT / "bin" / "promql.py"), "--help"], capture_output=True, text=True, cwd=tmp_path)
-    assert out.returncode == 0 and out.stdout.startswith("usage: promql.py"), out.stderr[-300:]
+    assert out.returncode == 0, out.stderr[-300:]
+    assert out.stdout.startswith("usage: promql.py"), out.stderr[-300:]
 
 
 def test_plugin_manifests() -> None:
@@ -36,12 +39,17 @@ def test_plugin_manifests() -> None:
     plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
     assert plugin["name"] == "obs-toolkit"
     market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text())
-    assert market["name"] == "obs-toolkit" and market["plugins"][0]["name"] == "obs-toolkit" and market["plugins"][0]["source"] == "./"
+    assert market["name"] == "obs-toolkit"
+    assert market["plugins"][0]["name"] == "obs-toolkit"
+    assert market["plugins"][0]["source"] == "./"
     hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())
     cmd = hooks["hooks"]["SessionStart"][0]["hooks"][0]["command"]
-    assert "${CLAUDE_PLUGIN_ROOT}" in cmd and "session-env.sh" in cmd
+    assert "${CLAUDE_PLUGIN_ROOT}" in cmd
+    assert "session-env.sh" in cmd
     sh = (ROOT / "hooks" / "session-env.sh").read_text()
-    assert "CLAUDE_ENV_FILE" in sh and "PYTHONPATH" in sh and "PATH" in sh
+    assert "CLAUDE_ENV_FILE" in sh
+    assert "PYTHONPATH" in sh
+    assert "PATH" in sh
 
 
 def test_skill_frontmatter_spec_fields_only() -> None:
@@ -59,6 +67,7 @@ def test_skill_frontmatter_spec_fields_only() -> None:
 def test_gitignore_and_rules() -> None:
     """저장소 기본 — .gitignore 에 tmp/·settings.local.json, 규칙 파일(.claude/rules/python-typehints.md)과 CI 워크플로가 있다."""
     gi = (ROOT / ".gitignore").read_text().splitlines()
-    assert "tmp/" in gi and "settings.local.json" in gi
+    assert "tmp/" in gi
+    assert "settings.local.json" in gi
     assert (ROOT / ".claude" / "rules" / "python-typehints.md").is_file()
     assert (ROOT / ".github" / "workflows" / "pytest.yml").is_file()

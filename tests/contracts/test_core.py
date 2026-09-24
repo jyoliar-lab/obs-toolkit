@@ -17,43 +17,66 @@ from obs.core import (
     Budget, Config, Lines, BudgetExceeded, Client, Evidence, ObsError, Response, Window, doctor, fmt_rfc3339,
     http_error_message, load_config, parse_duration, parse_time, prune, spill, spill_ref, spill_root, to_dict, to_json,
 )
-from tests.conftest import PHYSICAL, ClientFactory, FakeTransport
+from tests.conftest import PHYSICAL, ClientFactory, FakeTransport, RouteKey
 
 
 # ── 시간 ────────────────────────────────────────────────────────────────────────
 
 def test_parse_duration() -> None:
     """기간 표기 파서 — Prometheus/Loki 와 같은 표기(30s·5m·1.5h·2d·500ms)를 초로 바꾸고, 표기가 아니면 ObsError."""
-    assert parse_duration("30s") == 30 and parse_duration("5m") == 300 and parse_duration("1.5h") == 5400
-    assert parse_duration("2d") == 172800 and parse_duration("500ms") == 0.5
+    assert parse_duration("30s") == 30
+    assert parse_duration("5m") == 300
+    assert parse_duration("1.5h") == 5400
+    assert parse_duration("2d") == 172800
+    assert parse_duration("500ms") == 0.5
     with pytest.raises(ObsError):
         parse_duration("yesterday")
 
 
 def test_parse_time() -> None:
     """시각 표기 파서 — None/"now" 는 기준 시각, "-1h" 는 기준 대비 상대, 숫자는 unix 초, RFC3339 는 UTC 로 해석. 그 밖은 ObsError."""
-    assert parse_time(None, 100.0) == 100.0 and parse_time("now", 100.0) == 100.0
-    assert parse_time("-1h", 10000.0) == 6400.0 and parse_time("1234", 0.0) == 1234.0
+    assert parse_time(None, 100.0) == 100.0
+    assert parse_time("now", 100.0) == 100.0
+    assert parse_time("-1h", 10000.0) == 6400.0
+    assert parse_time("1234", 0.0) == 1234.0
     assert parse_time("2026-09-08T00:00:00Z", 0.0) == 1788825600.0
     with pytest.raises(ObsError):
         parse_time("tomorrow", 0.0)
 
 
-def test_window() -> None:
-    """Window — since/end 로 창을 만들고(길이·경계), shifted 가 창을 옮기며, with_baseline 은 본 창을 그대로 둔 채
-    같은 창을 offset 만큼 앞으로 옮겨 기준선으로 달고(start·end 둘 다 명시 검증), label 과 to_dict(중첩 baseline 포함)가 맞는지."""
+def test_window_last_builds_since_and_end() -> None:
+    """Window.last 는 since · end 표기로 창을 만든다 — 길이와 양 끝."""
     w = Window.last("1h", "-30m", at=10000.0)
     assert (w.start, w.end, w.seconds) == (4600.0, 8200.0, 3600.0)
-    assert w.shifted(60) == Window(4660.0, 8260.0)
+
+
+def test_window_shifted_moves_both_ends() -> None:
+    """shifted 는 창의 양 끝을 같은 만큼 옮긴다."""
+    assert Window(4600.0, 8200.0).shifted(60) == Window(4660.0, 8260.0)
+
+
+def test_window_with_baseline_keeps_own_window_and_attaches_shifted_copy() -> None:
+    """with_baseline 은 본 창을 그대로 둔 채 같은 창을 offset 만큼 앞으로 옮겨 기준선으로 단다."""
+    w = Window(4600.0, 8200.0)
     b = w.with_baseline("1d")
-    assert (b.start, b.end) == (w.start, w.end)                                   # 본 창은 그대로
+    assert (b.start, b.end) == (w.start, w.end)
     assert b.baseline is not None
-    assert (b.baseline.start, b.baseline.end) == (w.start - 86400, w.end - 86400)  # 하루 앞의 같은 창
-    assert w.label() == "%s ~ %s" % (fmt_rfc3339(4600.0), fmt_rfc3339(8200.0))
-    d = to_dict(b)
+    assert (b.baseline.start, b.baseline.end) == (w.start - 86400, w.end - 86400)
+
+
+def test_window_label_is_two_rfc3339_times() -> None:
+    """label 은 시작 ~ 끝을 RFC3339 로 말한다."""
+    assert Window(4600.0, 8200.0).label() == "%s ~ %s" % (fmt_rfc3339(4600.0), fmt_rfc3339(8200.0))
+
+
+def test_window_to_dict_nests_baseline() -> None:
+    """to_dict 는 기준선을 중첩된 dict 로 푼다 — 기준선의 기준선은 None."""
+    d = to_dict(Window(4600.0, 8200.0).with_baseline("1d"))
     assert isinstance(d, dict)
     bl = d["baseline"]
-    assert isinstance(bl, dict) and bl["start"] == 4600.0 - 86400 and bl["baseline"] is None
+    assert isinstance(bl, dict)
+    assert bl["start"] == 4600.0 - 86400
+    assert bl["baseline"] is None
 
 
 # ── 직렬화 ──────────────────────────────────────────────────────────────────────
@@ -65,7 +88,9 @@ def test_dataclasses_are_json_serializable(config: Config) -> None:
     for obj in (ev, config, Budget(), Response("metrics", "api/v1/query", 200, {"a": 1})):
         json.loads(to_json(obj))
     d = to_dict(ev)
-    assert isinstance(d, dict) and d["window"] == {"start": 1.0, "end": 2.0, "baseline": None} and d["value"] == {"lines": ["1 {}"]}
+    assert isinstance(d, dict)
+    assert d["window"] == {"start": 1.0, "end": 2.0, "baseline": None}
+    assert d["value"] == {"lines": ["1 {}"]}
     with pytest.raises(TypeError):
         to_dict(object())
 
@@ -84,7 +109,8 @@ def test_spill_writes_and_prunes(tmp_path: Path) -> None:
     env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     paths = [spill("k", {"i": i}, ["요약 %d" % i, "둘째 줄"], env, keep=3) for i in range(5)]
     root = spill_root(env)
-    assert all(p.parent == root and p.name.endswith("-k") for p in paths) and all(p.is_dir() for p in paths[2:])
+    assert all(p.parent == root and p.name.endswith("-k") for p in paths)
+    assert all(p.is_dir() for p in paths[2:])
     assert len(set(paths)) == 5                                                        # 이름 재사용 없음 — 경로는 그 호출만 가리킨다
     assert set(root.iterdir()) == set(paths[2:])                                       # 최근 3개만 남는다
     assert all(not p.exists() for p in paths[:2])                                     # 오래된 2개는 지워졌다
@@ -174,7 +200,8 @@ def test_http_errors_are_logical(make_client: ClientFactory, status: int, needle
     with pytest.raises(ObsError) as ei:
         client.get("logs", "loki/api/v1/query_range")
     msg = str(ei.value)
-    assert msg.startswith("logs ") and needle in msg
+    assert msg.startswith("logs ")
+    assert needle in msg
     for word in PHYSICAL:
         assert word not in msg, msg
 
@@ -184,7 +211,8 @@ def test_query_error_passes_backend_message(make_client: ClientFactory) -> None:
     client, _ = make_client({("metrics", "api/v1/query"): (400, {"status": "error", "error": 'parse error: unexpected "}"'})})
     with pytest.raises(ObsError) as ei:
         client.get("metrics", "api/v1/query", {"query": "up}"})
-    assert 'parse error: unexpected "}"' in str(ei.value) and "질의를 고쳐" in str(ei.value)
+    assert 'parse error: unexpected "}"' in str(ei.value)
+    assert "질의를 고쳐" in str(ei.value)
     assert http_error_message("logs", 422, "plain text reason") == "logs 백엔드가 질의를 거부했다(422): plain text reason — 질의를 고쳐 다시."
 
 
@@ -195,7 +223,8 @@ def test_not_found_is_agent_fixable(make_client: ClientFactory) -> None:
     with pytest.raises(ObsError) as ei:
         client.get("traces", "api/traces/deadbeef")
     msg = str(ei.value)
-    assert msg.startswith("traces 백엔드에 그 자원이 없다(404): trace not found") and "다시" in msg
+    assert msg.startswith("traces 백엔드에 그 자원이 없다(404): trace not found")
+    assert "다시" in msg
     assert "사람에게" in msg.split("다시", 1)[1]   # 반복되는 404 만 사람에게 — 순서가 그렇다
 
 
@@ -207,7 +236,8 @@ def test_gateway_errors_are_agent_fixable(make_client: ClientFactory, status: in
     with pytest.raises(ObsError) as ei:
         client.get("logs", "loki/api/v1/query_range")
     msg = str(ei.value)
-    assert msg.startswith("logs 백엔드가 제때 답하지 못했다(%d)" % status) and "좁혀 다시" in msg
+    assert msg.startswith("logs 백엔드가 제때 답하지 못했다(%d)" % status)
+    assert "좁혀 다시" in msg
     assert "사람에게" in msg.split("다시", 1)[1]
     for word in PHYSICAL:
         assert word not in msg
@@ -220,7 +250,9 @@ def test_read_timeout_is_agent_fixable(make_client: ClientFactory) -> None:
     with pytest.raises(ObsError) as ei:
         client.get("logs", "loki/api/v1/query_range")
     msg = str(ei.value)
-    assert msg.startswith("logs 백엔드가 30초 안에 답하지 않았다") and "좁혀 다시" in msg and "닿지 못했다" not in msg
+    assert msg.startswith("logs 백엔드가 30초 안에 답하지 않았다")
+    assert "좁혀 다시" in msg
+    assert "닿지 못했다" not in msg
     assert "사람에게" in msg.split("다시", 1)[1]
 
 
@@ -230,7 +262,8 @@ def test_urllib_read_timeout_maps_to_transport_timeout(base_env: dict[str, str],
     client = Client(config=load_config({**base_env, "OBS_GRAFANA_URL": slow_server.base}), token="t", timeout=0.3)
     with pytest.raises(ObsError) as ei:
         client.get("logs", "loki/api/v1/query_range", {"query": "{a=\"b\"}"})
-    assert "안에 답하지 않았다" in str(ei.value) and "닿지 못했다" not in str(ei.value)
+    assert "안에 답하지 않았다" in str(ei.value)
+    assert "닿지 못했다" not in str(ei.value)
 
 
 def test_transport_failure_is_logical(make_client: ClientFactory) -> None:
@@ -239,7 +272,8 @@ def test_transport_failure_is_logical(make_client: ClientFactory) -> None:
     with pytest.raises(ObsError) as ei:
         client.get("traces", "api/search")
     msg = str(ei.value)
-    assert msg.startswith("traces 백엔드에 닿지 못했다") and "obs-doctor.py" in msg
+    assert msg.startswith("traces 백엔드에 닿지 못했다")
+    assert "obs-doctor.py" in msg
     for word in PHYSICAL:
         assert word not in msg
 
@@ -308,7 +342,8 @@ def test_transport_never_consults_system_proxy(monkeypatch: pytest.MonkeyPatch, 
         monkeypatch.delenv(k, raising=False)
     client = Client(config=load_config({**base_env, "OBS_GRAFANA_URL": local_server.base}), token="t")
     r = client.get("metrics", "api/v1/query", {"query": "up"})
-    assert r.status == 200 and local_server.seen == ["/api/datasources/proxy/uid/prometheus/api/v1/query?query=up"]
+    assert r.status == 200
+    assert local_server.seen == ["/api/datasources/proxy/uid/prometheus/api/v1/query?query=up"]
 
 
 def test_transport_honors_env_proxy(monkeypatch: pytest.MonkeyPatch, base_env: dict[str, str], local_server: LocalServer) -> None:
@@ -324,18 +359,29 @@ def test_transport_honors_env_proxy(monkeypatch: pytest.MonkeyPatch, base_env: d
 
 # ── doctor ──────────────────────────────────────────────────────────────────────
 
-def test_doctor_shows_physical_and_probes(config: Config, base_env: dict[str, str]) -> None:
-    """doctor 는 사람용 — 물리 URL·uid·출처·spill 자리를 보이고 백엔드마다 probe 결과(ok/HTTP/논리 오류 문구)를 담되, 토큰 값은 직렬화해도 나오지 않는다.
-    한 백엔드가 401 이면 보고서 전체가 ok=False."""
-    t = FakeTransport(config, routes={("metrics", "api/v1/status/buildinfo"): (200, {}), ("logs", "loki/api/v1/labels"): (200, {}),
-                                      ("traces", "api/echo"): (401, b"")})
-    rep = doctor(config, "test-token-not-real", env=base_env, transport=t)
-    assert rep.grafana_url.value.startswith("https://") and rep.token_present and not rep.ok
+def _doctor_routes(traces_status: int) -> dict[RouteKey, tuple[int, object]]:
+    """doctor 의 probe 세 개 — traces 만 상태를 바꿔 준다."""
+    return {("metrics", "api/v1/status/buildinfo"): (200, {}), ("logs", "loki/api/v1/labels"): (200, {}), ("traces", "api/echo"): (traces_status, b"")}
+
+
+def test_doctor_reports_physical_and_per_backend_probes(config: Config, base_env: dict[str, str]) -> None:
+    """doctor 는 물리 URL · spill 자리를 보이고 백엔드마다 probe 결과를 담는다 — 한 백엔드가 401 이면 보고서 전체가 ok=False."""
+    rep = doctor(config, "test-token-not-real", env=base_env, transport=FakeTransport(config, routes=_doctor_routes(401)))
+    assert rep.grafana_url.value.startswith("https://")
+    assert not rep.ok
     by = {p.backend: p for p in rep.probes}
-    assert by["metrics"].ok and by["logs"].ok and not by["traces"].ok
+    assert by["metrics"].ok
+    assert by["logs"].ok
+    assert not by["traces"].ok
     assert by["traces"].detail.startswith("traces 백엔드 인증 실패")
     assert all(p.url.startswith(config.grafana_url.value) for p in rep.probes)
     assert rep.spill_dir.endswith(os.path.join("tmp", "obs"))
+
+
+def test_doctor_report_never_serializes_token(config: Config, base_env: dict[str, str]) -> None:
+    """doctor 보고서를 직렬화해도 토큰 값은 나오지 않는다 — 있음/없음(token_present)뿐."""
+    rep = doctor(config, "test-token-not-real", env=base_env, transport=FakeTransport(config, routes=_doctor_routes(200)))
+    assert rep.token_present
     assert "test-token-not-real" not in to_json(rep)
 
 
@@ -343,5 +389,7 @@ def test_doctor_without_token_skips_probes(config: Config, base_env: dict[str, s
     """토큰이 없으면 doctor 는 연결 시도를 하지 않고(transport 호출 0) 각 probe 에 "토큰 없음" 을 적는다 — 없는 토큰으로 401 을 만들어 보이지 않는다."""
     t = FakeTransport(config)
     rep = doctor(config, "", env=base_env, transport=t)
-    assert not rep.token_present and not rep.ok and not t.calls
+    assert not rep.token_present
+    assert not rep.ok
+    assert not t.calls
     assert all(not p.ok and "토큰 없음" in p.detail for p in rep.probes)

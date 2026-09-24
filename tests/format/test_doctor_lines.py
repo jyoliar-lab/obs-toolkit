@@ -14,5 +14,8 @@ def test_doctor_lines_show_url_and_hide_token() -> None:
         probes=[Probe("metrics", "prom", "https://gw.example/p/prom/api", False, 401, "metrics 백엔드 인증 실패(401)")],
     )
     text = "\n".join(cli.doctor_lines(rep))
-    assert "https://gw.example" in text and "uid metrics   prom  (env:OBS_UID_METRICS)" in text
-    assert "token         있음 (env)" in text and "✗ metrics  HTTP 401" in text and "결론: 문제 있음" in text
+    assert "https://gw.example" in text
+    assert "uid metrics   prom  (env:OBS_UID_METRICS)" in text
+    assert "token         있음 (env)" in text
+    assert "✗ metrics  HTTP 401" in text
+    assert "결론: 문제 있음" in text

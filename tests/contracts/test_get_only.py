@@ -46,6 +46,7 @@ def test_core_never_sets_http_method() -> None:
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "Request":
             request_calls += 1
             kws = {k.arg for k in node.keywords}
-            assert "method" not in kws and "data" not in kws, "Request 에 method/data 를 주지 않는다"
+            assert "method" not in kws, "Request 에 method/data 를 주지 않는다"
+            assert "data" not in kws, "Request 에 method/data 를 주지 않는다"
             assert len(node.args) == 1, "Request 위치 인자는 url 하나 — data 를 위치 인자로도 주지 않는다"
     assert request_calls == 1, "HTTP 요청을 만드는 자리는 정확히 하나다"
