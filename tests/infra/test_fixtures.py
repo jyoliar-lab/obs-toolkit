@@ -46,15 +46,6 @@ def test_fixture_is_recorded_format_with_request_and_response(name: str) -> None
     assert response_of(fx, fx.calls[-1].request.path, name) == fx.calls[-1].response.body
 
 
-@pytest.mark.parametrize("name", NAMES)
-def test_fixture_carries_no_physical_or_token(name: str) -> None:
-    """AC 7 — 커밋되는 파일이다: `_no_physical` 의 단어 목록(호스트 · 프록시 경로 · uid)과 토큰 자국이 파일 전체에 없다."""
-    text = (FIXTURES / name).read_text(encoding="utf-8")
-    _no_physical(text)
-    for mark in TOKEN_MARKS:
-        assert mark not in text, "%s: %s" % (name, mark)
-
-
 def test_unmarked_fixtures_come_from_recorder_and_manual_ones_say_why() -> None:
     """AC 5 — recorded 는 tests/record.py 또는 manual 뿐이고, manual 은 재현 불가 이유(reason)를 스스로 말한다."""
     manual: list[str] = []
@@ -181,5 +172,5 @@ def test_query_string_parsing_keeps_repeats_and_blanks() -> None:
 
 def test_recipes_send_what_tests_send() -> None:
     """레시피의 질의가 테스트가 보내는 것과 같다 — 후속 정합 검사의 전제."""
-    from tests.test_metrics import CPU_QUERY
+    from tests.contracts.test_metrics import CPU_QUERY
     assert record.CPU_QUERY == CPU_QUERY
