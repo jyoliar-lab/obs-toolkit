@@ -1,7 +1,7 @@
 """tests/replay.py — fixture replay: 나간 요청 == 녹화 요청 검사.
 
 테스트가 fixture 로 응답을 돌려줄 때(replay), **실제로 나간 요청이 fixture 에 녹화된 요청과 같은지** 호출마다 검사한다.
-경로 조각 라우팅(`"api/v1/query?"` 가 어떤 질의든 통과)은 코어가 질의 조립을 바꿔도 낡은 응답으로 테스트를 통과시킨다 —
+경로만 보는 라우팅(FakeTransport — 질의는 키에 없다)은 코어가 질의 조립을 바꿔도 낡은 응답으로 테스트를 통과시킨다 —
 이 검사가 그 조용한 어긋남을 실패로 만든다.
 
 - `request_key(url, config)` — 독립 부품. 물리(호스트 · 프록시 접두 · uid)를 지우고 네이티브 경로 + 정렬된 query 파라미터로 정규화한다.
@@ -9,7 +9,7 @@
   나중에 파일명 없이 요청으로 fixture 를 찾는 replay 의 인덱스 키이기도 하다(그 일은 미정).
 - `ReplayTransport(expected, config, unchecked=None)` — `(url, headers, timeout) → (status, body)`. 녹화된 호출 목록을 **순서대로** 돌려주며,
   호출마다 `request_key(나간 url)` 과 녹화 키를 비교해 다르면 AssertionError(두 요청이 나란히 보인다). 녹화보다 많이 부르면 실패.
-  검사를 끄는 유일한 길은 `unchecked=<이유>` — 이유가 코드에 남는다(공유 fixture `promql-instant-empty.json` 용). 기본값은 검사한다.
+  검사를 끄는 유일한 길은 `unchecked=<이유>` — 이유가 코드에 남는다(공유 fixture `promql-instant-empty.json` 용). 빈 이유(`""`)는 거부한다. 기본값은 검사한다.
   `recorded: manual` fixture 는 요청이 추정이라 비교하지 않고 경고를 낸다.
 - 시계는 하나다: 테스트는 고정 `at` 대신 fixture 의 `at`(녹화 시점)을 `*_run(…, at=at)` 에 주입한다 — 그래야 녹화와 같은 질의가 나간다.
   같은 replay 의 fixture 들은 `at` 이 같아야 한다(다르면 ValueError).
@@ -97,6 +97,8 @@ class ReplayTransport:
     calls: list[Call] = field(default_factory=list[Call])
 
     def __post_init__(self) -> None:
+        if self.unchecked == "":
+            raise ValueError("unchecked 가 비어 있다 — 검사를 끄려면 이유를 적는다(unchecked=<이유>)")
         for l in self.expected:
             if l.manual and self.unchecked is None:
                 warnings.warn("%s 은 recorded: manual — 요청이 추정이라 비교하지 않는다(%s)" % (l.name, l.fixture.reason), stacklevel=3)

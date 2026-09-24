@@ -8,7 +8,7 @@
 - `bin/` — 명령 4개(얇은 shim). Claude Code 가 플러그인이 켜진 동안 자동으로 PATH 에 올린다 — hook 없이도 bare name 실행.
 - `skills/obs-query/` — 스킬(Agent Skills 스펙 필드만). 명령은 `bin/` 에만 있다.
 - `hooks/hooks.json` — SessionStart 가 `bin/` 을 PATH 에, 플러그인 루트를 PYTHONPATH 에 올린다(`--plugin-dir` 대비).
-- `tests/` + `fixtures/` — 녹화 fixture 로 도는 pytest. GET 유일성 · 설정 해석 순서 · 물리 비노출을 검사한다. fixture 는 **호출 요청(백엔드 · 경로 · query string · 기준 시각 `at`)과 응답을 함께 담은 JSON 봉투**(`tests/record.py` 의 형식)이고, 테스트는 `replay`(conftest)로 녹화 호출을 순서대로 돌려받으며 **나간 요청이 녹화 요청과 같은지 호출마다 검사**한다(`tests/replay.py` — `request_key` 정규화 · 녹화 `at` 주입 · 검사를 끄는 유일한 길은 `unchecked=<이유>`). 녹화기 `tests/record.py` 는 `Client.transport` 래퍼 — 실환경에 한 번 돌리면 파일 이름 · 호출(전부) · 응답이 한 번에 떨어진다.
+- `tests/` + `fixtures/` — 녹화 fixture 로 도는 pytest. 세 티어(`contracts/` 약속 · `format/` 출력 스냅샷 · `infra/` 하네스)와 작성 규칙은 `.claude/rules/python-tests.md`, 그것을 지키는 메타테스트(래칫 allowlist)는 `tests/infra/test_conventions.py`. GET 유일성 · 설정 해석 순서 · 물리 비노출을 검사한다. fixture 는 **호출 요청(백엔드 · 경로 · query string · 기준 시각 `at`)과 응답을 함께 담은 JSON 봉투**(`tests/record.py` 의 형식)이고, 테스트는 `replay`(conftest)로 녹화 호출을 순서대로 돌려받으며 **나간 요청이 녹화 요청과 같은지 호출마다 검사**한다(`tests/replay.py` — `request_key` 정규화 · 녹화 `at` 주입 · 검사를 끄는 유일한 길은 `unchecked=<이유>`). 녹화기 `tests/record.py` 는 `Client.transport` 래퍼 — 실환경에 한 번 돌리면 파일 이름 · 호출(전부) · 응답이 한 번에 떨어진다.
 
 ## 쓰기
 
@@ -33,7 +33,7 @@ agent 인터페이스에는 URL · uid · 토큰이 없다. 물리는 `obs-docto
 python -m pip install pytest==9.1.1 pyright==1.1.411
 python -m pyright   # strict — Any 없음
 python -m pytest
-OBS_TEST_DUMP=1 python -m pytest tests/test_cli.py   # 각 테스트가 받은 Evidence.lines 를 tmp/test-output/ 에 덤프
+OBS_TEST_UPDATE=1 python -m pytest tests/format       # format 티어의 스냅샷(tests/format/snapshots/) 을 이번 출력으로 갱신
 
 # fixture 재녹화 — 실환경 토큰(OBS_GRAFANA_TOKEN) 필요. 한 실행의 모든 fixture 가 같은 at 을 받는다
 python -m tests.record --all                        # 13개 전부(레시피: tests/record.py 의 RECIPES)

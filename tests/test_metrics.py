@@ -12,17 +12,11 @@ import pytest
 from obs import metrics
 from obs.adapters import cli
 from obs.core import JSON, Evidence, Lines, ObsError, Window, fmt_rfc3339, to_dict
-from tests.conftest import ClientFactory, ReplayFactory, load_call, load_response
+from tests.conftest import UNCHECKED_SHARED_EMPTY, ClientFactory, ReplayFactory, _no_physical, load_call, load_response
 
-PHYSICAL: tuple[str, ...] = ("obs.mg", "jyo-liar.com/api", "datasources/proxy", "uid/prometheus")
 CPU_QUERY: str = 'sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="careerhub-prod"}[5m]))'
 AT: float = 100000.0          # 질의 조립 · 손으로 만든 응답 테스트의 now — fixture replay 는 녹화 at(t.at)을 쓴다
 SQ: str = "(%s)[3600s:60s]" % CPU_QUERY
-
-
-def _no_physical(text: str) -> None:
-    for word in PHYSICAL:
-        assert word not in text, "agent 출력에 물리 정보: %s" % word
 
 
 def _vector(*items: tuple[dict[str, str], str]) -> dict[str, JSON]:
@@ -116,7 +110,7 @@ def test_summarize_fixture_one_query(replay: ReplayFactory) -> None:
 
 def test_summarize_empty_is_no_data_not_zero(replay: ReplayFactory) -> None:
     """녹화한 빈 응답(없는 namespace) — series 가 비고, 렌더링은 "데이터 없음" 이지 0 이 아니다."""
-    client, t = replay("promql-instant-empty.json", unchecked="공유 fixture — 다섯 테스트가 다른 질의로 같은 빈 응답을 쓴다(녹화 요청은 summarize 의 것)")
+    client, t = replay("promql-instant-empty.json", unchecked=UNCHECKED_SHARED_EMPTY)
     ev, _ = metrics.summarize(client, CPU_QUERY, Window.last("1h", at=t.at))
     assert ev.value.series == []
     lines = cli.summary_lines(ev.value, Window.last("1h", at=t.at))
@@ -154,7 +148,7 @@ def test_compare_fixture_one_query_offset(replay: ReplayFactory) -> None:
 
 def test_compare_default_baseline_is_one_day(replay: ReplayFactory) -> None:
     """기준선이 없는 Window 를 주면 DEFAULT_BASELINE(1d) — offset 86400s. #102 의 red 도 같은 기본값을 쓴다."""
-    client, t = replay("promql-instant-empty.json", unchecked="공유 fixture — 다섯 테스트가 다른 질의로 같은 빈 응답을 쓴다(녹화 요청은 summarize 의 것)")
+    client, t = replay("promql-instant-empty.json", unchecked=UNCHECKED_SHARED_EMPTY)
     ev, _ = metrics.compare(client, CPU_QUERY, Window.last("1h", at=t.at))
     assert ev.window is not None and ev.window.baseline == Window(t.at - 3600 - 86400, t.at - 86400)
     assert ev.value.offset == "86400s" and "offset+86400s" in t.calls[0].url
@@ -162,7 +156,7 @@ def test_compare_default_baseline_is_one_day(replay: ReplayFactory) -> None:
 
 def test_compare_prev_baseline(replay: ReplayFactory) -> None:
     """--baseline prev — 직전 창 = offset 창 길이(3600s). 급변 감지용 규약."""
-    client, t = replay("promql-instant-empty.json", unchecked="공유 fixture — 다섯 테스트가 다른 질의로 같은 빈 응답을 쓴다(녹화 요청은 summarize 의 것)")
+    client, t = replay("promql-instant-empty.json", unchecked=UNCHECKED_SHARED_EMPTY)
     ev, _ = metrics.compare(client, CPU_QUERY, Window.last("1h", at=t.at).with_baseline("prev"))
     assert ev.window is not None and ev.window.baseline == Window(t.at - 7200, t.at - 3600)
     assert ev.value.offset == "3600s" and "offset+3600s" in t.calls[0].url
@@ -181,7 +175,7 @@ def test_compare_missing_series_and_zero_do_not_divide(make_client: ClientFactor
     지금 창에만 없는 시계열은 "지금 없음". 어느 경우도 ZeroDivisionError 없이 절대 차이는 남는다. 순서: 비율 → 기준선 0 → 기준선 없음 → 지금 없음."""
     body = _vector(_stat("a", "now", "0.4"), _stat("a", "base", "0"), _stat("b", "now", "1"), _stat("c", "base", "3"),
                    _stat("d", "now", "3.9"), _stat("d", "base", "1"))
-    client, _ = make_client({"api/v1/query?": (200, body)})
+    client, _ = make_client({("metrics", "api/v1/query"): (200, body)})
     ev, _ = metrics.compare(client, "q", Window.last("1h", at=AT).with_baseline("1d"))
     by = {d.labels["pod"]: d for d in ev.value.deltas}
     assert [d.labels["pod"] for d in ev.value.deltas] == ["d", "a", "b", "c"]
@@ -214,7 +208,7 @@ def test_compare_baseline_out_of_retention_says_so(replay: ReplayFactory) -> Non
 
 
 def test_compare_both_empty(replay: ReplayFactory) -> None:
-    client, t = replay("promql-instant-empty.json", unchecked="공유 fixture — 다섯 테스트가 다른 질의로 같은 빈 응답을 쓴다(녹화 요청은 summarize 의 것)")
+    client, t = replay("promql-instant-empty.json", unchecked=UNCHECKED_SHARED_EMPTY)
     ev, _ = metrics.compare(client, CPU_QUERY, Window.last("1h", at=t.at))
     assert ev.value.now_empty and ev.value.baseline_empty and ev.value.deltas == []
     lines = cli.compare_lines(ev.value, ev.window or Window(0, 0))
@@ -244,7 +238,7 @@ def test_top_clips_to_k_even_if_server_returns_more(make_client: ClientFactory) 
     """서버가 k 보다 많이 돌려줘도(다른 프록시 · 동률) 함수가 k 로 자른다 — 상한은 함수의 것."""
     at = load_call("promql-instant-topk-memory-by-pod.json").call.request.at   # FakeTransport 그대로 — k=3 요청에 k=10 녹화를 돌려주는 조건은 실환경이 만들 수 없다
     assert at is not None
-    client, _ = make_client({"api/v1/query?": (200, load_response("promql-instant-topk-memory-by-pod.json"))})
+    client, _ = make_client({("metrics", "api/v1/query"): (200, load_response("promql-instant-topk-memory-by-pod.json"))})
     ev, _ = metrics.top(client, "container_memory_working_set_bytes", Window.last("1h", at=at), k=3, by=["pod"])
     assert len(ev.value.entries) == 3 and ev.query.startswith("topk(3, ")
 
@@ -259,7 +253,7 @@ def test_top_query_axes_and_validation() -> None:
 
 
 def test_top_empty_is_no_data(replay: ReplayFactory) -> None:
-    client, t = replay("promql-instant-empty.json", unchecked="공유 fixture — 다섯 테스트가 다른 질의로 같은 빈 응답을 쓴다(녹화 요청은 summarize 의 것)")
+    client, t = replay("promql-instant-empty.json", unchecked=UNCHECKED_SHARED_EMPTY)
     ev, _ = metrics.top(client, "nothing", Window.last("1h", at=t.at))
     assert ev.value.entries == []
     lines = cli.top_lines(ev.value, ev.window or Window(0, 0))

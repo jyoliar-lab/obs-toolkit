@@ -12,14 +12,7 @@ import pytest
 
 from obs.adapters import cli
 from obs.core import DoctorReport, Evidence, Lines, Probe, Resolved
-from tests.conftest import ROOT, ClientFactory, ReplayFactory, load_response
-
-PHYSICAL: tuple[str, ...] = ("obs.mg", "jyo-liar.com/api", "datasources/proxy", "uid/prometheus", "loki-careerhub", "tempo-careerhub")
-
-
-def _no_physical(text: str) -> None:
-    for word in PHYSICAL:
-        assert word not in text, "agent 출력에 물리 정보: %s" % word
+from tests.conftest import ROOT, ClientFactory, ReplayFactory, _no_physical, load_response
 
 
 # ── promql ───────────────────────────────────────────────────────────────────────
@@ -70,7 +63,7 @@ def test_parse_metric_shapes() -> None:
 
 def test_promql_backend_error_status(make_client: ClientFactory) -> None:
     """HTTP 200 이지만 본문이 `status: error` 인 경우 — 논리 이름·errorType·메시지로 ObsError. 백엔드 이름(Prometheus)이 아니라 논리 이름(metrics)으로 말한다."""
-    client, _ = make_client({"api/v1/query": (200, {"status": "error", "errorType": "bad_data", "error": "boom"})})
+    client, _ = make_client({("metrics", "api/v1/query"): (200, {"status": "error", "errorType": "bad_data", "error": "boom"})})
     with pytest.raises(cli.ObsError) as ei:
         cli.promql_run(client, cli.PromqlArgs(query="up"))
     assert str(ei.value).startswith("metrics 백엔드 질의 오류(bad_data): boom")
@@ -132,7 +125,7 @@ def test_traceql_search_then_trace(replay: ReplayFactory) -> None:
 
 def test_traceql_search_empty_hints_wider_window(make_client: ClientFactory) -> None:
     """search 가 비면 창을 넓히라는 힌트를 낸다 — 시험 보고의 관찰: 기본 1시간 창에는 트레이스가 없는 것이 보통이다."""
-    client, _ = make_client({"api/search": (200, {"traces": []})})
+    client, _ = make_client({("traces", "api/search"): (200, {"traces": []})})
     ev, _, _ = cli.traceql_run(client, cli.TraceqlArgs(cmd="search"))
     assert ev.value.lines == ["(결과 없음 — 트레이스는 드물다. 창을 넓혀 다시: --since 24h · 7d)"]
 
