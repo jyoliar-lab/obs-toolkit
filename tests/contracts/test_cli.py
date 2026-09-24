@@ -9,7 +9,7 @@ import pytest
 
 from obs.adapters import cli
 from obs.core import JSON, Client
-from tests.conftest import AT, ClientFactory, _no_physical, _vector
+from tests.conftest import AT, MINUTE, ClientFactory, _no_physical, _vector
 
 
 # ── 거부 · 오류 ──────────────────────────────────────────────────────────────────
@@ -136,9 +136,9 @@ def test_promql_range_window_and_auto_step(make_client: ClientFactory) -> None:
     ev, _, kind = cli.promql_run(client, cli.PromqlArgs(query="sum(up)", range_="30m"), at=AT)
     assert kind == "promql-range"
     assert ev.window is not None
-    assert ev.window.seconds == 1800.0
+    assert ev.window.seconds == 30 * MINUTE
     assert "step=30s" in t.calls[0].url
-    assert "start=%s" % (AT - 1800.0) in t.calls[0].url
+    assert "start=%s" % (AT - 30 * MINUTE) in t.calls[0].url
 
 
 def test_logql_width_clips_log_body(make_client: ClientFactory) -> None:

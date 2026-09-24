@@ -17,7 +17,7 @@ from obs.core import (
     Budget, Config, Lines, BudgetExceeded, Client, Evidence, ObsError, Response, Window, doctor, fmt_rfc3339,
     http_error_message, load_config, parse_duration, parse_time, prune, spill, spill_ref, spill_root, to_dict, to_json,
 )
-from tests.conftest import PHYSICAL, ClientFactory, FakeTransport, RouteKey
+from tests.conftest import AT, DAY, HOUR, MINUTE, PHYSICAL, WEEK, ClientFactory, FakeTransport, RouteKey
 
 
 # ── 시간 ────────────────────────────────────────────────────────────────────────
@@ -35,62 +35,64 @@ def test_parse_duration() -> None:
 
 def test_parse_time() -> None:
     """parse_time 은 None · "now" 를 기준 시각으로, "-1h" 를 상대로, 숫자를 unix 초로, RFC3339 를 UTC 로 읽고 그 밖은 ObsError 다."""
-    assert parse_time(None, 100.0) == 100.0
-    assert parse_time("now", 100.0) == 100.0
-    assert parse_time("-1h", 10000.0) == 6400.0
-    assert parse_time("1234", 0.0) == 1234.0
-    assert parse_time("2026-09-08T00:00:00Z", 0.0) == 1788825600.0
+    assert parse_time(None, AT) == AT
+    assert parse_time("now", AT) == AT
+    assert parse_time("-1h", AT) == AT - HOUR
+    assert parse_time("1234", AT) == 1234.0
+    assert parse_time("2026-09-08T00:00:00Z", AT) == 1788825600.0
     with pytest.raises(ObsError):
-        parse_time("tomorrow", 0.0)
+        parse_time("tomorrow", AT)
+
+
+LAST_HOUR: Window = Window(AT - HOUR, AT)
+"""창 테스트의 기본 창 — 기준 시각까지의 한 시간."""
 
 
 def test_window_last_builds_since_and_end() -> None:
-    """Window.last 는 since · end 표기로 창을 만든다 — 길이와 양 끝."""
-    w = Window.last("1h", "-30m", at=10000.0)
-    assert (w.start, w.end, w.seconds) == (4600.0, 8200.0, 3600.0)
+    """Window.last 는 since · end 표기로 창을 만든다 — end 는 기준 시각 대비 상대, 길이는 since."""
+    w = Window.last("1h", "-30m", at=AT)
+    assert (w.start, w.end, w.seconds) == (AT - 30 * MINUTE - HOUR, AT - 30 * MINUTE, HOUR)
 
 
 def test_window_shifted_moves_both_ends() -> None:
     """shifted 는 창의 양 끝을 같은 만큼 옮긴다."""
-    assert Window(4600.0, 8200.0).shifted(60) == Window(4660.0, 8260.0)
+    assert LAST_HOUR.shifted(MINUTE) == Window(AT - HOUR + MINUTE, AT + MINUTE)
 
 
 def test_window_with_baseline_keeps_own_window_and_attaches_shifted_copy() -> None:
     """with_baseline 은 본 창을 그대로 둔 채 같은 창을 offset 만큼 앞으로 옮겨 기준선으로 단다."""
-    w = Window(4600.0, 8200.0)
-    b = w.with_baseline("1d")
-    assert (b.start, b.end) == (w.start, w.end)
-    assert b.baseline is not None
-    assert (b.baseline.start, b.baseline.end) == (w.start - 86400, w.end - 86400)
+    b = LAST_HOUR.with_baseline("1d")
+    assert (b.start, b.end) == (LAST_HOUR.start, LAST_HOUR.end)
+    assert b.baseline == Window(AT - HOUR - DAY, AT - DAY)
 
 
 def test_window_with_baseline_prev_and_period_specs() -> None:
     """with_baseline 의 prev 는 창 길이만큼 앞의 직전 창이고, 기간 표기(1w)는 그만큼 앞의 같은 창이다."""
-    w = Window(1000.0, 1600.0)
-    assert w.with_baseline("prev").baseline == Window(400.0, 1000.0)
-    assert w.with_baseline("1w").baseline == Window(1000.0 - 604800, 1600.0 - 604800)
+    w = Window(AT - 10 * MINUTE, AT)
+    assert w.with_baseline("prev").baseline == Window(AT - 20 * MINUTE, AT - 10 * MINUTE)
+    assert w.with_baseline("1w").baseline == Window(AT - 10 * MINUTE - WEEK, AT - WEEK)
 
 
 def test_window_with_baseline_rejects_unknown_spec_naming_candidates() -> None:
     """잘못된 기준선 spec 은 ObsError 이고 문구가 유효한 후보(prev)와 받은 값을 말한다."""
     with pytest.raises(ObsError) as ei:
-        Window(1000.0, 1600.0).with_baseline("yesterday")
+        LAST_HOUR.with_baseline("yesterday")
     assert "prev" in str(ei.value)
     assert "yesterday" in str(ei.value)
 
 
 def test_window_label_is_two_rfc3339_times() -> None:
     """label 은 시작 ~ 끝을 RFC3339 로 말한다."""
-    assert Window(4600.0, 8200.0).label() == "%s ~ %s" % (fmt_rfc3339(4600.0), fmt_rfc3339(8200.0))
+    assert LAST_HOUR.label() == "%s ~ %s" % (fmt_rfc3339(AT - HOUR), fmt_rfc3339(AT))
 
 
 def test_window_to_dict_nests_baseline() -> None:
     """to_dict 는 기준선을 중첩된 dict 로 푼다 — 기준선의 기준선은 None."""
-    d = to_dict(Window(4600.0, 8200.0).with_baseline("1d"))
+    d = to_dict(LAST_HOUR.with_baseline("1d"))
     assert isinstance(d, dict)
     bl = d["baseline"]
     assert isinstance(bl, dict)
-    assert bl["start"] == 4600.0 - 86400
+    assert bl["start"] == AT - HOUR - DAY
     assert bl["baseline"] is None
 
 

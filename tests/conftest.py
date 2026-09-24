@@ -15,7 +15,7 @@ from obs.core import JSON, Client, Config, Evidence, TransportError, TransportTi
 from tests.record import FIXTURES, ROOT, read_fixture, response_of, strip_physical
 from tests.replay import Call, FixtureSpec, Loaded, ReplayTransport, load_call, load_fixture_calls
 
-__all__ = ["FIXTURES", "ROOT", "Call", "Loaded", "load_call", "_no_physical", "_vector", "_stat"]   # 재수출 · 공용 헬퍼 — 테스트가 여기서 가져온다
+__all__ = ["FIXTURES", "ROOT", "Call", "Loaded", "load_call", "_no_physical", "_vector", "_stat", "AT", "MINUTE", "HOUR", "DAY", "WEEK"]   # 재수출 · 공용 헬퍼 — 테스트가 여기서 가져온다
 
 
 # ── 물리 비노출 — 단어 목록은 여기 한 곳 ─────────────────────────────────────────
@@ -37,7 +37,11 @@ def _no_physical(text: str) -> None:
 # ── 손 입력 — Prometheus 즉시 조회 응답 모양 ─────────────────────────────────────
 
 AT: float = 100000.0
-"""손 입력 테스트의 now — fixture replay 는 녹화 at(t.at)을 쓴다."""
+"""손 입력 테스트의 now — 창 · 기준선의 기대값은 전부 이 값 기준의 상대로 쓴다. fixture replay 는 녹화 at(t.at)을 쓴다."""
+MINUTE: float = 60.0
+HOUR: float = 60 * MINUTE
+DAY: float = 24 * HOUR
+WEEK: float = 7 * DAY
 
 
 def _vector(*items: tuple[dict[str, str], str]) -> dict[str, JSON]:

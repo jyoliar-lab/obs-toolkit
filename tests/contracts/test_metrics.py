@@ -9,11 +9,11 @@ import pytest
 from obs import metrics
 from obs.adapters import cli
 from obs.core import Client, Evidence, Lines, ObsError, Window, to_json
-from tests.conftest import AT, ClientFactory, _stat, _vector
+from tests.conftest import AT, DAY, HOUR, MINUTE, WEEK, ClientFactory, _stat, _vector
 from tests.record import CPU_QUERY
 
 
-SQ: str = "(%s)[3600s:60s]" % CPU_QUERY
+SQ: str = "(%s)[%ds:%ds]" % (CPU_QUERY, HOUR, MINUTE)   # 1h 창 · 60s step 의 서브쿼리
 
 
 
@@ -36,21 +36,21 @@ def test_summarize_query_is_seven_stats_in_one_expression() -> None:
 
 def test_compare_query_uses_offset_of_same_expression() -> None:
     """compare_query 는 같은 식의 지금 p95 와 offset p95 를 한 식으로 만든다."""
-    q = metrics.compare_query(CPU_QUERY, Window.last("1h", at=AT), "60s", "86400s")
+    q = metrics.compare_query(CPU_QUERY, Window.last("1h", at=AT), "60s", "%ds" % DAY)
     assert q == ('label_replace(quantile_over_time(0.95, %s), "stat", "now", "", "") or '
-                 'label_replace(quantile_over_time(0.95, %s offset 86400s), "stat", "base", "", "")' % (SQ, SQ))
+                 'label_replace(quantile_over_time(0.95, %s offset %ds), "stat", "base", "", "")' % (SQ, SQ, DAY))
 
 
 def test_auto_step_is_window_over_sixty_with_floor() -> None:
     """step 자동 — 창 길이/60, 최소 15s. promql --range 와 같은 함수다."""
-    assert metrics.auto_step(1800) == "30s"
-    assert metrics.auto_step(60) == "15s"
-    assert metrics.auto_step(86400) == "1440s"
+    assert metrics.auto_step(30 * MINUTE) == "30s"
+    assert metrics.auto_step(MINUTE) == "15s"
+    assert metrics.auto_step(DAY) == "1440s"
 
 
 def test_duration_literal_is_whole_seconds() -> None:
     """duration_literal 은 초를 PromQL 기간 표기로 — 1초 미만은 0s."""
-    assert metrics.duration_literal(3600.0) == "3600s"
+    assert metrics.duration_literal(HOUR) == "3600s"
     assert metrics.duration_literal(0.4) == "0s"
 
 
@@ -58,10 +58,12 @@ def test_baseline_offset_rules() -> None:
     """offset 은 창 끝의 차이다 — 기준선 없음은 1d, prev 는 창 길이, 길이가 다르거나 뒤에 있는 기준선은 거부한다."""
     w = Window.last("1h", at=AT)
     assert metrics.DEFAULT_BASELINE == "1d"
-    assert metrics.baseline_offset(w) == (w.with_baseline("1d"), "86400s")
-    assert metrics.baseline_offset(w.with_baseline("prev")) == (w.with_baseline("prev"), "3600s")
-    assert metrics.baseline_offset(w.with_baseline("1w")) == (w.with_baseline("1w"), "604800s")
-    for bad in (Window(0.0, 3600.0, baseline=Window(0.0, 1800.0)), Window(0.0, 3600.0, baseline=Window(100.0, 3700.0))):
+    assert metrics.baseline_offset(w) == (w.with_baseline("1d"), "%ds" % DAY)
+    assert metrics.baseline_offset(w.with_baseline("prev")) == (w.with_baseline("prev"), "%ds" % HOUR)
+    assert metrics.baseline_offset(w.with_baseline("1w")) == (w.with_baseline("1w"), "%ds" % WEEK)
+    shorter = Window(AT - HOUR, AT, baseline=Window(AT - HOUR, AT - 30 * MINUTE))
+    later = Window(AT - HOUR, AT, baseline=Window(AT - HOUR + MINUTE, AT + MINUTE))
+    for bad in (shorter, later):
         with pytest.raises(ObsError):
             metrics.baseline_offset(bad)
 
@@ -101,7 +103,7 @@ def test_compare_rejects_baseline_not_expressible_as_offset(make_client: ClientF
     """길이가 다른 기준선은 offset 으로 표현할 수 없어 질의 전에 거부한다."""
     client, t = make_client()
     with pytest.raises(ObsError):
-        metrics.compare(client, CPU_QUERY, Window(0.0, 3600.0, baseline=Window(0.0, 1800.0)))
+        metrics.compare(client, CPU_QUERY, Window(AT - HOUR, AT, baseline=Window(AT - HOUR, AT - 30 * MINUTE)))
     assert t.calls == []
 
 
@@ -195,9 +197,9 @@ def test_compare_default_baseline_is_one_day(make_client: ClientFactory) -> None
     client, t = make_client({("metrics", "api/v1/query"): (200, _vector())})
     ev, _ = metrics.compare(client, CPU_QUERY, W)
     assert ev.window is not None
-    assert ev.window.baseline == Window(AT - 3600 - 86400, AT - 86400)
-    assert ev.value.offset == "86400s"
-    assert "offset+86400s" in t.calls[0].url
+    assert ev.window.baseline == Window(AT - HOUR - DAY, AT - DAY)
+    assert ev.value.offset == "%ds" % DAY
+    assert "offset+%ds" % DAY in t.calls[0].url
 
 
 def test_compare_prev_baseline(make_client: ClientFactory) -> None:
@@ -205,9 +207,9 @@ def test_compare_prev_baseline(make_client: ClientFactory) -> None:
     client, t = make_client({("metrics", "api/v1/query"): (200, _vector())})
     ev, _ = metrics.compare(client, CPU_QUERY, W.with_baseline("prev"))
     assert ev.window is not None
-    assert ev.window.baseline == Window(AT - 7200, AT - 3600)
-    assert ev.value.offset == "3600s"
-    assert "offset+3600s" in t.calls[0].url
+    assert ev.window.baseline == Window(AT - 2 * HOUR, AT - HOUR)
+    assert ev.value.offset == "%ds" % HOUR
+    assert "offset+%ds" % HOUR in t.calls[0].url
 
 
 def test_compare_both_empty(make_client: ClientFactory) -> None:
