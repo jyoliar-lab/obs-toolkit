@@ -19,7 +19,7 @@ TOKEN_MARKS: tuple[str, ...] = ("Authorization", "Bearer ", "glsa_")
 
 @pytest.mark.parametrize("name", NAMES)
 def test_fixture_carries_no_physical_or_token(name: str) -> None:
-    """AC 7 — 커밋되는 파일이다: `_no_physical` 의 단어 목록(호스트 · 프록시 경로 · uid)과 토큰 자국이 파일 전체에 없다."""
+    """커밋되는 fixture 파일 전체에 물리 문자열과 토큰 자국이 없다."""
     text = (FIXTURES / name).read_text(encoding="utf-8")
     _no_physical(text)
     for mark in TOKEN_MARKS:

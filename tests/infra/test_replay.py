@@ -15,7 +15,7 @@ PHYS: str = "https://obs.mg.jyo-liar.com/api/datasources/proxy/uid/prometheus/" 
 
 
 def test_request_key_strips_physical_and_ignores_param_order(config: Config) -> None:
-    """AC 2 — 같은 요청의 파라미터 순서 차이는 같은 키, 물리(호스트 · 프록시 접두 · uid)는 사라진다."""
+    """request_key 는 물리를 지우고 파라미터 순서에 무관한 키를 만든다."""
     a = request_key(PHYS + "api/v1/query?query=up&time=1000.0", config)
     b = request_key(PHYS + "api/v1/query?time=1000.0&query=up", config)
     assert a == b == "api/v1/query?query=up&time=1000.0"
@@ -28,7 +28,7 @@ def test_request_key_strips_physical_and_ignores_param_order(config: Config) -> 
 
 
 def test_request_key_distinguishes_different_queries(config: Config) -> None:
-    """AC 2 — 다른 질의 · 다른 파라미터 값 · 다른 경로 · 같은 키의 값 집합 차이는 다른 키."""
+    """다른 질의 · 파라미터 값 · 경로 · 값 집합은 다른 키다."""
     base = request_key(PHYS + "api/v1/query?query=up&time=1000.0", config)
     assert request_key(PHYS + "api/v1/query?query=up%7Bjob%3D%22x%22%7D&time=1000.0", config) != base
     assert request_key(PHYS + "api/v1/query?query=up&time=1000", config) != base          # 표기가 다르면 다르다 — 코드가 같은 경로로 만들므로 녹화와 replay 는 같다
@@ -40,7 +40,7 @@ def test_request_key_distinguishes_different_queries(config: Config) -> None:
 
 
 def test_normalize_key_matches_recorded_request_key() -> None:
-    """녹화 쪽(Request.key)과 나간 쪽(request_key)이 같은 정규화를 쓴다 — 두 키가 만나는 자리."""
+    """녹화 쪽(Request.key)과 나간 쪽(request_key)이 같은 정규화를 쓴다."""
     rq = Request(at=1.0, at_rfc3339="x", backend="metrics", path="api/v1/query", query_string="time=1.0&query=up", params=parse_params("time=1.0&query=up"))
     assert rq.key == normalize_key("api/v1/query", {"query": "up", "time": "1.0"}) == "api/v1/query?query=up&time=1.0"
 
@@ -82,7 +82,7 @@ def test_replay_transport_at_is_the_recorded_at(config: Config) -> None:
 
 
 def test_replay_transport_fails_on_wrong_query_not_just_path(config: Config) -> None:
-    """경로 조각 라우팅과의 차이 — 경로가 같아도 질의가 다르면 실패한다(조립 식이 바뀐 것을 잡는 자리)."""
+    """경로가 같아도 질의가 다르면 replay 가 실패한다."""
     t = ReplayTransport(expected=[_loaded("a.json", "api/v1/query", {"query": 'label_replace(x, "stat", "n", "", "")', "time": "1000.0"})], config=config)
     client = Client(config=config, token="t", transport=t)
     with pytest.raises(AssertionError) as ei:
@@ -92,7 +92,7 @@ def test_replay_transport_fails_on_wrong_query_not_just_path(config: Config) -> 
 
 
 def test_replay_transport_unchecked_needs_a_reason_and_skips_comparison(config: Config) -> None:
-    """검사를 끄는 유일한 길은 unchecked=<이유> — 기본값은 검사. 끄면 어떤 질의든 녹화 응답이 돌아온다(공유 fixture 용)."""
+    """unchecked=<이유> 만이 검사를 끄고, 끄면 어떤 질의든 녹화 응답이 돌아온다."""
     t = ReplayTransport(expected=[_loaded("empty.json", "api/v1/query", {"query": "other", "time": "1.0"})], config=config,
                         unchecked="공유 fixture — 다른 질의로도 같은 빈 응답을 쓴다")
     client = Client(config=config, token="t", transport=t)
@@ -107,7 +107,7 @@ def test_replay_transport_rejects_empty_unchecked_reason(config: Config) -> None
 
 
 def test_replay_transport_warns_and_skips_manual_fixture(config: Config) -> None:
-    """recorded: manual 은 요청이 추정 — 비교하지 않고 그 사실을 경고로 알린다."""
+    """recorded: manual 은 비교하지 않고 경고로 알린다."""
     with pytest.warns(UserWarning, match="recorded: manual"):
         t = ReplayTransport(expected=[_loaded("m.json", "api/traces/abc", {}, manual=True, at=None)], config=config)
     client = Client(config=config, token="t", transport=t)
@@ -119,7 +119,7 @@ def test_replay_transport_warns_and_skips_manual_fixture(config: Config) -> None
 
 
 def test_shared_at_requires_one_at(config: Config) -> None:
-    """한 replay 의 fixture 들은 같은 녹화 실행이어야 한다 — at 이 다르면 거부."""
+    """한 replay 의 fixture 들은 at 이 하나여야 한다."""
     with pytest.raises(ValueError):
         shared_at([_loaded("a.json", "api/v1/query", {}, at=1.0), _loaded("b.json", "api/v1/query", {}, at=2.0)])
 

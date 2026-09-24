@@ -24,8 +24,7 @@ def _fixture(name: str) -> Fixture:
 # ── 파일 전부 — 형식 · 물리 비노출 · 출처 표시 ────────────────────────────────────
 
 def test_every_fixture_has_a_recipe_and_vice_versa() -> None:
-    """fixtures/ 의 파일 집합과 녹화기가 만드는 이름(실행 + 파생)의 집합이 같다 — 레시피 없는 fixture 도, fixture 없는 레시피도 없다(13개).
-    파생은 traceql-search.json 하나 — traceql-trace.json 실행의 첫 호출."""
+    """fixtures/ 의 파일 집합과 녹화기가 만드는 이름(실행 + 파생)의 집합이 같다."""
     assert NAMES == fixture_names()
     assert len(NAMES) == 13
     assert not set(RECIPES) & set(DERIVED)
@@ -34,8 +33,7 @@ def test_every_fixture_has_a_recipe_and_vice_versa() -> None:
 
 @pytest.mark.parametrize("name", NAMES)
 def test_fixture_is_recorded_format_with_request_and_response(name: str) -> None:
-    """AC 1 — 파일 하나를 열면 무엇을 불러 받은 응답인지(백엔드 · 경로 · query string · 파라미터 · at)가 응답과 구분되어 있고, 각각 기계로 꺼내진다.
-    at 은 녹화기 파일에서 float 이고 RFC3339 표기와 맞는다(manual 은 불명이면 None)."""
+    """모든 fixture 는 호출마다 요청(백엔드 · 경로 · query string · params · at)과 응답이 구분된 녹화 형식이다."""
     fx = _fixture(name)
     assert fx.calls, name
     for c in fx.calls:
@@ -56,7 +54,7 @@ def test_fixture_is_recorded_format_with_request_and_response(name: str) -> None
 
 
 def test_unmarked_fixtures_come_from_recorder_and_manual_ones_say_why() -> None:
-    """AC 5 — recorded 는 tests/record.py 또는 manual 뿐이고, manual 은 재현 불가 이유(reason)를 스스로 말한다."""
+    """recorded 는 tests/record.py 또는 manual 뿐이고 manual 은 reason 을 스스로 말한다."""
     manual: list[str] = []
     for name in NAMES:
         fx = _fixture(name)
@@ -66,13 +64,13 @@ def test_unmarked_fixtures_come_from_recorder_and_manual_ones_say_why() -> None:
             manual.append(name)
         else:
             assert fx.reason is None
-    assert manual == ["traceql-trace-error.json"]   # 오류 trace 는 주문할 수 없다 — 재녹화 시점(2026-09-22)에 168h 안에 없었다
+    assert manual == ["traceql-trace-error.json"]   # 오류 trace 는 주문할 수 없다 — 검색 상한(168h) 안에 없으면 손 기록
 
 
 # ── 내용 — 티켓이 못 박은 것 ─────────────────────────────────────────────────────
 
 def test_trace_fixture_records_search_then_trace_in_order() -> None:
-    """AC 3 — traceql-trace.json 에 api/search 와 api/traces/<id> 두 호출이 순서대로 있고, 둘째의 id 는 첫째 응답의 첫 hit 이다."""
+    """traceql-trace.json 은 api/search → api/traces/<id> 순이고 둘째의 id 는 첫째 응답의 첫 hit 이며 traceql-search.json 은 그 첫 호출이다."""
     fx = _fixture("traceql-trace.json")
     paths = [c.request.path for c in fx.calls]
     assert len(paths) == 2
@@ -93,7 +91,7 @@ def test_trace_fixture_records_search_then_trace_in_order() -> None:
 
 
 def test_metrics_fixtures_record_assembled_queries() -> None:
-    """AC 6 — PR #4 의 promql-instant-* 5개에 obs/metrics.py 가 조립한 실제 질의가 있다: label_replace(…) or … · offset · topk(…)."""
+    """promql-instant-* fixture 의 요청에는 obs/metrics.py 가 조립한 실제 질의가 있다."""
     def query_of(name: str) -> str:
         fx = _fixture(name)
         assert fx.calls[0].request.path == "api/v1/query"
@@ -125,7 +123,7 @@ def test_metrics_fixtures_record_assembled_queries() -> None:
 
 
 def test_at_is_explicit_and_not_derived_from_url() -> None:
-    """at 은 명시 필드 — 백엔드마다 URL 의 단위가 다르다(PromQL 초 · LogQL 나노초 · TraceQL 정수 초). 세 fixture 의 at 이 각 단위와 맞는다."""
+    """at 은 명시 필드이고 백엔드마다 다른 URL 단위(초 · 나노초 · 정수 초)와 맞는다."""
     prom = _fixture("promql-instant-up.json").calls[0].request
     loki = _fixture("logql-streams-careerhub-prod.json").calls[0].request
     tempo = _fixture("traceql-search.json").calls[0].request
@@ -202,7 +200,7 @@ def _always_ok(url: str, headers: Mapping[str, str], timeout: float) -> tuple[in
 
 
 def test_recorder_refuses_unknown_physical_prefix(config: Config) -> None:
-    """접두를 모르는 URL 은 기록하지 않는다 — 호스트가 fixture 에 실리는 길을 구조로 막는다."""
+    """접두를 모르는 URL 은 Recorder 가 기록하지 않는다."""
     rec = Recorder(inner=_always_ok, config=config, at=1.0)   # inner 가 통과시켜도 Recorder 가 거부한다
     with pytest.raises(ValueError):
         rec("https://elsewhere.example/x", {}, 1.0)
@@ -243,6 +241,6 @@ def test_decode_body_matches_client_get_rules() -> None:
 
 
 def test_recipes_send_what_tests_send() -> None:
-    """레시피의 질의가 테스트가 보내는 것과 같다 — 후속 정합 검사의 전제."""
+    """레시피의 질의가 테스트가 보내는 것과 같다."""
     from tests.contracts.test_metrics import CPU_QUERY
     assert record.CPU_QUERY == CPU_QUERY

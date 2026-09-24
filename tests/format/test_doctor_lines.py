@@ -6,7 +6,7 @@ from obs.core import DoctorReport, Probe, Resolved
 
 
 def test_doctor_lines_show_url_and_hide_token() -> None:
-    """AC 2 — obs-doctor.py 렌더링에는 URL·uid·출처가 보이고(물리가 보이는 유일한 출력), 토큰은 있음/없음만이며, 실패 probe 는 ✗·HTTP 상태·문구와 "문제 있음" 결론으로 이어진다."""
+    """doctor_lines 는 URL · uid · 출처를 보이고 토큰은 있음/없음만이며 실패 probe 는 ✗ 와 "문제 있음" 결론으로 이어진다."""
     rep = DoctorReport(
         grafana_url=Resolved("https://gw.example", "default"), proxy_prefix=Resolved("/p", "default"),
         uids={"metrics": Resolved("prom", "env:OBS_UID_METRICS")}, config_path=None, config_candidates=["/x/config.json"],

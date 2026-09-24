@@ -31,16 +31,6 @@ RULES: dict[str, str] = {
 }
 
 ALLOWLIST: dict[str, dict[str, int]] = {
-    "tests/contracts/test_metrics.py::test_summarize_requires_query": {"docstring": 1},
-    "tests/format/test_logql_lines.py::test_logql_streams": {"date": 1},
-    "tests/format/test_metrics_lines.py::test_compare_both_empty": {"docstring": 1},
-    "tests/format/test_metrics_lines.py::test_top_empty_is_no_data": {"docstring": 1},
-    "tests/format/test_metrics_lines.py::test_top_wraps_query_server_side": {"date": 1},
-    "tests/format/test_promql_lines.py::test_promql_instant_up": {"date": 1},
-    "tests/format/test_promql_lines.py::test_promql_range_summary": {"date": 1},
-    "tests/format/test_traceql_lines.py::test_parse_spans_error_detection": {"date": 1},
-    "tests/format/test_traceql_lines.py::test_traceql_search_then_trace": {"date": 1},
-    "tests/infra/test_fixtures.py::test_unmarked_fixtures_come_from_recorder_and_manual_ones_say_why": {"date": 1},
 }
 """래칫 — 현재 위반. 키는 `<tests/ 상대 경로>::<최상위 함수 이름>`(함수 밖이면 경로만), 값은 규칙별 개수.
 위반을 고치면 여기서 그만큼 뺀다(안 빼면 실패). 실패 문구가 지금 상태를 이 꼴로 찍어 준다. 전부 비면 이 상수를 지운다."""

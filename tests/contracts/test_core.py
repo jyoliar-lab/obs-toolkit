@@ -23,7 +23,7 @@ from tests.conftest import PHYSICAL, ClientFactory, FakeTransport, RouteKey
 # ── 시간 ────────────────────────────────────────────────────────────────────────
 
 def test_parse_duration() -> None:
-    """기간 표기 파서 — Prometheus/Loki 와 같은 표기(30s·5m·1.5h·2d·500ms)를 초로 바꾸고, 표기가 아니면 ObsError."""
+    """parse_duration 은 Prometheus 기간 표기(30s · 5m · 1.5h · 2d · 500ms)를 초로 바꾸고 표기가 아니면 ObsError 다."""
     assert parse_duration("30s") == 30
     assert parse_duration("5m") == 300
     assert parse_duration("1.5h") == 5400
@@ -34,7 +34,7 @@ def test_parse_duration() -> None:
 
 
 def test_parse_time() -> None:
-    """시각 표기 파서 — None/"now" 는 기준 시각, "-1h" 는 기준 대비 상대, 숫자는 unix 초, RFC3339 는 UTC 로 해석. 그 밖은 ObsError."""
+    """parse_time 은 None · "now" 를 기준 시각으로, "-1h" 를 상대로, 숫자를 unix 초로, RFC3339 를 UTC 로 읽고 그 밖은 ObsError 다."""
     assert parse_time(None, 100.0) == 100.0
     assert parse_time("now", 100.0) == 100.0
     assert parse_time("-1h", 10000.0) == 6400.0
@@ -82,8 +82,7 @@ def test_window_to_dict_nests_baseline() -> None:
 # ── 직렬화 ──────────────────────────────────────────────────────────────────────
 
 def test_dataclasses_are_json_serializable(config: Config) -> None:
-    """어댑터 경계 요구 — 코어의 dataclass(Evidence·Config·Budget·Response)가 전부 to_json 으로 직렬화되고, 중첩(window·value)이 dict 로 풀린다.
-    JSON 으로 옮길 수 없는 값(object())은 조용히 통과시키지 않고 TypeError."""
+    """코어의 dataclass 는 전부 to_json 으로 직렬화되고 중첩은 dict 로 풀리며, 옮길 수 없는 값은 TypeError 다."""
     ev = Evidence(backend="metrics", query="up", window=Window(1.0, 2.0), value=Lines(["1 {}"]), raw_ref="tmp/obs/x.json")
     for obj in (ev, config, Budget(), Response("metrics", "api/v1/query", 200, {"a": 1})):
         json.loads(to_json(obj))
@@ -98,14 +97,13 @@ def test_dataclasses_are_json_serializable(config: Config) -> None:
 # ── spill ───────────────────────────────────────────────────────────────────────
 
 def test_spill_root_prefers_project_dir(tmp_path: Path) -> None:
-    """spill 자리 — CLAUDE_PROJECT_DIR 이 있으면 그 아래 tmp/obs, 없으면 cwd 의 tmp/obs. 플러그인 캐시 디렉터리를 가리키던 #90 의 parents[4] 산술을 대체한 규칙이다."""
+    """spill 자리는 CLAUDE_PROJECT_DIR 아래 tmp/obs 이고, 없으면 cwd 의 tmp/obs 다."""
     assert spill_root({"CLAUDE_PROJECT_DIR": str(tmp_path)}) == tmp_path / "tmp" / "obs"
     assert spill_root({}, cwd=tmp_path / "cwd") == tmp_path / "cwd" / "tmp" / "obs"
 
 
 def test_spill_writes_and_prunes(tmp_path: Path) -> None:
-    """spill — 한 호출이 디렉터리 하나(<시각>-<kind>/)를 만들고 그 안에 raw.json(원본)·summary.txt(요약 전체)를 둔다(이름은 재사용되지 않는다).
-    keep 개를 넘으면 오래된 디렉터리부터 지워 정확히 최근 keep 개(어느 것인지 · 내용까지)만 남으며, spill_ref 가 프로젝트 기준 상대 경로를 돌려준다."""
+    """spill 은 호출마다 새 디렉터리에 raw.json · summary.txt 를 쓰고 keep 개를 넘으면 오래된 것부터 지우며 프로젝트 기준 상대 경로를 돌려준다."""
     env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     paths = [spill("k", {"i": i}, ["요약 %d" % i, "둘째 줄"], env, keep=3) for i in range(5)]
     root = spill_root(env)
@@ -121,7 +119,7 @@ def test_spill_writes_and_prunes(tmp_path: Path) -> None:
 
 
 def test_prune_oldest_first(tmp_path: Path) -> None:
-    """prune 단독 — mtime 이 오래된 항목부터 지우고 지운 개수를 돌려준다. 호출 디렉터리(안의 파일까지)와 예전 형식의 낱개 파일을 같이 센다."""
+    """prune 은 mtime 이 오래된 항목(디렉터리 · 낱개 파일)부터 지우고 지운 개수를 돌려준다."""
     for i in range(4):
         p = tmp_path / ("%d" % i)
         if i % 2:
@@ -134,8 +132,7 @@ def test_prune_oldest_first(tmp_path: Path) -> None:
 
 
 def test_prune_protects_just_written_file(tmp_path: Path) -> None:
-    """prune 의 protect — 방금 쓴 파일은 mtime 이 가장 오래돼 보여도 지우지 않고, 나머지에서 keep-1 개만 남긴다.
-    같은 초 안에 여러 번 spill 할 때 이름 순서(-2, -3 접미)가 mtime 동률을 잘못 가르는 경우를 구조로 막는다."""
+    """prune 은 protect 로 받은 항목을 mtime 과 무관하게 남기고 나머지에서 keep-1 개만 남긴다."""
     files = [tmp_path / ("%d" % i) for i in range(4)]
     for i, p in enumerate(files):
         p.mkdir(); (p / "raw.json").write_text("{}")
@@ -148,7 +145,7 @@ def test_prune_protects_just_written_file(tmp_path: Path) -> None:
 # ── 예산 ────────────────────────────────────────────────────────────────────────
 
 def test_budget_queries(make_client: ClientFactory) -> None:
-    """예산 — 질의 횟수 상한을 넘기면 transport 를 부르기 전에 BudgetExceeded. 실제로 나간 호출 수가 상한과 같음을 FakeTransport 기록으로 확인한다."""
+    """질의 횟수가 상한을 넘기면 transport 를 부르기 전에 BudgetExceeded 다."""
     client, t = make_client({("metrics", "api/v1/query"): (200, {"status": "success", "data": {}})})
     client.budget = Budget(max_queries=2)
     client.get("metrics", "api/v1/query"); client.get("metrics", "api/v1/query")
@@ -158,7 +155,7 @@ def test_budget_queries(make_client: ClientFactory) -> None:
 
 
 def test_budget_bytes(make_client: ClientFactory) -> None:
-    """예산 — 받은 응답 바이트 누적이 상한을 넘기면 BudgetExceeded. 한 조사가 원본을 무한정 끌어오지 못하게 하는 겹이다."""
+    """받은 응답 바이트 누적이 상한을 넘기면 BudgetExceeded 다."""
     client, _ = make_client({("metrics", "api/v1/query"): (200, {"pad": "x" * 100})})
     client.budget = Budget(max_response_bytes=150)
     client.get("metrics", "api/v1/query")
@@ -169,8 +166,7 @@ def test_budget_bytes(make_client: ClientFactory) -> None:
 # ── Client.get ──────────────────────────────────────────────────────────────────
 
 def test_get_builds_proxy_url_and_bearer(make_client: ClientFactory, config: Config) -> None:
-    """Client.get 의 물리 조립 — 논리 이름을 Config 의 proxy_url 로 풀고, None·"" 인 파라미터는 버리며, Bearer 토큰과 Accept 헤더를 붙인다.
-    돌려주는 Response 에는 URL 이 없다(backend·path·status·body 만)."""
+    """Client.get 은 논리 이름을 proxy_url 로 풀고 None · "" 파라미터를 버리며 Bearer · Accept 헤더를 붙이고, Response 에는 URL 이 없다."""
     client, t = make_client({("metrics", "api/v1/query"): (200, {"status": "success"})})
     r = client.get("metrics", "/api/v1/query", {"query": "up", "time": 1.5, "empty": "", "none": None})
     assert r == Response("metrics", "/api/v1/query", 200, {"status": "success"})
@@ -181,21 +177,21 @@ def test_get_builds_proxy_url_and_bearer(make_client: ClientFactory, config: Con
 
 
 def test_get_logical_names_only(make_client: ClientFactory) -> None:
-    """agent 인터페이스에 물리가 없다 — uid("prometheus")를 backend 자리에 넣으면 거부된다. 논리 이름만 받는다."""
+    """backend 자리에 uid 를 넣으면 거부한다 — 논리 이름만 받는다."""
     client, _ = make_client()
     with pytest.raises(ObsError):
         client.get("prometheus", "api/v1/query")
 
 
 def test_get_non_json_body(make_client: ClientFactory) -> None:
-    """JSON 이 아닌 응답(Tempo /api/echo 의 "echo")은 str 로 body 에 실린다 — 파싱 실패를 오류로 만들지 않는다."""
+    """JSON 이 아닌 응답 본문은 str 로 실린다 — 파싱 실패를 오류로 만들지 않는다."""
     client, _ = make_client({("traces", "api/echo"): (200, b"echo")})
     assert client.get("traces", "api/echo").body == "echo"
 
 
 @pytest.mark.parametrize("status,needle", [(401, "인증 실패"), (403, "거부"), (405, "거부"), (500, "오류"), (429, "속도 제한")])
 def test_http_errors_are_logical(make_client: ClientFactory, status: int, needle: str) -> None:
-    """오류 문구 규약 — 401·403·405·500·429 는 사람의 것: 논리 이름으로 시작하고 상태별 다음 행동을 말하며, 백엔드가 본문에 호스트를 흘려도 문구에 물리 문자열이 없다."""
+    """401 · 403 · 405 · 500 · 429 의 문구는 논리 이름으로 시작하고 다음 행동을 말하며 물리 문자열이 없다."""
     client, _ = make_client({("logs", "loki/api/v1/query_range"): (status, {"message": "secret host obs.mg.jyo-liar.com"})})
     with pytest.raises(ObsError) as ei:
         client.get("logs", "loki/api/v1/query_range")
@@ -207,7 +203,7 @@ def test_http_errors_are_logical(make_client: ClientFactory, status: int, needle
 
 
 def test_query_error_passes_backend_message(make_client: ClientFactory) -> None:
-    """예외 규약 — 질의 오류(400·422)는 agent 가 고칠 수 있는 것이라 백엔드 메시지(파서 오류 등)를 그대로 통과시키고 "질의를 고쳐 다시" 로 끝난다."""
+    """질의 오류(400 · 422)는 백엔드 메시지를 그대로 통과시키고 "질의를 고쳐 다시" 로 끝난다."""
     client, _ = make_client({("metrics", "api/v1/query"): (400, {"status": "error", "error": 'parse error: unexpected "}"'})})
     with pytest.raises(ObsError) as ei:
         client.get("metrics", "api/v1/query", {"query": "up}"})
@@ -217,8 +213,7 @@ def test_query_error_passes_backend_message(make_client: ClientFactory) -> None:
 
 
 def test_not_found_is_agent_fixable(make_client: ClientFactory) -> None:
-    """404 는 agent 가 고칠 수 있는 것(만료·오타 traceID, 없는 레이블) — 403/405 와 묶지 않고 백엔드 메시지를 통과시켜
-    "다시" 로 끝낸다. 시험 보고(#93 코멘트)의 마찰 3: 없는 traceID 가 "사람에게" 로 가 오진을 유도했다."""
+    """404 는 백엔드 메시지를 통과시켜 "다시" 로 끝내고, "사람에게" 는 그 뒤에만 온다."""
     client, _ = make_client({("traces", "api/traces/deadbeef"): (404, {"error": "trace not found"})})
     with pytest.raises(ObsError) as ei:
         client.get("traces", "api/traces/deadbeef")
@@ -230,8 +225,7 @@ def test_not_found_is_agent_fixable(make_client: ClientFactory) -> None:
 
 @pytest.mark.parametrize("status", [502, 503, 504])
 def test_gateway_errors_are_agent_fixable(make_client: ClientFactory, status: int) -> None:
-    """502·503·504 는 "제때 답하지 못했다" — 무거운 질의가 흔한 원인이라 "좁혀 다시" 가 먼저 오고, 가벼운 질의도 그럴 때만 사람에게.
-    재시험 보고(#93 코멘트)의 새 마찰 1: 7d 창의 Loki 집계가 502 로 "사람에게" 가 됐다. 그 밖의 5xx(500)는 그대로 사람의 것."""
+    """502 · 503 · 504 는 "제때 답하지 못했다" 와 "좁혀 다시" 가 먼저 오고 물리 문자열이 없다."""
     client, _ = make_client({("logs", "loki/api/v1/query_range"): (status, b"<html>bad gateway obs.mg.jyo-liar.com</html>")})
     with pytest.raises(ObsError) as ei:
         client.get("logs", "loki/api/v1/query_range")
@@ -244,8 +238,7 @@ def test_gateway_errors_are_agent_fixable(make_client: ClientFactory, status: in
 
 
 def test_read_timeout_is_agent_fixable(make_client: ClientFactory) -> None:
-    """읽기 시간 초과 — 닿기는 했는데 답이 없는 것 — 도 같은 분류다: 제한 시간(초)을 말하고 "좁혀 다시" 로 먼저 보낸다.
-    연결 실패(fail=)와 달리 "닿지 못했다" 라고 하지 않는다."""
+    """읽기 시간 초과는 제한 시간을 말하고 "좁혀 다시" 로 보내며 "닿지 못했다" 라고 하지 않는다."""
     client, _ = make_client(hang=True)
     with pytest.raises(ObsError) as ei:
         client.get("logs", "loki/api/v1/query_range")
@@ -257,8 +250,7 @@ def test_read_timeout_is_agent_fixable(make_client: ClientFactory) -> None:
 
 
 def test_urllib_read_timeout_maps_to_transport_timeout(base_env: dict[str, str], slow_server: LocalServer) -> None:
-    """실제 urllib 경로 — 연결은 받되 응답을 미루는 로컬 서버에 짧은 timeout 으로 닿으면 TransportError 가 아니라
-    TransportTimeout 이 난다(맨손 TimeoutError 를 구분해 올린다). 그래서 Client 가 "좁혀 다시" 로 분류할 수 있다."""
+    """실제 urllib 경로에서 응답이 늦으면 TransportError 가 아니라 TransportTimeout 으로 분류된다."""
     client = Client(config=load_config({**base_env, "OBS_GRAFANA_URL": slow_server.base}), token="t", timeout=0.3)
     with pytest.raises(ObsError) as ei:
         client.get("logs", "loki/api/v1/query_range", {"query": "{a=\"b\"}"})
@@ -267,7 +259,7 @@ def test_urllib_read_timeout_maps_to_transport_timeout(base_env: dict[str, str],
 
 
 def test_transport_failure_is_logical(make_client: ClientFactory) -> None:
-    """연결 실패(DNS·VPN) — 논리 이름으로 "닿지 못했다" 와 obs-doctor.py 안내만 말하고 호스트·uid 는 없다."""
+    """연결 실패는 논리 이름으로 "닿지 못했다" 와 obs-doctor.py 안내만 말하고 물리 문자열이 없다."""
     client, _ = make_client(fail="[Errno 8] nodename nor servname provided")
     with pytest.raises(ObsError) as ei:
         client.get("traces", "api/search")
@@ -279,7 +271,7 @@ def test_transport_failure_is_logical(make_client: ClientFactory) -> None:
 
 
 def test_error_messages_never_carry_token(make_client: ClientFactory) -> None:
-    """백엔드가 오류 본문에 토큰을 되돌려 보내도 agent 가 보는 문구에는 토큰이 없다 — 401 은 본문을 인용하지 않는 상태 코드다."""
+    """백엔드가 오류 본문에 토큰을 되돌려도 agent 가 보는 문구에는 토큰이 없다."""
     client, _ = make_client({("metrics", "api/v1/query"): (401, {"message": "bad token test-token-not-real"})})
     with pytest.raises(ObsError) as ei:
         client.get("metrics", "api/v1/query")
@@ -330,9 +322,7 @@ def slow_server() -> Iterator[LocalServer]:
 
 
 def test_transport_never_consults_system_proxy(monkeypatch: pytest.MonkeyPatch, base_env: dict[str, str], local_server: LocalServer) -> None:
-    """마찰 4 — urllib 기본 opener 는 시스템 프록시(macOS _scproxy)를 조회하고, 그 경로가 CoreFoundation 의 argv 파싱을 깨워
-    `--series '{a="b"}'` 를 plist 로 읽으려다 stderr 에 경고를 흘린다. 코어의 transport 는 getproxies()·macOS sysconf 를
-    부르지 않아야 한다 — 부르면 여기서 AssertionError. env 프록시가 없는 보통의 경우를 본다."""
+    """코어의 transport 는 시스템 프록시(getproxies · macOS sysconf)를 조회하지 않는다."""
     def forbidden(*_: object, **__: object) -> dict[str, str]:
         raise AssertionError("시스템 프록시를 조회했다 — env 프록시만 봐야 한다")
     monkeypatch.setattr(urllib.request, "getproxies", forbidden)
@@ -347,8 +337,7 @@ def test_transport_never_consults_system_proxy(monkeypatch: pytest.MonkeyPatch, 
 
 
 def test_transport_honors_env_proxy(monkeypatch: pytest.MonkeyPatch, base_env: dict[str, str], local_server: LocalServer) -> None:
-    """env 프록시(HTTP_PROXY)는 따른다 — 클러스터·사내망 소비자를 위해. 목적지는 해석 불가능한 호스트(example.invalid)이고
-    요청이 로컬 프록시에 절대 URI 로 닿으면 env 프록시를 쓴 것이다."""
+    """env 프록시(HTTP_PROXY)는 따른다 — 요청이 프록시에 절대 URI 로 닿는다."""
     monkeypatch.setenv("HTTP_PROXY", local_server.base)
     monkeypatch.delenv("NO_PROXY", raising=False); monkeypatch.delenv("no_proxy", raising=False)
     client = Client(config=load_config({**base_env, "OBS_GRAFANA_URL": "http://example.invalid"}), token="t")
@@ -386,7 +375,7 @@ def test_doctor_report_never_serializes_token(config: Config, base_env: dict[str
 
 
 def test_doctor_without_token_skips_probes(config: Config, base_env: dict[str, str]) -> None:
-    """토큰이 없으면 doctor 는 연결 시도를 하지 않고(transport 호출 0) 각 probe 에 "토큰 없음" 을 적는다 — 없는 토큰으로 401 을 만들어 보이지 않는다."""
+    """토큰이 없으면 doctor 는 연결 시도 없이 각 probe 에 "토큰 없음" 을 적는다."""
     t = FakeTransport(config)
     rep = doctor(config, "", env=base_env, transport=t)
     assert not rep.token_present
