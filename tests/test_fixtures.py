@@ -3,23 +3,18 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Mapping
 
 import pytest
 
 from obs.core import Client, Config
 from tests import record
-from tests.conftest import FIXTURES, FakeTransport
+from tests.conftest import FIXTURES, FakeTransport, _no_physical
 from tests.record import DERIVED, RECIPES, RECORDED_BY, RECORDED_MANUAL, Fixture, Recorder, fixture_names, read_fixture, response_of, write_fixture
-from tests.test_cli import PHYSICAL   # `_no_physical` 의 단어 목록 — fixture 전체에 같은 규약
 
 FIXTURE_FILES: list[Path] = sorted(FIXTURES.glob("*"))
 NAMES: list[str] = [p.name for p in FIXTURE_FILES]
 TOKEN_MARKS: tuple[str, ...] = ("Authorization", "Bearer ", "glsa_")
-
-
-def _no_physical(text: str) -> None:
-    for word in PHYSICAL:
-        assert word not in text, "fixture 에 물리 정보: %s" % word
 
 
 def _fixture(name: str) -> Fixture:
@@ -128,8 +123,8 @@ def test_at_is_explicit_and_not_derived_from_url() -> None:
 def test_recorder_strips_physical_keeps_order_and_writes_envelope(config: Config, tmp_path: Path) -> None:
     """Recorder 는 Client.transport 래퍼다 — 나간 물리 URL 에서 접두(호스트 · 프록시 경로 · uid)를 잘라 논리 이름 · 네이티브 경로 · query string 만,
     응답은 status · body 만, 헤더는 기록하지 않는다. 호출 순서가 보존되고 같은 at 이 각 요청에 실린다. 파일 전체에 토큰 · 물리 문자열이 없다."""
-    inner = FakeTransport(routes={"api/v1/query": (200, {"status": "success", "data": {"resultType": "vector", "result": []}}),
-                                  "api/traces/": (200, {"batches": []})})
+    inner = FakeTransport(config, routes={("metrics", "api/v1/query"): (200, {"status": "success", "data": {"resultType": "vector", "result": []}}),
+                                          ("traces", "api/traces/abc"): (200, {"batches": []})})
     rec = Recorder(inner=inner, config=config, at=1000.0)
     client = Client(config=config, token="test-token-not-real", transport=rec)
     r1 = client.get("metrics", "api/v1/query", {"query": "up", "time": 1000.0, "match[]": "a"})
@@ -154,9 +149,13 @@ def test_recorder_strips_physical_keeps_order_and_writes_envelope(config: Config
         response_of(fx, "loki/", "x")          # 없는 경로
 
 
+def _always_ok(url: str, headers: Mapping[str, str], timeout: float) -> tuple[int, bytes]:
+    return 200, b"{}"
+
+
 def test_recorder_refuses_unknown_physical_prefix(config: Config) -> None:
     """접두를 모르는 URL 은 기록하지 않는다 — 호스트가 fixture 에 실리는 길을 구조로 막는다."""
-    rec = Recorder(inner=FakeTransport(routes={"x": (200, {})}), config=config, at=1.0)
+    rec = Recorder(inner=_always_ok, config=config, at=1.0)   # inner 가 통과시켜도 Recorder 가 거부한다
     with pytest.raises(ValueError):
         rec("https://elsewhere.example/x", {}, 1.0)
     assert rec.calls == []

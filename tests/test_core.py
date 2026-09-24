@@ -17,9 +17,7 @@ from obs.core import (
     Budget, Config, Lines, BudgetExceeded, Client, Evidence, ObsError, Response, Window, doctor, fmt_rfc3339,
     http_error_message, load_config, parse_duration, parse_time, prune, spill, spill_ref, spill_root, to_dict, to_json,
 )
-from tests.conftest import ClientFactory, FakeTransport
-
-PHYSICAL: tuple[str, ...] = ("obs.mg", "jyo-liar", "prometheus", "loki-careerhub", "tempo-careerhub", "datasources/proxy")
+from tests.conftest import PHYSICAL, ClientFactory, FakeTransport
 
 
 # ── 시간 ────────────────────────────────────────────────────────────────────────
@@ -125,7 +123,7 @@ def test_prune_protects_just_written_file(tmp_path: Path) -> None:
 
 def test_budget_queries(make_client: ClientFactory) -> None:
     """예산 — 질의 횟수 상한을 넘기면 transport 를 부르기 전에 BudgetExceeded. 실제로 나간 호출 수가 상한과 같음을 FakeTransport 기록으로 확인한다."""
-    client, t = make_client({"api/v1/query": (200, {"status": "success", "data": {}})})
+    client, t = make_client({("metrics", "api/v1/query"): (200, {"status": "success", "data": {}})})
     client.budget = Budget(max_queries=2)
     client.get("metrics", "api/v1/query"); client.get("metrics", "api/v1/query")
     with pytest.raises(BudgetExceeded):
@@ -135,7 +133,7 @@ def test_budget_queries(make_client: ClientFactory) -> None:
 
 def test_budget_bytes(make_client: ClientFactory) -> None:
     """예산 — 받은 응답 바이트 누적이 상한을 넘기면 BudgetExceeded. 한 조사가 원본을 무한정 끌어오지 못하게 하는 겹이다."""
-    client, _ = make_client({"api/v1/query": (200, {"pad": "x" * 100})})
+    client, _ = make_client({("metrics", "api/v1/query"): (200, {"pad": "x" * 100})})
     client.budget = Budget(max_response_bytes=150)
     client.get("metrics", "api/v1/query")
     with pytest.raises(BudgetExceeded):
@@ -147,7 +145,7 @@ def test_budget_bytes(make_client: ClientFactory) -> None:
 def test_get_builds_proxy_url_and_bearer(make_client: ClientFactory, config: Config) -> None:
     """Client.get 의 물리 조립 — 논리 이름을 Config 의 proxy_url 로 풀고, None·"" 인 파라미터는 버리며, Bearer 토큰과 Accept 헤더를 붙인다.
     돌려주는 Response 에는 URL 이 없다(backend·path·status·body 만)."""
-    client, t = make_client({"api/v1/query": (200, {"status": "success"})})
+    client, t = make_client({("metrics", "api/v1/query"): (200, {"status": "success"})})
     r = client.get("metrics", "/api/v1/query", {"query": "up", "time": 1.5, "empty": "", "none": None})
     assert r == Response("metrics", "/api/v1/query", 200, {"status": "success"})
     call = t.calls[0]
@@ -165,14 +163,14 @@ def test_get_logical_names_only(make_client: ClientFactory) -> None:
 
 def test_get_non_json_body(make_client: ClientFactory) -> None:
     """JSON 이 아닌 응답(Tempo /api/echo 의 "echo")은 str 로 body 에 실린다 — 파싱 실패를 오류로 만들지 않는다."""
-    client, _ = make_client({"api/echo": (200, b"echo")})
+    client, _ = make_client({("traces", "api/echo"): (200, b"echo")})
     assert client.get("traces", "api/echo").body == "echo"
 
 
 @pytest.mark.parametrize("status,needle", [(401, "인증 실패"), (403, "거부"), (405, "거부"), (500, "오류"), (429, "속도 제한")])
 def test_http_errors_are_logical(make_client: ClientFactory, status: int, needle: str) -> None:
     """오류 문구 규약 — 401·403·405·500·429 는 사람의 것: 논리 이름으로 시작하고 상태별 다음 행동을 말하며, 백엔드가 본문에 호스트를 흘려도 문구에 물리 문자열이 없다."""
-    client, _ = make_client({"loki/api/v1/query_range": (status, {"message": "secret host obs.mg.jyo-liar.com"})})
+    client, _ = make_client({("logs", "loki/api/v1/query_range"): (status, {"message": "secret host obs.mg.jyo-liar.com"})})
     with pytest.raises(ObsError) as ei:
         client.get("logs", "loki/api/v1/query_range")
     msg = str(ei.value)
@@ -183,7 +181,7 @@ def test_http_errors_are_logical(make_client: ClientFactory, status: int, needle
 
 def test_query_error_passes_backend_message(make_client: ClientFactory) -> None:
     """예외 규약 — 질의 오류(400·422)는 agent 가 고칠 수 있는 것이라 백엔드 메시지(파서 오류 등)를 그대로 통과시키고 "질의를 고쳐 다시" 로 끝난다."""
-    client, _ = make_client({"api/v1/query": (400, {"status": "error", "error": 'parse error: unexpected "}"'})})
+    client, _ = make_client({("metrics", "api/v1/query"): (400, {"status": "error", "error": 'parse error: unexpected "}"'})})
     with pytest.raises(ObsError) as ei:
         client.get("metrics", "api/v1/query", {"query": "up}"})
     assert 'parse error: unexpected "}"' in str(ei.value) and "질의를 고쳐" in str(ei.value)
@@ -193,7 +191,7 @@ def test_query_error_passes_backend_message(make_client: ClientFactory) -> None:
 def test_not_found_is_agent_fixable(make_client: ClientFactory) -> None:
     """404 는 agent 가 고칠 수 있는 것(만료·오타 traceID, 없는 레이블) — 403/405 와 묶지 않고 백엔드 메시지를 통과시켜
     "다시" 로 끝낸다. 시험 보고(#93 코멘트)의 마찰 3: 없는 traceID 가 "사람에게" 로 가 오진을 유도했다."""
-    client, _ = make_client({"api/traces/": (404, {"error": "trace not found"})})
+    client, _ = make_client({("traces", "api/traces/deadbeef"): (404, {"error": "trace not found"})})
     with pytest.raises(ObsError) as ei:
         client.get("traces", "api/traces/deadbeef")
     msg = str(ei.value)
@@ -205,7 +203,7 @@ def test_not_found_is_agent_fixable(make_client: ClientFactory) -> None:
 def test_gateway_errors_are_agent_fixable(make_client: ClientFactory, status: int) -> None:
     """502·503·504 는 "제때 답하지 못했다" — 무거운 질의가 흔한 원인이라 "좁혀 다시" 가 먼저 오고, 가벼운 질의도 그럴 때만 사람에게.
     재시험 보고(#93 코멘트)의 새 마찰 1: 7d 창의 Loki 집계가 502 로 "사람에게" 가 됐다. 그 밖의 5xx(500)는 그대로 사람의 것."""
-    client, _ = make_client({"loki/api/v1/query_range": (status, b"<html>bad gateway obs.mg.jyo-liar.com</html>")})
+    client, _ = make_client({("logs", "loki/api/v1/query_range"): (status, b"<html>bad gateway obs.mg.jyo-liar.com</html>")})
     with pytest.raises(ObsError) as ei:
         client.get("logs", "loki/api/v1/query_range")
     msg = str(ei.value)
@@ -248,7 +246,7 @@ def test_transport_failure_is_logical(make_client: ClientFactory) -> None:
 
 def test_error_messages_never_carry_token(make_client: ClientFactory) -> None:
     """백엔드가 오류 본문에 토큰을 되돌려 보내도 agent 가 보는 문구에는 토큰이 없다 — 401 은 본문을 인용하지 않는 상태 코드다."""
-    client, _ = make_client({"api/v1/query": (401, {"message": "bad token test-token-not-real"})})
+    client, _ = make_client({("metrics", "api/v1/query"): (401, {"message": "bad token test-token-not-real"})})
     with pytest.raises(ObsError) as ei:
         client.get("metrics", "api/v1/query")
     assert "test-token-not-real" not in str(ei.value)
@@ -329,7 +327,8 @@ def test_transport_honors_env_proxy(monkeypatch: pytest.MonkeyPatch, base_env: d
 def test_doctor_shows_physical_and_probes(config: Config, base_env: dict[str, str]) -> None:
     """doctor 는 사람용 — 물리 URL·uid·출처·spill 자리를 보이고 백엔드마다 probe 결과(ok/HTTP/논리 오류 문구)를 담되, 토큰 값은 직렬화해도 나오지 않는다.
     한 백엔드가 401 이면 보고서 전체가 ok=False."""
-    t = FakeTransport(routes={"buildinfo": (200, {}), "labels": (200, {}), "api/echo": (401, b"")})
+    t = FakeTransport(config, routes={("metrics", "api/v1/status/buildinfo"): (200, {}), ("logs", "loki/api/v1/labels"): (200, {}),
+                                      ("traces", "api/echo"): (401, b"")})
     rep = doctor(config, "test-token-not-real", env=base_env, transport=t)
     assert rep.grafana_url.value.startswith("https://") and rep.token_present and not rep.ok
     by = {p.backend: p for p in rep.probes}
@@ -342,7 +341,7 @@ def test_doctor_shows_physical_and_probes(config: Config, base_env: dict[str, st
 
 def test_doctor_without_token_skips_probes(config: Config, base_env: dict[str, str]) -> None:
     """토큰이 없으면 doctor 는 연결 시도를 하지 않고(transport 호출 0) 각 probe 에 "토큰 없음" 을 적는다 — 없는 토큰으로 401 을 만들어 보이지 않는다."""
-    t = FakeTransport()
+    t = FakeTransport(config)
     rep = doctor(config, "", env=base_env, transport=t)
     assert not rep.token_present and not rep.ok and not t.calls
     assert all(not p.ok and "토큰 없음" in p.detail for p in rep.probes)

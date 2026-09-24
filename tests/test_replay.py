@@ -84,6 +84,12 @@ def test_replay_transport_unchecked_needs_a_reason_and_skips_comparison(config: 
     assert ReplayTransport.__dataclass_fields__["unchecked"].default is None
 
 
+def test_replay_transport_rejects_empty_unchecked_reason(config: Config) -> None:
+    """unchecked="" 는 검사를 끄지 못한다 — 이유가 비면 ValueError."""
+    with pytest.raises(ValueError, match="unchecked"):
+        ReplayTransport(expected=[_loaded("a.json", "api/v1/query", {})], config=config, unchecked="")
+
+
 def test_replay_transport_warns_and_skips_manual_fixture(config: Config) -> None:
     """recorded: manual 은 요청이 추정 — 비교하지 않고 그 사실을 경고로 알린다."""
     with pytest.warns(UserWarning, match="recorded: manual"):
