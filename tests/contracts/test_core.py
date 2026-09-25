@@ -1,22 +1,29 @@
 """코어 — 시간 창 · 근거 · spill · 예산 · Client.get · 오류 문구 · 직렬화 · doctor."""
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
+import shutil
+import socket
+import struct
 import threading
 import time
 import urllib.request
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 import pytest
 
+from obs import core
 from obs.core import (
     Budget, Config, Lines, BudgetExceeded, Client, Evidence, ObsError, Response, Window, doctor, fmt_rfc3339,
     http_error_message, load_config, parse_duration, parse_time, prune, spill, spill_ref, spill_root, to_dict, to_json,
 )
+from obs.core import _scrub  # pyright: ignore[reportPrivateUsage] — 오류 문구의 물리 삭제는 이 함수 하나가 한다(tests/record.py 의 선례)
 from tests.conftest import AT, DAY, HOUR, MINUTE, PHYSICAL, WEEK, ClientFactory, FakeTransport, RouteKey
 
 
@@ -42,6 +49,39 @@ def test_parse_time() -> None:
     assert parse_time("2026-09-08T00:00:00Z", AT) == 1788825600.0
     with pytest.raises(ObsError):
         parse_time("tomorrow", AT)
+
+
+def test_parse_duration_ignores_surrounding_whitespace() -> None:
+    """parse_duration 은 앞뒤 공백을 무시한다 — " 5m " 은 5m 이다."""
+    assert parse_duration(" 5m ") == 5 * MINUTE
+
+
+def test_parse_duration_rejects_two_decimal_points() -> None:
+    """소수점이 둘인 "1.5.5h" 는 기간 표기가 아니라 ObsError 다."""
+    with pytest.raises(ObsError):
+        parse_duration("1.5.5h")
+
+
+def test_parse_time_naive_rfc3339_is_read_as_utc() -> None:
+    """tz 가 없는 RFC3339 는 UTC 로 읽는다 — Z 를 붙인 표기와 같은 순간이다."""
+    assert parse_time("2030-01-02T03:04:05", AT) == parse_time("2030-01-02T03:04:05Z", AT)
+
+
+def test_parse_time_applies_utc_offset() -> None:
+    """+09:00 오프셋은 UTC 로 환산된다 — 9시간 뒤 시각의 +09:00 표기는 같은 순간의 Z 표기와 같다."""
+    assert parse_time("2030-01-02T12:04:05+09:00", AT) == parse_time("2030-01-02T03:04:05Z", AT)
+
+
+def test_parse_time_blank_is_the_default() -> None:
+    """빈 문자열 · 공백뿐인 문자열은 None 과 같이 기준 시각이다."""
+    assert parse_time("", AT) == AT
+    assert parse_time("   ", AT) == AT
+
+
+def test_parse_time_rejects_relative_with_unknown_unit() -> None:
+    """"-1x" 처럼 단위가 아닌 상대 표기는 ObsError 다 — 숫자로도 RFC3339 로도 읽히지 않는다."""
+    with pytest.raises(ObsError):
+        parse_time("-1x", AT)
 
 
 LAST_HOUR: Window = Window(AT - HOUR, AT)
@@ -148,6 +188,52 @@ def test_prune_oldest_first(tmp_path: Path) -> None:
     assert sorted(p.name for p in tmp_path.iterdir()) == ["2.json", "3"]
 
 
+class _FixedDatetime(_dt.datetime):
+    """now() 가 항상 같은 순간을 돌려주는 datetime — spill 이름의 마이크로초 충돌을 재현한다."""
+
+    @classmethod
+    def now(cls, tz: _dt.tzinfo | None = None) -> _FixedDatetime:
+        return cls(2030, 1, 2, 3, 4, 5, 123456, tzinfo=tz)
+
+
+class _FrozenClock:
+    """obs.core 의 `_dt` 자리에 들어갈 대체 — datetime 만 고정하고 timezone 은 그대로."""
+    datetime = _FixedDatetime
+    timezone = _dt.timezone
+
+
+def test_spill_same_microsecond_gets_numbered_suffix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """같은 마이크로초에 두 번 spill 하면 두 번째 디렉터리는 -2 접미로 구분된다 — 이름은 재사용되지 않는다."""
+    monkeypatch.setattr(core, "_dt", _FrozenClock)
+    env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+    first = spill("k", {"i": 1}, env=env)
+    second = spill("k", {"i": 2}, env=env)
+    assert second != first
+    assert second.name == first.name + "-2"
+    assert json.loads((second / "raw.json").read_text()) == {"i": 2}
+
+
+def test_spill_ref_outside_project_is_absolute(tmp_path: Path) -> None:
+    """spill 경로가 프로젝트 밖이면 상대 경로를 만들지 않고 절대 경로 그대로 돌려준다."""
+    outside = tmp_path / "elsewhere" / "call"
+    assert spill_ref(outside, {"CLAUDE_PROJECT_DIR": str(tmp_path / "project")}) == str(outside)
+
+
+def test_prune_swallows_os_error_and_does_not_count_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """지우기가 OSError 로 실패한 항목은 예외 없이 건너뛰고 지운 개수에 넣지 않는다."""
+    for i in range(3):
+        d = tmp_path / ("%d" % i)
+        d.mkdir()
+        os.utime(d, (1000 + i, 1000 + i))
+
+    def refuse(path: str | os.PathLike[str], *args: object, **kwargs: object) -> None:
+        raise OSError("busy: %s" % path)
+
+    monkeypatch.setattr(shutil, "rmtree", refuse)
+    assert prune(tmp_path, keep=1) == 0
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["0", "1", "2"]
+
+
 def test_prune_protects_just_written_file(tmp_path: Path) -> None:
     """prune 은 protect 로 받은 항목을 mtime 과 무관하게 남기고 나머지에서 keep-1 개만 남긴다."""
     files = [tmp_path / ("%d" % i) for i in range(4)]
@@ -180,7 +266,22 @@ def test_budget_bytes(make_client: ClientFactory) -> None:
         client.get("metrics", "api/v1/query")
 
 
+def test_budget_bytes_limit_is_inclusive() -> None:
+    """응답 총량이 상한과 같으면 통과하고, 그 위로 1 byte 라도 넘으면 BudgetExceeded 다."""
+    b = Budget(max_response_bytes=10)
+    b.charge_bytes(10)
+    with pytest.raises(BudgetExceeded):
+        b.charge_bytes(1)
+
+
 # ── Client.get ──────────────────────────────────────────────────────────────────
+
+def test_get_encodes_bracketed_key_and_sends_string_value_once(make_client: ClientFactory) -> None:
+    """match[] 같은 키는 URL 인코딩되어 나가고, doseq 인코딩에서도 문자열 값은 문자 단위로 쪼개지지 않고 한 번만 나간다."""
+    client, t = make_client({("metrics", "api/v1/labels"): (200, {"status": "success", "data": []})})
+    client.get("metrics", "api/v1/labels", {"match[]": "up"})
+    assert t.calls[0].url.split("?", 1)[1] == "match%5B%5D=up"
+
 
 def test_get_builds_proxy_url_and_bearer(make_client: ClientFactory, config: Config) -> None:
     """Client.get 은 논리 이름을 proxy_url 로 풀고 None · "" 파라미터를 버리며 Bearer · Accept 헤더를 붙이고, Response 에는 URL 이 없다."""
@@ -227,6 +328,21 @@ def test_query_error_passes_backend_message(make_client: ClientFactory) -> None:
     assert 'parse error: unexpected "}"' in str(ei.value)
     assert "질의를 고쳐" in str(ei.value)
     assert http_error_message("logs", 422, "plain text reason") == "logs 백엔드가 질의를 거부했다(422): plain text reason — 질의를 고쳐 다시."
+
+
+def test_query_error_message_clips_backend_text_to_300_chars() -> None:
+    """400 의 백엔드 메시지는 300자에서 잘린다 — JSON 의 error 값이든 JSON 이 아닌 본문이든."""
+    long = "x" * 400
+    for body in (long, json.dumps({"error": long})):
+        msg = http_error_message("metrics", 400, body)
+        assert "x" * 300 in msg
+        assert "x" * 301 not in msg
+
+
+def test_query_error_message_omits_non_object_json_body() -> None:
+    """본문이 JSON 이지만 객체가 아니면(목록 · 숫자) 메시지를 싣지 않는다 — 빈 본문과 같은 문구다."""
+    assert "[1, 2]" not in http_error_message("metrics", 400, "[1, 2]")
+    assert http_error_message("metrics", 400, "[1, 2]") == http_error_message("metrics", 400, "")
 
 
 def test_not_found_is_agent_fixable(make_client: ClientFactory) -> None:
@@ -299,12 +415,15 @@ def test_error_messages_never_carry_token(make_client: ClientFactory) -> None:
 
 @dataclass
 class LocalServer:
-    """요청 경로를 `seen` 에 기록하고 200 JSON 을 돌려주는 로컬 HTTP 서버."""
+    """요청 경로를 `seen` 에 기록하고 정해진 상태 · 본문을 돌려주는 로컬 HTTP 서버 — 실제 `_urllib_transport` 가 지나는 상대."""
     base: str
     seen: list[str] = field(default_factory=list[str])
 
 
-def _serve(delay: float) -> Iterator[LocalServer]:
+OK_BODY: bytes = b'{"status":"success","data":{}}'
+
+
+def _serve(delay: float, status: int = 200, body: bytes = OK_BODY) -> Iterator[LocalServer]:
     seen: list[str] = []
 
     class H(BaseHTTPRequestHandler):
@@ -312,8 +431,7 @@ def _serve(delay: float) -> Iterator[LocalServer]:
             seen.append(self.path)
             if delay:
                 time.sleep(delay)
-            body = b'{"status":"success","data":{}}'
-            self.send_response(200); self.send_header("Content-Type", "application/json")
+            self.send_response(status); self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
 
         def log_message(self, format: str, *args: object) -> None:   # noqa: A002 — BaseHTTPRequestHandler 시그니처
@@ -336,6 +454,52 @@ def local_server() -> Iterator[LocalServer]:
 def slow_server() -> Iterator[LocalServer]:
     """연결은 받되 응답을 1초 미룬다 — 읽기 시간 초과를 만든다."""
     yield from _serve(1.0)
+
+
+ServerFactory = Callable[[int, bytes], LocalServer]
+"""(status, body) → 그 응답만 돌려주는 로컬 서버. 테스트가 끝나면 fixture 가 전부 내린다."""
+
+
+@pytest.fixture
+def error_server() -> Iterator[ServerFactory]:
+    """상태 코드 · 본문을 정해 띄우는 로컬 서버 공장 — HTTPError 경로(4xx · 5xx 본문)를 실제 urllib 로 지나게 한다."""
+    with ExitStack() as stack:
+        def make(status: int, body: bytes) -> LocalServer:
+            gen = _serve(0, status, body)
+            stack.callback(lambda: next(gen, None))   # 다시 진행시키면 _serve 의 finally 가 서버를 내린다
+            return next(gen)
+        yield make
+
+
+def _closed_port() -> int:
+    """방금 열었다 닫은 포트 — 그리로 부르면 연결 거부(URLError)가 난다."""
+    srv = HTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler)
+    port = srv.server_port
+    srv.server_close()
+    return port
+
+
+def _reset_after_headers() -> int:
+    """헤더(Content-Length 1000)까지 보내고 본문 대신 RST 로 끊는 원시 소켓 서버 — 본문을 읽는 중의 ConnectionResetError(OSError) 경로용. 포트를 돌려준다."""
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+
+    def run() -> None:
+        conn, _ = srv.accept()
+        conn.recv(65536)
+        conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n")
+        conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))   # linger 0 — close 가 FIN 이 아니라 RST 를 보낸다
+        conn.close()
+        srv.close()
+
+    threading.Thread(target=run, daemon=True).start()
+    return srv.getsockname()[1]
+
+
+def _real_client(base_env: dict[str, str], base: str) -> Client:
+    """transport 주입 없는 Client — `_urllib_transport` 를 실제로 지난다."""
+    return Client(config=load_config({**base_env, "OBS_GRAFANA_URL": base}), token="t", timeout=2.0)
 
 
 def test_transport_never_consults_system_proxy(monkeypatch: pytest.MonkeyPatch, base_env: dict[str, str], local_server: LocalServer) -> None:
@@ -361,6 +525,57 @@ def test_transport_honors_env_proxy(monkeypatch: pytest.MonkeyPatch, base_env: d
     r = client.get("metrics", "api/v1/query", {"query": "up"})
     assert r.status == 200
     assert local_server.seen == ["http://example.invalid/api/datasources/proxy/uid/prometheus/api/v1/query?query=up"]
+
+
+def test_urllib_http_error_returns_status_with_body(base_env: dict[str, str], error_server: ServerFactory) -> None:
+    """실제 urllib 경로의 HTTPError 는 상태와 본문이 함께 돌아온다 — 404 의 문구에 백엔드 메시지가 실리고 요청은 서버에 한 번 닿는다."""
+    srv = error_server(404, b'{"error":"trace not found"}')
+    with pytest.raises(ObsError) as ei:
+        _real_client(base_env, srv.base).get("traces", "api/traces/deadbeef")
+    assert str(ei.value).startswith("traces 백엔드에 그 자원이 없다(404): trace not found")
+    assert len(srv.seen) == 1
+
+
+@pytest.mark.parametrize("status,needle", [(401, "인증 실패"), (403, "거부"), (502, "제때 답하지 못했다")])
+def test_urllib_http_error_body_with_host_stays_out_of_message(base_env: dict[str, str], error_server: ServerFactory, status: int, needle: str) -> None:
+    """실제 urllib 경로에서 사람의 것인 상태(401 · 403 · 502)의 본문에 호스트를 심어도 문구에는 호스트도 본문도 없다."""
+    host = "127.0.0.1"
+    srv = error_server(status, ("<html>upstream %s says no</html>" % host).encode("utf-8"))
+    with pytest.raises(ObsError) as ei:
+        _real_client(base_env, srv.base).get("metrics", "api/v1/query", {"query": "up"})
+    msg = str(ei.value)
+    assert needle in msg
+    assert host not in msg
+    assert "upstream" not in msg
+
+
+def test_urllib_connection_refused_is_unreachable_without_host(base_env: dict[str, str]) -> None:
+    """닫힌 포트(연결 거부)는 실제 urllib 경로에서 "닿지 못했다" 로 분류되고 문구에 호스트 · 포트가 없다 — 시간 초과와 다르다."""
+    port = _closed_port()
+    with pytest.raises(ObsError) as ei:
+        _real_client(base_env, "http://127.0.0.1:%d" % port).get("logs", "loki/api/v1/labels")
+    msg = str(ei.value)
+    assert msg.startswith("logs 백엔드에 닿지 못했다")
+    assert "127.0.0.1" not in msg
+    assert str(port) not in msg
+    assert "안에 답하지 않았다" not in msg
+    assert "obs-doctor.py" in msg
+
+
+def test_urllib_reset_while_reading_is_unreachable_without_host(base_env: dict[str, str]) -> None:
+    """본문을 읽는 중 연결이 RST 로 끊기면 실제 urllib 경로가 OSError 를 "닿지 못했다" 로 분류하고 문구에 호스트 · 포트가 없다."""
+    port = _reset_after_headers()
+    with pytest.raises(ObsError) as ei:
+        _real_client(base_env, "http://127.0.0.1:%d" % port).get("metrics", "api/v1/query", {"query": "up"})
+    msg = str(ei.value)
+    assert msg.startswith("metrics 백엔드에 닿지 못했다")
+    assert "127.0.0.1" not in msg
+    assert str(port) not in msg
+
+
+def test_scrub_redacts_each_secret_and_ignores_empty() -> None:
+    """_scrub 은 secrets 의 문자열마다 모든 출현을 <redacted> 로 바꾸고 빈 secret 은 무시한다 — 빈 문자열로 전부를 지우지 않는다."""
+    assert _scrub("dial gw.example:443 by gw.example", ("gw.example", "")) == "dial <redacted>:443 by <redacted>"
 
 
 # ── doctor ──────────────────────────────────────────────────────────────────────
