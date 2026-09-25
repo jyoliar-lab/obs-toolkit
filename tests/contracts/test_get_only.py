@@ -25,9 +25,7 @@ def _py_files() -> list[Path]:
 
 
 def test_only_core_imports_http() -> None:
-    """GET 유일성의 절반 — HTTP 를 만지는 모듈은 obs/core.py 하나여야 한다.
-    obs/** 와 skills/** 의 파이썬 파일을 AST 로 훑어 urllib·http·socket·ssl·requests 류 import 가 core.py 밖에 없음을 확인한다.
-    새 어댑터가 자기 HTTP 클라이언트를 들이면 여기서 막힌다."""
+    """obs/** · skills/** 에서 HTTP 를 import 하는 모듈은 obs/core.py 하나다."""
     offenders: list[str] = []
     for path in _py_files():
         if path == ROOT / "obs" / "core.py":
@@ -39,13 +37,14 @@ def test_only_core_imports_http() -> None:
 
 
 def test_core_never_sets_http_method() -> None:
-    """urllib.request.Request(...) 호출에 method= · data= 가 없다 — urllib 기본 = GET."""
+    """core 의 urllib.request.Request 호출에 method= · data= 가 없다 — urllib 기본은 GET 이다."""
     tree = ast.parse((ROOT / "obs" / "core.py").read_text(encoding="utf-8"))
     request_calls = 0
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "Request":
             request_calls += 1
             kws = {k.arg for k in node.keywords}
-            assert "method" not in kws and "data" not in kws, "Request 에 method/data 를 주지 않는다"
+            assert "method" not in kws, "Request 에 method/data 를 주지 않는다"
+            assert "data" not in kws, "Request 에 method/data 를 주지 않는다"
             assert len(node.args) == 1, "Request 위치 인자는 url 하나 — data 를 위치 인자로도 주지 않는다"
     assert request_calls == 1, "HTTP 요청을 만드는 자리는 정확히 하나다"

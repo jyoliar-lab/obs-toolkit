@@ -1,0 +1,10 @@
+3309109248  {pod=kube-apiserver-raspberrypi-1}
+3066085376  {pod=kube-apiserver-raspberrypi-0}
+2870034432  {pod=kube-apiserver-raspberrypi-2}
+2806497280  {pod=prometheus-monitoring-kube-prometheus-prometheus-0}
+1637023744  {pod=instance-manager-b251ae4054af761d3a58f01effc1d556}
+1589477376  {pod=instance-manager-995865632f1dffd248943ba7ea5a0b26}
+1505820672  {pod=careerhub-mongodb-0}
+1111392256  {pod=argocd-application-controller-0}
+1012187136  {pod=careerhub-mongodb-1}
+920600576  {pod=careerhub-mongodb-arb-0}

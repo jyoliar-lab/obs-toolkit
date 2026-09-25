@@ -1,6 +1,6 @@
 # Python 테스트 — 세 티어와 작성 규칙
 
-`tests/` 는 세 티어로 나뉜다. 티어의 정의는 **"실패하면 사람이 무엇을 하나"** 다. 규약은 `tests/infra/test_conventions.py`(메타테스트)가 CI 에서 지킨다 — 새 위반은 즉시 실패하고, 기존 위반은 래칫 allowlist 로 줄어들기만 한다.
+`tests/` 는 세 티어로 나뉜다. 티어의 정의는 **"실패하면 사람이 무엇을 하나"** 다. 규약은 `tests/infra/test_conventions.py`(메타테스트)가 CI 에서 지킨다 — 위반은 0 이 기준이고, 있으면 즉시 실패한다.
 
 ## 세 티어 — 운영적 정의
 
@@ -56,10 +56,6 @@
 - `FakeTransport` 라우트 키는 `(backend, native_path)` **정확 일치**다 — 경로 조각 · `?` 트릭이 없다. 등록되지 않은 요청은 실패 문구에 등록된 키를 나열한다.
 - 스냅샷 파일 이름은 `request.node.name`(파라미터 포함) 그대로다.
 
-## 래칫 allowlist
+## 위반은 0 이 기준
 
-`tests/infra/test_conventions.py` 의 `ALLOWLIST` 가 현재 위반을 `{"tests/test_cli.py::test_promql_instant_up": {"and": 3}, …}` 꼴로 든다.
-
-- 실제 위반이 allowlist 보다 **많으면** 실패(새 위반).
-- **적으면** allowlist 를 줄이라고 실패(느슨한 채로 남지 않게) — 위반을 고쳤으면 그 항목을 그만큼 뺀다.
-- 같으면 통과. **전부 비면 `ALLOWLIST` 를 지운다** — 재편의 완료 기준이 "allowlist 가 빈다" 다.
+게이트를 올릴 때(#106)는 기존 위반을 래칫 allowlist 로 들고 있었고, 재편(#107)으로 allowlist 가 비어 삭제됐다. 이제 메타테스트는 위반이 하나라도 있으면 자리 · 규칙 · 개수를 말하며 실패한다 — allowlist 를 되살리지 않고 위반을 고친다.

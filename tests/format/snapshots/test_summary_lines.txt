@@ -1,0 +1,21 @@
+창 09-22 09:11:46Z ~ 09-22 10:11:46Z  step=60s  (n=서브쿼리 점 수 · p50/p95=quantile_over_time · slope=deriv 값/초)
+n=60  min=7.39502e-05  p50=0.000104056  p95=0.000145735  max=0.000165675  last=7.39502e-05  slope=+9.83865e-11/s  {pod=api-composer-5cd4748b88-4w5hc}
+n=60  min=6.88857e-05  p50=8.49996e-05  p95=0.00011607  max=0.000134335  last=8.78096e-05  slope=+3.15821e-09/s  {pod=api-composer-5cd4748b88-5scd5}
+n=60  min=6.66567e-05  p50=8.27387e-05  p95=0.000106303  max=0.000115909  last=8.25732e-05  slope=-3.32602e-09/s  {pod=auth-service-869c7d45b9-2j48w}
+n=60  min=6.94486e-05  p50=8.05653e-05  p95=9.37649e-05  max=0.000103545  last=8.12403e-05  slope=+9.82482e-10/s  {pod=auth-service-869c7d45b9-bsrqg}
+n=60  min=0.0707642  p50=0.0739885  p95=0.0757208  max=0.0765269  last=0.0748215  slope=+8.02198e-08/s  {pod=careerhub-mongodb-0}
+n=60  min=0.0751147  p50=0.0775855  p95=0.0793862  max=0.0806198  last=0.0784202  slope=+2.10968e-07/s  {pod=careerhub-mongodb-1}
+n=60  min=0.0495243  p50=0.0506779  p95=0.0514078  max=0.0516471  last=0.0504332  slope=+4.99863e-08/s  {pod=careerhub-mongodb-arb-0}
+n=60  min=0.00297189  p50=0.00309702  p95=0.00354167  max=0.00376704  last=0.0030095  slope=-6.16485e-08/s  {pod=careerhub-nginx-gateway-nginx-6b74ff84d5-7hngr}
+n=60  min=0.0200617  p50=0.0262113  p95=0.0360153  max=0.0366377  last=0.0204672  slope=+7.31235e-07/s  {pod=careerhub-postgresql-1}
+n=60  min=0.012799  p50=0.0134773  p95=0.0141198  max=0.0144898  last=0.0135726  slope=-3.52413e-08/s  {pod=careerhub-postgresql-2}
+n=60  min=0.000278075  p50=0.000301257  p95=0.000328209  max=0.000330607  last=0.000327227  slope=+5.26575e-10/s  {pod=careerhub-postgresql-pooler-54dcf6c55b-2rgcv}
+n=60  min=3.78783e-06  p50=4.17465e-06  p95=4.47031e-06  max=4.95628e-06  last=3.98077e-06  slope=+4.18278e-11/s  {pod=frontend-5b9cb468cd-xnpvq}
+n=60  min=0.000823638  p50=0.000928696  p95=0.00101809  max=0.00104181  last=0.000967971  slope=+3.42518e-08/s  {pod=posting-service-697c7c9468-2b45b}
+n=60  min=0.000831837  p50=0.00091229  p95=0.0009848  max=0.00101318  last=0.000951466  slope=-2.27851e-09/s  {pod=posting-service-697c7c9468-nb6c8}
+n=60  min=0.00077043  p50=0.000859481  p95=0.000896403  max=0.000914377  last=0.000835068  slope=-5.86654e-09/s  {pod=review-service-599858944c-ht9m8}
+n=60  min=0.000803445  p50=0.000884897  p95=0.000956552  max=0.000979977  last=0.000968318  slope=+5.52965e-09/s  {pod=review-service-599858944c-trqvx}
+n=60  min=0.000799505  p50=0.000890853  p95=0.000942336  max=0.000952452  last=0.000865979  slope=+1.52337e-08/s  {pod=userinfo-service-5856d5d7bc-4m4pp}
+n=60  min=0.000878845  p50=0.000944124  p95=0.0010082  max=0.00102638  last=0.00101576  slope=+4.14246e-09/s  {pod=userinfo-service-5856d5d7bc-nh74j}
+n=60  min=0.0103976  p50=0.0107959  p95=0.0111567  max=0.0112765  last=0.0107939  slope=-1.5182e-09/s  {pod=zitadel-f65b884bd-jm9zg}
+n=60  min=0.0217589  p50=0.0225018  p95=0.0238587  max=0.0242684  last=0.0225732  slope=-1.49742e-07/s  {pod=zitadel-login-5f84b58446-9pn4q}

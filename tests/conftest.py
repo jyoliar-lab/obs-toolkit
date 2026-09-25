@@ -7,15 +7,15 @@ import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping, Protocol, Sequence, cast
+from typing import Mapping, Protocol, Sequence, TypeVar, cast
 
 import pytest
 
-from obs.core import JSON, Client, Config, TransportError, TransportTimeout, load_config
+from obs.core import JSON, Client, Config, Evidence, TransportError, TransportTimeout, Window, load_config
 from tests.record import FIXTURES, ROOT, read_fixture, response_of, strip_physical
 from tests.replay import Call, FixtureSpec, Loaded, ReplayTransport, load_call, load_fixture_calls
 
-__all__ = ["FIXTURES", "ROOT", "Call", "Loaded", "load_call", "_no_physical"]   # 재수출 · 공용 헬퍼 — 테스트가 여기서 가져온다
+__all__ = ["FIXTURES", "ROOT", "Call", "Loaded", "load_call", "_no_physical", "_vector", "_stat", "AT", "MINUTE", "HOUR", "DAY", "WEEK"]   # 재수출 · 공용 헬퍼 — 테스트가 여기서 가져온다
 
 
 # ── 물리 비노출 — 단어 목록은 여기 한 곳 ─────────────────────────────────────────
@@ -32,6 +32,27 @@ def _no_physical(text: str) -> None:
     """text 에 PHYSICAL 의 단어가 하나도 없다."""
     for word in PHYSICAL:
         assert word not in text, "물리 정보가 실렸다: %s" % word
+
+
+# ── 손 입력 — Prometheus 즉시 조회 응답 모양 ─────────────────────────────────────
+
+AT: float = 100000.0
+"""손 입력 테스트의 now — 창 · 기준선의 기대값은 전부 이 값 기준의 상대로 쓴다. fixture replay 는 녹화 at(t.at)을 쓴다."""
+MINUTE: float = 60.0
+HOUR: float = 60 * MINUTE
+DAY: float = 24 * HOUR
+WEEK: float = 7 * DAY
+
+
+def _vector(*items: tuple[dict[str, str], str]) -> dict[str, JSON]:
+    """Prometheus 즉시 조회 응답을 손으로 — (레이블, 값) 목록. 비면 빈 vector."""
+    result: list[JSON] = [{"metric": dict(labels), "value": [AT, v]} for labels, v in items]
+    return {"status": "success", "data": {"resultType": "vector", "result": result}}
+
+
+def _stat(pod: str, stat: str, v: str) -> tuple[dict[str, str], str]:
+    """환원 응답의 한 항목 — pod · stat 이름표와 값."""
+    return {"pod": pod, "stat": stat}, v
 
 
 # ── 녹화 fixture ─────────────────────────────────────────────────────────────────
@@ -126,6 +147,17 @@ def replay(config: Config) -> ReplayFactory:
         t = ReplayTransport(expected=expected, config=config, unchecked=unchecked)
         return Client(config=config, token="test-token-not-real", transport=t), t
     return _make
+
+
+# ── Evidence 의 창 ───────────────────────────────────────────────────────────────
+
+V = TypeVar("V")
+
+
+def window_of(ev: Evidence[V]) -> Window:
+    """렌더링 함수에 넘길 Evidence 의 창 — `ev.window or Window(0, 0)` 대신. 창 없는 Evidence 는 테스트가 만들지 않는다."""
+    assert ev.window is not None, "Evidence 에 창이 없다"
+    return ev.window
 
 
 # ── 스냅샷 — format 티어의 비교 장치 ─────────────────────────────────────────────

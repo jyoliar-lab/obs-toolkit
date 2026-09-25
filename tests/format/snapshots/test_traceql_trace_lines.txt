@@ -1,0 +1,13 @@
+트레이스 5218697c3912d4fe404780fba90d7604  총 105.2ms  span 8개  시작 09-22 10:40:55Z
+루트: ngf:careerhub-prod:careerhub-nginx-gateway / /api/
+서비스: api-composer(4), posting-service(1), review-service(1), userinfo-service(1), ngf:careerhub-prod:careerhub-nginx-gateway(1)
+오류 span: 0
+느린 span top 15:
+     105.0ms  +    0.0ms  ngf:careerhub-prod:careerhub-nginx-gateway / /api/
+     103.6ms  +    1.5ms  api-composer / GET /api/job_postings
+      98.4ms  +    1.8ms  api-composer / careerhub.posting_service.restapi_grpc.RestApiGrpc/JobPostings
+      95.0ms  +    4.9ms  posting-service / careerhub.posting_service.restapi_grpc.RestApiGrpc/JobPostings
+       2.5ms  +  102.4ms  api-composer / careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/GetScrapJobsById
+       2.1ms  +  100.2ms  api-composer / careerhub.review_service.restapi_grpc.ReviewReaderGrpc/GetCompanyScores
+       2.0ms  +  102.7ms  userinfo-service / careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/GetScrapJobsById
+       1.4ms  +  100.8ms  review-service / careerhub.review_service.restapi_grpc.ReviewReaderGrpc/GetCompanyScores

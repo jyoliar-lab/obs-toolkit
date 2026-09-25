@@ -1,0 +1,1 @@
+n=61  min=65  max=65  first=65  last=65  {}

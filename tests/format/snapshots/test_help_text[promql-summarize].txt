@@ -1,0 +1,22 @@
+usage: promql.py summarize [-h] [--since SINCE] [--end END] [--max-lines MAX_LINES] [--json] [--step STEP] query
+
+promql.py summarize '<PromQL>' --since 1h [--end <시각>] [--step 60s]
+
+시계열마다 `n min p50 p95 max last slope` 한 줄 — 서브쿼리 `(Q)[<창>:<step>]` 위의 count/min/quantile(0.5·0.95)/
+max/last_over_time · deriv(slope, 값/초)를 한 질의로. 첫 줄은 창·step 헤더. 시계열이 없으면 "데이터 없음"(0 과 다르다).
+step 은 창 길이/60(최소 15s) — 긴 창(--since 7d)이면 해상도가 거칠어지므로 헤더의 step 을 같이 읽는다.
+
+계산은 백엔드가 한다 — 코어는 질의를 조립해 결과만 받는다(연산당 질의 1회). 조립된 질의와 창은 호출 디렉터리의
+summary.txt 머리에 남는다(그대로 재실행 가능). stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만.
+
+positional arguments:
+  query                 PromQL
+
+options:
+  -h, --help            show this help message and exit
+  --since SINCE         창 길이. 기본 1h
+  --end END             창 끝 (now · -10m · unix초 · RFC3339). 기본 now
+  --max-lines MAX_LINES
+                        stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
+  --json                stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 항상 남는다)
+  --step STEP           서브쿼리 해상도. 기본 창 길이/60 (최소 15s)

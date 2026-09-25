@@ -1,0 +1,40 @@
+usage: traceql.py [-h] [--q Q] [--since SINCE] [--end END] [--limit LIMIT] [--min-duration MIN_DURATION]
+                  [--scope {span,resource,intrinsic}] [--top TOP] [--max-lines MAX_LINES] [--json]
+                  {search,trace,tags,tag-values} [arg]
+
+traceql — 트레이스 검색·조회 (traces 백엔드, GET 만).
+
+사용:
+  traceql.py search [--q '<TraceQL>'] [--since 1h] [--limit 20]     최근 트레이스 목록
+  traceql.py trace <traceID>                                        트레이스 하나 — 요약
+  traceql.py tags [--scope span|resource|intrinsic]                 검색 가능한 태그
+  traceql.py tag-values <tag> [--q '<TraceQL>']                     태그 값
+
+옵션:
+  --q <TraceQL>      검색식. 예: '{ resource.service.name = "posting-service" && status = error }'
+                     비우면 구간 안의 모든 트레이스(최근순)
+  --since <기간>     조회 구간 길이. 기본 1h        --end <시각>  구간 끝. 기본 now
+  --limit <n>        search 결과 상한. 기본 20
+  --min-duration     예: 500ms · 2s (search)
+  --top <n>          trace 요약에서 보이는 느린 span 수. 기본 15
+  --max-lines <n>    stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
+  --json             stdout 에 요약을 찍지 않고 경로만(파일은 항상 남는다)
+
+trace 는 원본이 크다 — stdout 은 요약(서비스·span 수·오류·느린 span)이고 원본은 호출 디렉터리의 raw.json.
+
+positional arguments:
+  {search,trace,tags,tag-values}
+  arg                   trace: traceID · tag-values: 태그 이름
+
+options:
+  -h, --help            show this help message and exit
+  --q Q
+  --since SINCE
+  --end END
+  --limit LIMIT
+  --min-duration MIN_DURATION
+  --scope {span,resource,intrinsic}
+  --top TOP
+  --max-lines MAX_LINES
+                        stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
+  --json                stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 항상 남는다)

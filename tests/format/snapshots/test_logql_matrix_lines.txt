@@ -1,0 +1,5 @@
+n=259  min=14  max=15  last=15  {detected_level=debug}
+n=41  min=1  max=1  last=1  {detected_level=error}
+n=259  min=367  max=375  last=367  {detected_level=info}
+n=259  min=3975  max=4066  last=4024  {detected_level=unknown}
+n=259  min=180  max=181  last=180  {detected_level=warn}
