@@ -1,0 +1,37 @@
+{
+ "format": "obs-fixture/1",
+ "recorded": "tests/record.py",
+ "calls": [
+  {
+   "request": {
+    "at": 1790329633.701372,
+    "at_rfc3339": "2026-09-25T09:47:13Z",
+    "backend": "traces",
+    "path": "api/v2/search/tag/resource.service.name/values",
+    "query_string": "start=1790243233&end=1790329633",
+    "params": {
+     "start": "1790243233",
+     "end": "1790329633"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "tagValues": [
+      {
+       "type": "string",
+       "value": "posting-service"
+      },
+      {
+       "type": "string",
+       "value": "review-service"
+      }
+     ],
+     "metrics": {
+      "inspectedBytes": "20407"
+     }
+    }
+   }
+  }
+ ]
+}

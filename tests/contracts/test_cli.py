@@ -9,7 +9,7 @@ import pytest
 
 from obs.adapters import cli
 from obs.core import JSON, Client
-from tests.conftest import AT, HOUR, MINUTE, ClientFactory, _no_physical, _vector
+from tests.conftest import AT, MINUTE, ClientFactory, _no_physical, _vector
 
 
 # ── 거부 · 오류 ──────────────────────────────────────────────────────────────────
@@ -43,83 +43,6 @@ def test_traceql_trace_requires_id(make_client: ClientFactory) -> None:
     with pytest.raises(cli.ObsError, match="traceID 가 필요하다"):
         cli.traceql_run(client, cli.TraceqlArgs(cmd="trace"))
     assert t.calls == []
-
-
-# ── metadata 분기 — --labels · --label-values · --series · tags · tag-values ─────────
-
-NAMES: dict[str, JSON] = {"status": "success", "data": ["b", "a"]}
-LABEL_SETS: dict[str, JSON] = {"status": "success", "data": [{"__name__": "up", "job": "j"}, {"__name__": "up", "job": "k"}]}
-TAG_VALUES: dict[str, JSON] = {"tagValues": [{"value": "POST"}, {"value": "GET"}]}
-
-
-def test_promql_labels_calls_labels_endpoint_once_with_selector_as_match(make_client: ClientFactory) -> None:
-    """--labels 는 api/v1/labels 를 selector 를 match[] 로 실어 한 번 부르고 이름을 정렬해 낸다."""
-    client, t = make_client({("metrics", "api/v1/labels"): (200, NAMES)})
-    ev, _, kind = cli.promql_run(client, cli.PromqlArgs(query="up", labels=True), at=AT)
-    assert kind == "promql-labels"
-    assert ev.value.lines == ["a", "b"]
-    assert len(t.calls) == 1
-    assert "match%5B%5D=up" in t.calls[0].url
-
-
-def test_promql_label_values_targets_the_named_label(make_client: ClientFactory) -> None:
-    """--label-values NAME 은 api/v1/label/NAME/values 를 부르고 값을 정렬해 내며 Evidence.query 가 이름을 말한다."""
-    client, t = make_client({("metrics", "api/v1/label/job/values"): (200, NAMES)})
-    ev, _, kind = cli.promql_run(client, cli.PromqlArgs(query="up", label_values="job"), at=AT)
-    assert kind == "promql-label-values"
-    assert ev.value.lines == ["a", "b"]
-    assert len(t.calls) == 1
-    assert "job" in ev.query
-
-
-def test_promql_series_defaults_to_last_hour_and_lists_label_sets(make_client: ClientFactory) -> None:
-    """--series 는 api/v1/series 를 selector 로 부르고 --range 가 없으면 끝 시각 앞 1시간을 창으로 보내며 레이블 집합을 한 줄씩 낸다."""
-    client, t = make_client({("metrics", "api/v1/series"): (200, LABEL_SETS)})
-    ev, _, kind = cli.promql_run(client, cli.PromqlArgs(series="up"), at=AT)
-    assert kind == "promql-series"
-    assert len(ev.value.lines) == 2
-    assert all(line.startswith("{") for line in ev.value.lines)
-    assert "start=%s" % (AT - HOUR) in t.calls[0].url
-    assert "end=%s" % AT in t.calls[0].url
-
-
-def test_logql_labels_sends_nanosecond_window(make_client: ClientFactory) -> None:
-    """--labels 는 loki/api/v1/labels 를 나노초 start · end 로 한 번 부르고 이름을 정렬해 낸다."""
-    client, t = make_client({("logs", "loki/api/v1/labels"): (200, NAMES)})
-    ev, _, kind = cli.logql_run(client, cli.LogqlArgs(labels=True), at=AT)
-    assert kind == "logql-labels"
-    assert ev.value.lines == ["a", "b"]
-    assert len(t.calls) == 1
-    assert "start=%d" % int((AT - HOUR) * 1e9) in t.calls[0].url
-    assert "end=%d" % int(AT * 1e9) in t.calls[0].url
-
-
-def test_logql_label_values_targets_the_named_label(make_client: ClientFactory) -> None:
-    """--label-values NAME 은 loki/api/v1/label/NAME/values 를 부르고 값을 정렬해 낸다."""
-    client, t = make_client({("logs", "loki/api/v1/label/app/values"): (200, NAMES)})
-    ev, _, kind = cli.logql_run(client, cli.LogqlArgs(label_values="app"), at=AT)
-    assert kind == "logql-label-values"
-    assert ev.value.lines == ["a", "b"]
-    assert len(t.calls) == 1
-
-
-def test_logql_series_sends_selector_as_match(make_client: ClientFactory) -> None:
-    """--series 는 loki/api/v1/series 를 selector 를 match[] 로 실어 부르고 스트림 레이블 집합을 한 줄씩 낸다."""
-    client, t = make_client({("logs", "loki/api/v1/series"): (200, LABEL_SETS)})
-    ev, _, kind = cli.logql_run(client, cli.LogqlArgs(series='{namespace="n"}'), at=AT)
-    assert kind == "logql-series"
-    assert len(ev.value.lines) == 2
-    assert "match%5B%5D=" in t.calls[0].url
-
-
-def test_traceql_tag_values_targets_the_tag_and_passes_q(make_client: ClientFactory) -> None:
-    """tag-values TAG 는 api/v2/search/tag/TAG/values 를 --q 와 함께 부르고 값을 정렬해 낸다."""
-    client, t = make_client({("traces", "api/v2/search/tag/http.method/values"): (200, TAG_VALUES)})
-    ev, _, kind = cli.traceql_run(client, cli.TraceqlArgs(cmd="tag-values", arg="http.method", q="{ status = error }"), at=AT)
-    assert kind == "traceql-tag-values"
-    assert ev.value.lines == ["GET", "POST"]
-    assert len(t.calls) == 1
-    assert "q=" in t.calls[0].url
 
 
 # ── 출력 절제 ────────────────────────────────────────────────────────────────────

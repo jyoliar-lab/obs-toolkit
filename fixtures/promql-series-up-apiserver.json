@@ -1,0 +1,52 @@
+{
+ "format": "obs-fixture/1",
+ "recorded": "tests/record.py",
+ "calls": [
+  {
+   "request": {
+    "at": 1790329562.84917,
+    "at_rfc3339": "2026-09-25T09:46:02Z",
+    "backend": "metrics",
+    "path": "api/v1/series",
+    "query_string": "match%5B%5D=up%7Bjob%3D%22apiserver%22%7D&start=1790325962.84917&end=1790329562.84917",
+    "params": {
+     "match[]": "up{job=\"apiserver\"}",
+     "start": "1790325962.84917",
+     "end": "1790329562.84917"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "status": "success",
+     "data": [
+      {
+       "__name__": "up",
+       "endpoint": "https",
+       "instance": "10.18.1.12:6443",
+       "job": "apiserver",
+       "namespace": "default",
+       "service": "kubernetes"
+      },
+      {
+       "__name__": "up",
+       "endpoint": "https",
+       "instance": "10.18.1.10:6443",
+       "job": "apiserver",
+       "namespace": "default",
+       "service": "kubernetes"
+      },
+      {
+       "__name__": "up",
+       "endpoint": "https",
+       "instance": "10.18.1.11:6443",
+       "job": "apiserver",
+       "namespace": "default",
+       "service": "kubernetes"
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

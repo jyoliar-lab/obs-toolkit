@@ -1,0 +1,14 @@
+apiserver
+coredns
+kube-controller-manager
+kube-etcd
+kube-proxy
+kube-scheduler
+kube-state-metrics
+kubelet
+monitoring-grafana
+monitoring-kube-prometheus-alertmanager
+monitoring-kube-prometheus-operator
+monitoring-kube-prometheus-prometheus
+node-exporter
+promcheck
