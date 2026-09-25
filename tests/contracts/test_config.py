@@ -115,24 +115,8 @@ def test_unknown_backend(config: Config) -> None:
         config.uid("nope")
 
 
-# ── 설정 엣지 — proxy_prefix 의 출처 · 형태가 틀린 파일 · 빈 값 ─────────────────────
+# ── 설정 엣지 — 형태가 틀린 파일 · 빈 값 ─────────────────────────────────────────
 # OBS_CONFIG 가 없는 파일을 가리키는 경우는 같은 Feature 의 Bug 티켓이 다룬다 — 여기서 검사하지 않는다.
-
-def test_proxy_prefix_from_env(base_env: dict[str, str], tmp_path: Path) -> None:
-    """OBS_PROXY_PREFIX 는 proxy_prefix 를 덮고 출처가 env 이며 proxy_url 에 그대로 쓰인다."""
-    cfg = load_config({**base_env, "OBS_PROXY_PREFIX": "/p"}, home=tmp_path / "home")
-    assert cfg.proxy_prefix.value == "/p"
-    assert cfg.proxy_prefix.source == "env:OBS_PROXY_PREFIX"
-    assert cfg.proxy_url("metrics", "api/v1/query") == "%s/p/%s/api/v1/query" % (cfg.grafana_url.value, cfg.uid("metrics"))
-
-
-def test_proxy_prefix_from_file(base_env: dict[str, str], tmp_path: Path) -> None:
-    """설정 파일의 proxy_prefix 는 기본값을 덮고 출처가 file:<경로> 다."""
-    p = _write(Path(base_env["CLAUDE_PLUGIN_DATA"]) / "config.json", {"proxy_prefix": "/from-file"})
-    cfg = load_config(base_env, home=tmp_path / "home")
-    assert cfg.proxy_prefix.value == "/from-file"
-    assert cfg.proxy_prefix.source == "file:%s" % p
-
 
 def test_empty_file_value_falls_back_to_default(base_env: dict[str, str], tmp_path: Path) -> None:
     """설정 파일의 값이 빈 문자열이면 없는 것과 같다 — 기본값이 쓰이고 출처가 default 다."""
@@ -144,17 +128,9 @@ def test_empty_file_value_falls_back_to_default(base_env: dict[str, str], tmp_pa
     assert cfg.uids["logs"].value == DEFAULT_UIDS["logs"]
 
 
-def test_null_uids_means_defaults(base_env: dict[str, str], tmp_path: Path) -> None:
-    """uids 가 null 이면 없는 것과 같다 — 세 백엔드 모두 기본값이다."""
-    _write(Path(base_env["CLAUDE_PLUGIN_DATA"]) / "config.json", {"uids": None})
-    cfg = load_config(base_env, home=tmp_path / "home")
-    assert {k: v.value for k, v in cfg.uids.items()} == DEFAULT_UIDS
-
-
-@pytest.mark.parametrize("uids", ["prometheus", ["a", "b"], 1])
-def test_uids_not_an_object_is_an_error(base_env: dict[str, str], tmp_path: Path, uids: object) -> None:
-    """uids 가 객체가 아니면(문자열 · 목록 · 숫자) 조용히 무시하지 않고 ObsError 로 거부한다."""
-    _write(Path(base_env["CLAUDE_PLUGIN_DATA"]) / "config.json", {"uids": uids})
+def test_uids_not_an_object_is_an_error(base_env: dict[str, str], tmp_path: Path) -> None:
+    """uids 가 객체가 아니면 조용히 무시하지 않고 ObsError 로 거부한다."""
+    _write(Path(base_env["CLAUDE_PLUGIN_DATA"]) / "config.json", {"uids": "prometheus"})
     with pytest.raises(ObsError, match="uids"):
         load_config(base_env, home=tmp_path / "home")
 

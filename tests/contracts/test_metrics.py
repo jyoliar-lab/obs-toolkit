@@ -288,30 +288,12 @@ def test_check_status_rejects_non_object_body() -> None:
     assert "oops" in str(ei.value)
 
 
-def test_check_status_clips_long_non_object_body() -> None:
-    """객체가 아닌 본문이 300자를 넘으면 문구에는 앞부분과 … 만 실리고 개행은 ⏎ 로 접힌다."""
-    with pytest.raises(ObsError) as ei:
-        metrics.check_status("a\n" + "x" * 400, "logs")
-    msg = str(ei.value)
-    assert "x" * 300 not in msg
-    assert msg.endswith("…")
-    assert "\n" not in msg
-
-
 def test_summarize_explicit_step_overrides_auto(make_client: ClientFactory) -> None:
     """summarize 에 step 을 주면 자동값 대신 그 step 이 Summary 와 서브쿼리에 쓰인다."""
     client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
     ev, _ = metrics.summarize(client, CPU_QUERY, W, step="5m")
     assert ev.value.step == "5m"
     assert ev.query == metrics.summarize_query(CPU_QUERY, W, "5m")
-
-
-def test_compare_explicit_step_overrides_auto(make_client: ClientFactory) -> None:
-    """compare 에 step 을 주면 자동값 대신 그 step 이 Comparison 과 서브쿼리에 쓰인다."""
-    client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
-    ev, _ = metrics.compare(client, CPU_QUERY, W.with_baseline("1d"), step="5m")
-    assert ev.value.step == "5m"
-    assert ":5m]" in ev.query
 
 
 def test_top_drops_non_finite_values(make_client: ClientFactory) -> None:

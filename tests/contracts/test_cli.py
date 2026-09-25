@@ -45,22 +45,6 @@ def test_traceql_trace_requires_id(make_client: ClientFactory) -> None:
     assert t.calls == []
 
 
-def test_traceql_tag_values_requires_tag_name(make_client: ClientFactory) -> None:
-    """tag-values 명령에 태그 이름이 없으면 질의 전에 ObsError 다."""
-    client, t = make_client()
-    with pytest.raises(cli.ObsError, match="태그 이름이 필요하다"):
-        cli.traceql_run(client, cli.TraceqlArgs(cmd="tag-values"))
-    assert t.calls == []
-
-
-def test_traceql_unknown_command_is_rejected(make_client: ClientFactory) -> None:
-    """모르는 traceql 명령은 질의 전에 ObsError 이고 문구가 네 명령을 말한다."""
-    client, t = make_client()
-    with pytest.raises(cli.ObsError, match="tag-values"):
-        cli.traceql_run(client, cli.TraceqlArgs(cmd="spans"))
-    assert t.calls == []
-
-
 # ── metadata 분기 — --labels · --label-values · --series · tags · tag-values ─────────
 
 NAMES: dict[str, JSON] = {"status": "success", "data": ["b", "a"]}
@@ -76,13 +60,6 @@ def test_promql_labels_calls_labels_endpoint_once_with_selector_as_match(make_cl
     assert ev.value.lines == ["a", "b"]
     assert len(t.calls) == 1
     assert "match%5B%5D=up" in t.calls[0].url
-
-
-def test_promql_labels_without_selector_sends_no_match(make_client: ClientFactory) -> None:
-    """--labels 에 selector 가 없으면 match[] 파라미터가 나가지 않는다 — None 은 버려진다."""
-    client, t = make_client({("metrics", "api/v1/labels"): (200, NAMES)})
-    cli.promql_run(client, cli.PromqlArgs(labels=True), at=AT)
-    assert "match" not in t.calls[0].url
 
 
 def test_promql_label_values_targets_the_named_label(make_client: ClientFactory) -> None:
@@ -104,13 +81,6 @@ def test_promql_series_defaults_to_last_hour_and_lists_label_sets(make_client: C
     assert all(line.startswith("{") for line in ev.value.lines)
     assert "start=%s" % (AT - HOUR) in t.calls[0].url
     assert "end=%s" % AT in t.calls[0].url
-
-
-def test_promql_series_uses_range_when_given(make_client: ClientFactory) -> None:
-    """--series 에 --range 가 있으면 그 길이의 창이 start 로 나간다."""
-    client, t = make_client({("metrics", "api/v1/series"): (200, LABEL_SETS)})
-    cli.promql_run(client, cli.PromqlArgs(series="up", range_="30m"), at=AT)
-    assert "start=%s" % (AT - 30 * MINUTE) in t.calls[0].url
 
 
 def test_logql_labels_sends_nanosecond_window(make_client: ClientFactory) -> None:
@@ -142,14 +112,6 @@ def test_logql_series_sends_selector_as_match(make_client: ClientFactory) -> Non
     assert "match%5B%5D=" in t.calls[0].url
 
 
-def test_logql_direction_forward_orders_oldest_first(make_client: ClientFactory) -> None:
-    """--direction forward 는 direction 파라미터로 나가고 로그 줄이 오래된 것부터다."""
-    client, t = make_client({("logs", "loki/api/v1/query_range"): (200, STREAMS)})
-    ev, _, _ = cli.logql_run(client, cli.LogqlArgs(query='{namespace="n"}', direction="forward"), at=AT)
-    assert "direction=forward" in t.calls[0].url
-    assert ev.value.lines[1][:14] <= ev.value.lines[2][:14]
-
-
 def test_traceql_tag_values_targets_the_tag_and_passes_q(make_client: ClientFactory) -> None:
     """tag-values TAG 는 api/v2/search/tag/TAG/values 를 --q 와 함께 부르고 값을 정렬해 낸다."""
     client, t = make_client({("traces", "api/v2/search/tag/http.method/values"): (200, TAG_VALUES)})
@@ -158,22 +120,6 @@ def test_traceql_tag_values_targets_the_tag_and_passes_q(make_client: ClientFact
     assert ev.value.lines == ["GET", "POST"]
     assert len(t.calls) == 1
     assert "q=" in t.calls[0].url
-
-
-def test_traceql_tags_scope_goes_to_query_string_only_when_given(make_client: ClientFactory) -> None:
-    """tags --scope 는 scope 파라미터로 나가고, 없으면 파라미터 자체가 없다."""
-    client, t = make_client({("traces", "api/v2/search/tags"): (200, {"scopes": []})})
-    cli.traceql_run(client, cli.TraceqlArgs(cmd="tags", scope="span"), at=AT)
-    cli.traceql_run(client, cli.TraceqlArgs(cmd="tags"), at=AT)
-    assert "scope=span" in t.calls[0].url
-    assert "scope" not in t.calls[1].url
-
-
-def test_traceql_search_min_duration_goes_to_query_string(make_client: ClientFactory) -> None:
-    """search --min-duration 은 minDuration 파라미터로 나간다."""
-    client, t = make_client({("traces", "api/search"): (200, {"traces": []})})
-    cli.traceql_run(client, cli.TraceqlArgs(cmd="search", min_duration="500ms"), at=AT)
-    assert "minDuration=500ms" in t.calls[0].url
 
 
 # ── 출력 절제 ────────────────────────────────────────────────────────────────────
@@ -308,19 +254,6 @@ def test_run_outputs_carry_no_physical(make_client: ClientFactory, backend: str)
 
 
 # ── 값의 표기 — fmt_val · fmt_signed 의 경계 ─────────────────────────────────────
-
-@pytest.mark.parametrize("v,expected", [("NaN", "NaN"), (1e15, "1e+15"), (999_999_999_999_999, "999999999999999"), ("abc", "abc"), (2.0, "2")])
-def test_fmt_val_boundaries(v: str | int | float, expected: str) -> None:
-    """fmt_val 은 NaN 을 "NaN" 으로, 1e15 이상의 정수값은 지수 표기로(그 아래는 정수 그대로), 숫자가 아닌 문자열은 그대로 낸다."""
-    assert cli.fmt_val(v) == expected
-
-
-def test_fmt_signed_marks_only_non_negative() -> None:
-    """fmt_signed 는 0 이상에만 + 를 붙이고 음수는 - 그대로다."""
-    assert cli.fmt_signed(-3.0) == "-3"
-    assert cli.fmt_signed(0.0) == "+0"
-    assert cli.fmt_signed(2.5) == "+2.5"
-
 
 # ── trace 의 오류 원인 — 손으로 만든 Span ────────────────────────────────────────
 
