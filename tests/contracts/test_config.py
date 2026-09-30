@@ -116,7 +116,6 @@ def test_unknown_backend(config: Config) -> None:
 
 
 # ── 설정 엣지 — 형태가 틀린 파일 · 빈 값 ─────────────────────────────────────────
-# OBS_CONFIG 가 없는 파일을 가리키는 경우는 같은 Feature 의 Bug 티켓이 다룬다 — 여기서 검사하지 않는다.
 
 def test_empty_file_value_falls_back_to_default(base_env: dict[str, str], tmp_path: Path) -> None:
     """설정 파일의 값이 빈 문자열이면 없는 것과 같다 — 기본값이 쓰이고 출처가 default 다."""
@@ -142,3 +141,48 @@ def test_top_level_not_an_object_is_an_error(base_env: dict[str, str], tmp_path:
     p.write_text("[]", encoding="utf-8")
     with pytest.raises(ObsError, match="최상위"):
         load_config(base_env, home=tmp_path / "home")
+
+
+# ── 명시 경로(OBS_CONFIG) — 사람이 놓은 경로는 몰래 버려지지 않는다 ──────────────────
+
+@pytest.mark.parametrize("given", ["missing", "directory", "missing-with-implicit"])
+def test_explicit_config_not_a_file_is_an_error(base_env: dict[str, str], tmp_path: Path, given: str) -> None:
+    """OBS_CONFIG 가 파일이 아닌 경로를 가리키면 기본값 · 암묵 후보로 넘어가지 않고 ObsError 이며, 문구가 그 경로와 OBS_CONFIG 를 말하고 "사람에게" 로 끝난다."""
+    # given — 명시 경로가 파일이 아니다(없음 · 디렉터리 · 없음 + 암묵 후보에는 유효 파일)
+    explicit = tmp_path / "explicit" / "obs-config.json"
+    if given == "directory":
+        explicit.mkdir(parents=True)
+    if given == "missing-with-implicit":
+        _write(Path(base_env["CLAUDE_PLUGIN_DATA"]) / "config.json", {"grafana_url": "http://implicit"})
+    env = {**base_env, "OBS_CONFIG": str(explicit)}
+    # when
+    with pytest.raises(ObsError) as ei:
+        load_config(env, home=tmp_path / "home")
+    # then
+    msg = str(ei.value)
+    assert str(explicit) in msg
+    assert "OBS_CONFIG" in msg
+    assert msg.endswith("사람에게")
+
+
+def test_explicit_config_file_is_read(base_env: dict[str, str], tmp_path: Path) -> None:
+    """OBS_CONFIG 가 유효 파일을 가리키면 그 파일의 값이 쓰이고 출처가 "file:<그 경로>" 다."""
+    # given — 명시 경로에 유효 파일
+    p = _write(tmp_path / "explicit" / "obs-config.json", {"grafana_url": "http://explicit"})
+    env = {**base_env, "OBS_CONFIG": str(p)}
+    # when
+    cfg = load_config(env, home=tmp_path / "home")
+    # then
+    assert cfg.grafana_url.value == "http://explicit"
+    assert cfg.grafana_url.source == "file:%s" % p
+
+
+def test_blank_explicit_config_is_unset(base_env: dict[str, str], tmp_path: Path) -> None:
+    """OBS_CONFIG 가 공백뿐이면 미설정과 같다 — 암묵 후보가 전부 없으면 기본값이고 config_path 가 없다."""
+    # given — OBS_CONFIG 는 공백뿐 · 암묵 후보 전부 없음
+    env = {**base_env, "OBS_CONFIG": "   "}
+    # when
+    cfg = load_config(env, home=tmp_path / "home")
+    # then
+    assert cfg.grafana_url.source == "default"
+    assert cfg.config_path is None

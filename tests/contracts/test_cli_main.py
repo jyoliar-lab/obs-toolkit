@@ -63,3 +63,15 @@ def test_doctor_main_json_prints_report_as_json(monkeypatch: pytest.MonkeyPatch,
         cli.doctor_main(["--json"])
     assert ei.value.code == 1
     assert json.loads(capsys.readouterr().out) == to_dict(_report(False))
+
+
+def test_doctor_main_exits_1_on_missing_explicit_config(monkeypatch: pytest.MonkeyPatch, cli_env: None, tmp_path: Path) -> None:
+    """OBS_CONFIG 가 없는 파일을 가리키면 obs-doctor.py 의 배선(main_guard(doctor_main))은 exit 1 이다."""
+    # given — OBS_CONFIG 는 없는 파일 · doctor 는 정상 보고서를 내는 대역
+    monkeypatch.setenv("OBS_CONFIG", str(tmp_path / "nonexistent" / "obs-config.json"))
+    monkeypatch.setattr(cli, "doctor", _fake_doctor(_report(True)))
+    # when
+    with pytest.raises(SystemExit) as ei:
+        cli.main_guard(lambda: cli.doctor_main([]))
+    # then
+    assert ei.value.code == 1
