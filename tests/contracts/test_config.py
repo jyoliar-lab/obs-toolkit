@@ -113,3 +113,32 @@ def test_unknown_backend(config: Config) -> None:
     """논리 이름은 metrics · logs · traces 셋뿐이고 그 밖의 이름으로 uid 를 물으면 ObsError 다."""
     with pytest.raises(ObsError):
         config.uid("nope")
+
+
+# ── 설정 엣지 — 형태가 틀린 파일 · 빈 값 ─────────────────────────────────────────
+# OBS_CONFIG 가 없는 파일을 가리키는 경우는 같은 Feature 의 Bug 티켓이 다룬다 — 여기서 검사하지 않는다.
+
+def test_empty_file_value_falls_back_to_default(base_env: dict[str, str], tmp_path: Path) -> None:
+    """설정 파일의 값이 빈 문자열이면 없는 것과 같다 — 기본값이 쓰이고 출처가 default 다."""
+    _write(Path(base_env["CLAUDE_PLUGIN_DATA"]) / "config.json", {"grafana_url": "", "proxy_prefix": "", "uids": {"logs": ""}})
+    cfg = load_config(base_env, home=tmp_path / "home")
+    assert cfg.grafana_url.source == "default"
+    assert cfg.proxy_prefix.source == "default"
+    assert cfg.uids["logs"].source == "default"
+    assert cfg.uids["logs"].value == DEFAULT_UIDS["logs"]
+
+
+def test_uids_not_an_object_is_an_error(base_env: dict[str, str], tmp_path: Path) -> None:
+    """uids 가 객체가 아니면 조용히 무시하지 않고 ObsError 로 거부한다."""
+    _write(Path(base_env["CLAUDE_PLUGIN_DATA"]) / "config.json", {"uids": "prometheus"})
+    with pytest.raises(ObsError, match="uids"):
+        load_config(base_env, home=tmp_path / "home")
+
+
+def test_top_level_not_an_object_is_an_error(base_env: dict[str, str], tmp_path: Path) -> None:
+    """설정 파일의 최상위가 객체가 아니면(목록) ObsError 다 — 기본값으로 넘어가지 않는다."""
+    p = Path(base_env["CLAUDE_PLUGIN_DATA"]) / "config.json"
+    p.parent.mkdir(parents=True)
+    p.write_text("[]", encoding="utf-8")
+    with pytest.raises(ObsError, match="최상위"):
+        load_config(base_env, home=tmp_path / "home")

@@ -1,0 +1,33 @@
+{
+ "format": "obs-fixture/1",
+ "recorded": "tests/record.py",
+ "calls": [
+  {
+   "request": {
+    "at": 1790329562.84917,
+    "at_rfc3339": "2026-09-25T09:46:02Z",
+    "backend": "metrics",
+    "path": "api/v1/labels",
+    "query_string": "match%5B%5D=up%7Bjob%3D%22apiserver%22%7D&end=1790329562.84917",
+    "params": {
+     "match[]": "up{job=\"apiserver\"}",
+     "end": "1790329562.84917"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "status": "success",
+     "data": [
+      "__name__",
+      "endpoint",
+      "instance",
+      "job",
+      "namespace",
+      "service"
+     ]
+    }
+   }
+  }
+ ]
+}

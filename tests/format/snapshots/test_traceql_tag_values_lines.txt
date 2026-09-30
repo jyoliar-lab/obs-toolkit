@@ -1,0 +1,2 @@
+posting-service
+review-service

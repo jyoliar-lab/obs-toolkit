@@ -176,6 +176,8 @@ def test_run_outputs_carry_no_physical(make_client: ClientFactory, backend: str)
     _no_physical("\n".join(_lines_of(client, backend)))
 
 
+# ── 값의 표기 — fmt_val · fmt_signed 의 경계 ─────────────────────────────────────
+
 # ── trace 의 오류 원인 — 손으로 만든 Span ────────────────────────────────────────
 
 def _span(status_message: str = "", attrs: dict[str, str] | None = None, error: bool = True) -> cli.Span:

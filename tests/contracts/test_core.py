@@ -3,13 +3,16 @@ from __future__ import annotations
 
 import json
 import os
+import socket
+import struct
 import threading
 import time
 import urllib.request
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 import pytest
 
@@ -42,6 +45,11 @@ def test_parse_time() -> None:
     assert parse_time("2026-09-08T00:00:00Z", AT) == 1788825600.0
     with pytest.raises(ObsError):
         parse_time("tomorrow", AT)
+
+
+def test_parse_time_naive_rfc3339_is_read_as_utc() -> None:
+    """tz 가 없는 RFC3339 는 UTC 로 읽는다 — Z 를 붙인 표기와 같은 순간이다."""
+    assert parse_time("2030-01-02T03:04:05", AT) == parse_time("2030-01-02T03:04:05Z", AT)
 
 
 LAST_HOUR: Window = Window(AT - HOUR, AT)
@@ -299,12 +307,15 @@ def test_error_messages_never_carry_token(make_client: ClientFactory) -> None:
 
 @dataclass
 class LocalServer:
-    """요청 경로를 `seen` 에 기록하고 200 JSON 을 돌려주는 로컬 HTTP 서버."""
+    """요청 경로를 `seen` 에 기록하고 정해진 상태 · 본문을 돌려주는 로컬 HTTP 서버 — 실제 `_urllib_transport` 가 지나는 상대."""
     base: str
     seen: list[str] = field(default_factory=list[str])
 
 
-def _serve(delay: float) -> Iterator[LocalServer]:
+OK_BODY: bytes = b'{"status":"success","data":{}}'
+
+
+def _serve(delay: float, status: int = 200, body: bytes = OK_BODY) -> Iterator[LocalServer]:
     seen: list[str] = []
 
     class H(BaseHTTPRequestHandler):
@@ -312,8 +323,7 @@ def _serve(delay: float) -> Iterator[LocalServer]:
             seen.append(self.path)
             if delay:
                 time.sleep(delay)
-            body = b'{"status":"success","data":{}}'
-            self.send_response(200); self.send_header("Content-Type", "application/json")
+            self.send_response(status); self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
 
         def log_message(self, format: str, *args: object) -> None:   # noqa: A002 — BaseHTTPRequestHandler 시그니처
@@ -336,6 +346,52 @@ def local_server() -> Iterator[LocalServer]:
 def slow_server() -> Iterator[LocalServer]:
     """연결은 받되 응답을 1초 미룬다 — 읽기 시간 초과를 만든다."""
     yield from _serve(1.0)
+
+
+ServerFactory = Callable[[int, bytes], LocalServer]
+"""(status, body) → 그 응답만 돌려주는 로컬 서버. 테스트가 끝나면 fixture 가 전부 내린다."""
+
+
+@pytest.fixture
+def error_server() -> Iterator[ServerFactory]:
+    """상태 코드 · 본문을 정해 띄우는 로컬 서버 공장 — HTTPError 경로(4xx · 5xx 본문)를 실제 urllib 로 지나게 한다."""
+    with ExitStack() as stack:
+        def make(status: int, body: bytes) -> LocalServer:
+            gen = _serve(0, status, body)
+            stack.callback(lambda: next(gen, None))   # 다시 진행시키면 _serve 의 finally 가 서버를 내린다
+            return next(gen)
+        yield make
+
+
+def _closed_port() -> int:
+    """방금 열었다 닫은 포트 — 그리로 부르면 연결 거부(URLError)가 난다."""
+    srv = HTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler)
+    port = srv.server_port
+    srv.server_close()
+    return port
+
+
+def _reset_after_headers() -> int:
+    """헤더(Content-Length 1000)까지 보내고 본문 대신 RST 로 끊는 원시 소켓 서버 — 본문을 읽는 중의 ConnectionResetError(OSError) 경로용. 포트를 돌려준다."""
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+
+    def run() -> None:
+        conn, _ = srv.accept()
+        conn.recv(65536)
+        conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n")
+        conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))   # linger 0 — close 가 FIN 이 아니라 RST 를 보낸다
+        conn.close()
+        srv.close()
+
+    threading.Thread(target=run, daemon=True).start()
+    return srv.getsockname()[1]
+
+
+def _real_client(base_env: dict[str, str], base: str) -> Client:
+    """transport 주입 없는 Client — `_urllib_transport` 를 실제로 지난다."""
+    return Client(config=load_config({**base_env, "OBS_GRAFANA_URL": base}), token="t", timeout=2.0)
 
 
 def test_transport_never_consults_system_proxy(monkeypatch: pytest.MonkeyPatch, base_env: dict[str, str], local_server: LocalServer) -> None:
@@ -361,6 +417,51 @@ def test_transport_honors_env_proxy(monkeypatch: pytest.MonkeyPatch, base_env: d
     r = client.get("metrics", "api/v1/query", {"query": "up"})
     assert r.status == 200
     assert local_server.seen == ["http://example.invalid/api/datasources/proxy/uid/prometheus/api/v1/query?query=up"]
+
+
+def test_urllib_http_error_returns_status_with_body(base_env: dict[str, str], error_server: ServerFactory) -> None:
+    """실제 urllib 경로의 HTTPError 는 상태와 본문이 함께 돌아온다 — 404 의 문구에 백엔드 메시지가 실리고 요청은 서버에 한 번 닿는다."""
+    srv = error_server(404, b'{"error":"trace not found"}')
+    with pytest.raises(ObsError) as ei:
+        _real_client(base_env, srv.base).get("traces", "api/traces/deadbeef")
+    assert str(ei.value).startswith("traces 백엔드에 그 자원이 없다(404): trace not found")
+    assert len(srv.seen) == 1
+
+
+def test_urllib_http_error_body_with_host_stays_out_of_message(base_env: dict[str, str], error_server: ServerFactory) -> None:
+    """실제 urllib 경로에서 401 본문에 호스트를 심어도 문구에는 호스트도 본문도 없다."""
+    host = "127.0.0.1"
+    srv = error_server(401, ("<html>upstream %s says no</html>" % host).encode("utf-8"))
+    with pytest.raises(ObsError) as ei:
+        _real_client(base_env, srv.base).get("metrics", "api/v1/query", {"query": "up"})
+    msg = str(ei.value)
+    assert "인증 실패(401)" in msg
+    assert host not in msg
+    assert "upstream" not in msg
+
+
+def test_urllib_connection_refused_is_unreachable_without_host(base_env: dict[str, str]) -> None:
+    """닫힌 포트(연결 거부)는 실제 urllib 경로에서 "닿지 못했다" 로 분류되고 문구에 호스트 · 포트가 없다 — 시간 초과와 다르다."""
+    port = _closed_port()
+    with pytest.raises(ObsError) as ei:
+        _real_client(base_env, "http://127.0.0.1:%d" % port).get("logs", "loki/api/v1/labels")
+    msg = str(ei.value)
+    assert msg.startswith("logs 백엔드에 닿지 못했다")
+    assert "127.0.0.1" not in msg
+    assert str(port) not in msg
+    assert "안에 답하지 않았다" not in msg
+    assert "obs-doctor.py" in msg
+
+
+def test_urllib_reset_while_reading_is_unreachable_without_host(base_env: dict[str, str]) -> None:
+    """본문을 읽는 중 연결이 RST 로 끊기면 실제 urllib 경로가 OSError 를 "닿지 못했다" 로 분류하고 문구에 호스트 · 포트가 없다."""
+    port = _reset_after_headers()
+    with pytest.raises(ObsError) as ei:
+        _real_client(base_env, "http://127.0.0.1:%d" % port).get("metrics", "api/v1/query", {"query": "up"})
+    msg = str(ei.value)
+    assert msg.startswith("metrics 백엔드에 닿지 못했다")
+    assert "127.0.0.1" not in msg
+    assert str(port) not in msg
 
 
 # ── doctor ──────────────────────────────────────────────────────────────────────

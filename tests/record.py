@@ -245,6 +245,7 @@ EMPTY_QUERY: str = CPU_QUERY.replace('namespace="careerhub-prod"', 'namespace="n
 LOG_SELECTOR: str = '{namespace="careerhub-prod"}'
 LOG_METRIC_QUERY: str = "sum by (detected_level) (count_over_time(%s[5m]))" % LOG_SELECTOR
 TRACE_SEARCH: cli.TraceqlArgs = cli.TraceqlArgs(cmd="search", since="24h", limit=3)
+UP_APISERVER: str = 'up{job="apiserver"}'   # metadata 조회(labels · series)의 selector — 시계열 셋
 
 
 def _promql(a: cli.PromqlArgs) -> Recipe:
@@ -305,6 +306,14 @@ RECIPES: dict[str, Recipe] = {
     "traceql-trace.json": _search_then_trace,
     "traceql-tags.json": _traceql(cli.TraceqlArgs(cmd="tags")),
     "traceql-trace-error.json": _error_trace,
+    # metadata 조회 — 좁은 selector 로 스냅샷을 작게 유지한다(up 전체는 시계열 65개)
+    "promql-labels-up-apiserver.json": _promql(cli.PromqlArgs(query=UP_APISERVER, labels=True)),
+    "promql-label-values-job.json": _promql(cli.PromqlArgs(query="up", label_values="job")),
+    "promql-series-up-apiserver.json": _promql(cli.PromqlArgs(series=UP_APISERVER)),
+    "logql-labels.json": _logql(cli.LogqlArgs(labels=True)),
+    "logql-label-values-namespace.json": _logql(cli.LogqlArgs(label_values="namespace")),
+    "logql-series-careerhub-prod.json": _logql(cli.LogqlArgs(series=LOG_SELECTOR)),
+    "traceql-tag-values-service-name.json": _traceql(cli.TraceqlArgs(cmd="tag-values", arg="resource.service.name", since="24h")),   # span 태그는 1h 창에 비기 일쑤 — 24h 의 resource 태그
 }
 
 

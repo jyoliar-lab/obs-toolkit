@@ -1,0 +1,6 @@
+__name__
+endpoint
+instance
+job
+namespace
+service

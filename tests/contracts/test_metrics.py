@@ -8,7 +8,7 @@ import pytest
 
 from obs import metrics
 from obs.adapters import cli
-from obs.core import Client, Evidence, Lines, ObsError, Window, to_json
+from obs.core import JSON, Client, Evidence, Lines, ObsError, Window, to_json
 from tests.conftest import AT, DAY, HOUR, MINUTE, WEEK, ClientFactory, _stat, _vector
 from tests.record import CPU_QUERY
 
@@ -267,3 +267,47 @@ def test_metrics_run_dispatches_by_subcommand(make_client: ClientFactory) -> Non
         assert isinstance(ev.value, Lines)
     with pytest.raises(ObsError):
         cli.metrics_run(client, cli.MetricsArgs(cmd="red", query="x"), at=AT)
+
+
+# ── 경계값 — check_status · 명시 step · 비유한 값 · 기준선만 있는 시계열 ───────────────
+
+def test_check_status_prints_warnings_to_stderr(capsys: pytest.CaptureFixture[str]) -> None:
+    """응답의 warnings 는 stderr 에 warning: 으로 한 줄씩 나가고 본문은 그대로 통과한다 — stdout 에는 아무것도 없다."""
+    body: dict[str, JSON] = {**_vector(), "warnings": ["w1", "w2"]}
+    assert metrics.check_status(body, "metrics") is body
+    captured = capsys.readouterr()
+    assert captured.err.splitlines() == ["warning: w1", "warning: w2"]
+    assert captured.out == ""
+
+
+def test_check_status_rejects_non_object_body() -> None:
+    """본문이 객체가 아니면(문자열) 논리 이름으로 "JSON 이 아닌 응답" ObsError 다."""
+    with pytest.raises(ObsError) as ei:
+        metrics.check_status("<html>oops</html>", "logs")
+    assert str(ei.value).startswith("logs 백엔드가 JSON 이 아닌 응답을 냈다")
+    assert "oops" in str(ei.value)
+
+
+def test_summarize_explicit_step_overrides_auto(make_client: ClientFactory) -> None:
+    """summarize 에 step 을 주면 자동값 대신 그 step 이 Summary 와 서브쿼리에 쓰인다."""
+    client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
+    ev, _ = metrics.summarize(client, CPU_QUERY, W, step="5m")
+    assert ev.value.step == "5m"
+    assert ev.query == metrics.summarize_query(CPU_QUERY, W, "5m")
+
+
+def test_top_drops_non_finite_values(make_client: ClientFactory) -> None:
+    """top 은 NaN · ±Inf · 숫자 아닌 값의 시계열을 항목에서 뺀다 — 부재는 순위에 들지 않는다."""
+    body = _vector(({"pod": "a"}, "NaN"), ({"pod": "b"}, "+Inf"), ({"pod": "c"}, "x"), ({"pod": "d"}, "1"))
+    client, _ = make_client({("metrics", "api/v1/query"): (200, body)})
+    ev, _ = metrics.top(client, "up", W, k=10, by=["pod"])
+    assert [e.labels["pod"] for e in ev.value.entries] == ["d"]
+
+
+def test_compare_baseline_only_series_marks_now_empty(make_client: ClientFactory) -> None:
+    """지금 창에는 시계열이 없고 기준선에만 있으면 now_empty 이고 baseline_empty 는 아니며 그 시계열은 now None 으로 실린다."""
+    client, _ = make_client({("metrics", "api/v1/query"): (200, _vector(_stat("a", "base", "1")))})
+    ev, _ = metrics.compare(client, CPU_QUERY, W.with_baseline("1d"))
+    assert ev.value.now_empty
+    assert not ev.value.baseline_empty
+    assert [(d.now, d.base) for d in ev.value.deltas] == [(None, 1.0)]

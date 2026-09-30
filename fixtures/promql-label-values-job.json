@@ -1,0 +1,41 @@
+{
+ "format": "obs-fixture/1",
+ "recorded": "tests/record.py",
+ "calls": [
+  {
+   "request": {
+    "at": 1790329562.84917,
+    "at_rfc3339": "2026-09-25T09:46:02Z",
+    "backend": "metrics",
+    "path": "api/v1/label/job/values",
+    "query_string": "match%5B%5D=up&end=1790329562.84917",
+    "params": {
+     "match[]": "up",
+     "end": "1790329562.84917"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "status": "success",
+     "data": [
+      "apiserver",
+      "coredns",
+      "kube-controller-manager",
+      "kube-etcd",
+      "kube-proxy",
+      "kube-scheduler",
+      "kube-state-metrics",
+      "kubelet",
+      "monitoring-grafana",
+      "monitoring-kube-prometheus-alertmanager",
+      "monitoring-kube-prometheus-operator",
+      "monitoring-kube-prometheus-prometheus",
+      "node-exporter",
+      "promcheck"
+     ]
+    }
+   }
+  }
+ ]
+}
