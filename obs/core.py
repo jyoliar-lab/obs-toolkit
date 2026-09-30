@@ -180,9 +180,14 @@ class Config:
         )
 
 
+def _explicit_config(env: Mapping[str, str]) -> str:
+    """OBS_CONFIG 의 값 — 공백뿐이면 미설정("")."""
+    return env.get(ENV_CONFIG, "").strip()
+
+
 def config_file_candidates(env: Mapping[str, str], home: Path | None = None) -> list[Path]:
     """설정 파일 후보 — 순서대로. OBS_CONFIG 가 있으면 그것만."""
-    explicit = env.get(ENV_CONFIG, "").strip()
+    explicit = _explicit_config(env)
     if explicit:
         return [Path(explicit).expanduser()]
     out: list[Path] = []
@@ -194,7 +199,7 @@ def config_file_candidates(env: Mapping[str, str], home: Path | None = None) -> 
 
 
 def _read_config_file(env: Mapping[str, str], home: Path | None) -> tuple[dict[str, JSON], str | None]:
-    explicit = env.get(ENV_CONFIG, "").strip()
+    explicit = bool(_explicit_config(env))
     for p in config_file_candidates(env, home):
         if not p.is_file():
             if explicit:
