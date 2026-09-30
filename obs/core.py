@@ -194,8 +194,11 @@ def config_file_candidates(env: Mapping[str, str], home: Path | None = None) -> 
 
 
 def _read_config_file(env: Mapping[str, str], home: Path | None) -> tuple[dict[str, JSON], str | None]:
+    explicit = env.get(ENV_CONFIG, "").strip()
     for p in config_file_candidates(env, home):
         if not p.is_file():
+            if explicit:
+                raise ObsError("%s 가 가리키는 경로가 설정 파일이 아니다(%s) — 사람에게" % (ENV_CONFIG, p))
             continue
         try:
             data: JSON = json.loads(p.read_text(encoding="utf-8"))
