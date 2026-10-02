@@ -352,7 +352,8 @@ def test_templates_clusters_with_examples(make_client: ClientFactory) -> None:
 
 
 def test_templates_requests_patterns_then_one_example_per_cluster(make_client: ClientFactory) -> None:
-    """요청은 군집 목록 1회 + 군집마다 예시 1회다 — patterns 에 start · end · step 이 있고 limit 은 없으며, 예시는 |> · forward · limit 1 이다."""
+    """요청은 군집 목록 1회 + 군집마다 예시 1회다 — patterns 에 start · end · step 이 있고 limit 은 없으며, 예시 질의는 군집마다 그 패턴의
+    pattern_filter 질의(중복 없이 셋 다) · forward · limit 1 이다."""
     # given
     client, t = make_client({("logs", PATTERNS): (200, THREE), ("logs", RANGE): (200, EXAMPLE)})
     # when
@@ -361,16 +362,18 @@ def test_templates_requests_patterns_then_one_example_per_cluster(make_client: C
     assert len(t.calls) == 4
     assert _path(t.calls[0]).endswith(PATTERNS)
     first = _params(t.calls[0])
+    assert first["query"] == SEL
     assert "start" in first
     assert "end" in first
     assert "step" in first
     assert "limit" not in first
+    examples = [_params(c) for c in t.calls[1:]]
     for call in t.calls[1:]:
         assert _path(call).endswith(RANGE)
-        params = _params(call)
-        assert "|>" in params["query"]
-        assert params["direction"] == "forward"
-        assert params["limit"] == "1"
+    assert sorted(e["query"] for e in examples) == sorted(logs.pattern_filter(SEL, p) for p in ("a <_>", "b <_>", "c <_>"))
+    for e in examples:
+        assert e["direction"] == "forward"
+        assert e["limit"] == "1"
 
 
 def test_templates_default_step_is_auto(make_client: ClientFactory) -> None:
