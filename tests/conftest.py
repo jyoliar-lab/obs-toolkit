@@ -12,6 +12,7 @@ from typing import Mapping, Protocol, Sequence, TypeVar, cast
 import pytest
 
 from obs.core import JSON, Client, Config, Evidence, TransportError, TransportTimeout, Window, load_config
+from obs.logs import LogEntry
 from tests.record import FIXTURES, ROOT, read_fixture, response_of, strip_physical
 from tests.replay import Call, FixtureSpec, Loaded, ReplayTransport, load_call, load_fixture_calls
 
@@ -100,6 +101,45 @@ class FakeTransport:
         return status, bytes(raw)
 
 
+# ── FakeLoki — 로그 API 를 Loki 처럼 흉내 내는 대역 ───────────────────────────────────
+
+@dataclass
+class FakeLoki:
+    """`(url, headers, timeout) → (status, body)`. 창 안의 로그 줄(`entries`)과 전체 건수(`count`)를 받아, 로그 API(`loki/api/v1/query_range`)에는
+    요청의 `start` · `end` · `direction` · `limit` 을 Loki 규칙대로 적용한 스트림 응답을, count API(`loki/api/v1/query`)에는 `count` 의 vector 를 낸다.
+    정적 본문의 FakeTransport 로는 "창 안의 세상" 과 "상한에 잘린 응답" 을 나눠 적을 수 없는 자리(around)용 — Given 은 세상만 말하고 잘림은 대역이 만든다.
+    Loki 규칙: `[start, end)` 안의 줄만 · backward 는 end 에 가까운 순 · forward 는 start 에 가까운 순 · `limit` 은 스트림 합산 · 0 건이면 count 는 빈 vector."""
+    config: Config
+    entries: list[LogEntry] = field(default_factory=list[LogEntry])
+    count: int = 0
+    calls: list[Call] = field(default_factory=list[Call])
+
+    def __call__(self, url: str, headers: Mapping[str, str], timeout: float) -> tuple[int, bytes]:
+        self.calls.append(Call(url=url, headers=dict(headers), timeout=timeout))
+        rq = strip_physical(url, self.config, None)
+        if (rq.backend, rq.path) == ("logs", "loki/api/v1/query"):
+            result: list[JSON] = [] if self.count == 0 else [{"metric": {}, "value": [AT, str(self.count)]}]
+            return 200, json.dumps({"status": "success", "data": {"resultType": "vector", "result": result}}).encode("utf-8")
+        if (rq.backend, rq.path) != ("logs", "loki/api/v1/query_range"):
+            raise AssertionError("FakeLoki 는 loki/api/v1/query · query_range 만 안다 — 받은 요청 %r" % ((rq.backend, rq.path),))
+        start, end = int(str(rq.params.get("start", "0"))), int(str(rq.params.get("end", "0")))
+        backward = str(rq.params.get("direction", "backward")) == "backward"
+        limit = int(str(rq.params.get("limit", "100")))
+        inside = sorted((e for e in self.entries if start <= e.ts_ns < end), key=lambda e: e.ts_ns, reverse=backward)[:limit]
+        streams: list[JSON] = []
+        for e in inside:
+            for st in streams:
+                st_obj = st if isinstance(st, dict) else {}
+                if st_obj.get("stream") == e.labels:
+                    values = st_obj.get("values")
+                    if isinstance(values, list):
+                        values.append([str(e.ts_ns), e.line])
+                    break
+            else:
+                streams.append({"stream": dict(e.labels), "values": [[str(e.ts_ns), e.line]]})
+        return 200, json.dumps({"status": "success", "data": {"resultType": "streams", "result": streams}}).encode("utf-8")
+
+
 # ── 격리된 env · Client 공장 ─────────────────────────────────────────────────────
 
 @pytest.fixture
@@ -126,6 +166,19 @@ class ClientFactory(Protocol):
 def make_client(config: Config) -> ClientFactory:
     def _make(routes: dict[RouteKey, tuple[int, object]] | None = None, fail: str | None = None, hang: bool = False) -> tuple[Client, FakeTransport]:
         t = FakeTransport(config=config, routes=routes or {}, fail=fail, hang=hang)
+        return Client(config=config, token="test-token-not-real", transport=t), t
+    return _make
+
+
+class LokiFactory(Protocol):
+    def __call__(self, entries: Sequence[LogEntry] = (), count: int = 0) -> tuple[Client, FakeLoki]: ...
+
+
+@pytest.fixture
+def make_loki(config: Config) -> LokiFactory:
+    """Loki 처럼 창 · 방향 · limit 을 적용하는 로그 API 대역의 Client — around 의 손 입력용."""
+    def _make(entries: Sequence[LogEntry] = (), count: int = 0) -> tuple[Client, FakeLoki]:
+        t = FakeLoki(config=config, entries=list(entries), count=count)
         return Client(config=config, token="test-token-not-real", transport=t), t
     return _make
 

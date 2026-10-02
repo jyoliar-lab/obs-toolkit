@@ -1,0 +1,28 @@
+{
+ "format": "obs-fixture/1",
+ "recorded": "tests/record.py",
+ "calls": [
+  {
+   "request": {
+    "at": 1790934663.365801,
+    "at_rfc3339": "2026-10-02T09:51:03Z",
+    "backend": "logs",
+    "path": "loki/api/v1/patterns",
+    "query_string": "query=%7Bnamespace%3D%22no-such-namespace%22%7D&start=1790931063365801216&end=1790934663365801216&step=60s",
+    "params": {
+     "query": "{namespace=\"no-such-namespace\"}",
+     "start": "1790931063365801216",
+     "end": "1790934663365801216",
+     "step": "60s"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "status": "success",
+     "data": []
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,889 @@
+{
+ "format": "obs-fixture/1",
+ "recorded": "tests/record.py",
+ "calls": [
+  {
+   "request": {
+    "at": 1790934663.365801,
+    "at_rfc3339": "2026-10-02T09:51:03Z",
+    "backend": "logs",
+    "path": "loki/api/v1/query",
+    "query_string": "query=sum%28count_over_time%28%7Bnamespace%3D%22careerhub-prod%22%7D%5B120s%5D%29%29&time=1790932923365801216",
+    "params": {
+     "query": "sum(count_over_time({namespace=\"careerhub-prod\"}[120s]))",
+     "time": "1790932923365801216"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "status": "success",
+     "data": {
+      "resultType": "vector",
+      "result": [
+       {
+        "metric": {},
+        "value": [
+         1790932923.365,
+         "1833"
+        ]
+       }
+      ],
+      "stats": {
+       "summary": {
+        "bytesProcessedPerSecond": 88394671,
+        "linesProcessedPerSecond": 212191,
+        "totalBytesProcessed": 1279735,
+        "totalLinesProcessed": 3072,
+        "execTime": 0.014477513,
+        "queueTime": 0.000120222,
+        "subqueries": 0,
+        "totalEntriesReturned": 1,
+        "splits": 0,
+        "shards": 1,
+        "totalPostFilterLines": 3072,
+        "totalStructuredMetadataBytesProcessed": 92050
+       },
+       "querier": {
+        "store": {
+         "totalChunksRef": 0,
+         "totalChunksDownloaded": 0,
+         "chunksDownloadTime": 0,
+         "queryReferencedStructuredMetadata": false,
+         "queryUsedV2Engine": false,
+         "chunk": {
+          "headChunkBytes": 0,
+          "headChunkLines": 0,
+          "decompressedBytes": 0,
+          "decompressedLines": 0,
+          "compressedBytes": 0,
+          "totalDuplicates": 0,
+          "postFilterLines": 0,
+          "headChunkStructuredMetadataBytes": 0,
+          "decompressedStructuredMetadataBytes": 0
+         },
+         "chunkRefsFetchTime": 0,
+         "congestionControlLatency": 0,
+         "pipelineWrapperFilteredLines": 0,
+         "dataobj": {
+          "prePredicateDecompressedRows": 0,
+          "prePredicateDecompressedBytes": 0,
+          "prePredicateDecompressedStructuredMetadataBytes": 0,
+          "postPredicateRows": 0,
+          "postPredicateDecompressedBytes": 0,
+          "postPredicateStructuredMetadataBytes": 0,
+          "postFilterRows": 0,
+          "pagesScanned": 0,
+          "pagesDownloaded": 0,
+          "pagesDownloadedBytes": 0,
+          "pageBatches": 0,
+          "totalRowsAvailable": 0,
+          "totalPageDownloadTime": 0
+         }
+        }
+       },
+       "ingester": {
+        "totalReached": 1,
+        "totalChunksMatched": 5,
+        "totalBatches": 5,
+        "totalLinesSent": 1833,
+        "store": {
+         "totalChunksRef": 3,
+         "totalChunksDownloaded": 3,
+         "chunksDownloadTime": 446498,
+         "queryReferencedStructuredMetadata": false,
+         "queryUsedV2Engine": false,
+         "chunk": {
+          "headChunkBytes": 2460,
+          "headChunkLines": 5,
+          "decompressedBytes": 1277275,
+          "decompressedLines": 3067,
+          "compressedBytes": 173381,
+          "totalDuplicates": 0,
+          "postFilterLines": 3072,
+          "headChunkStructuredMetadataBytes": 40,
+          "decompressedStructuredMetadataBytes": 92010
+         },
+         "chunkRefsFetchTime": 228518,
+         "congestionControlLatency": 0,
+         "pipelineWrapperFilteredLines": 0,
+         "dataobj": {
+          "prePredicateDecompressedRows": 0,
+          "prePredicateDecompressedBytes": 0,
+          "prePredicateDecompressedStructuredMetadataBytes": 0,
+          "postPredicateRows": 0,
+          "postPredicateDecompressedBytes": 0,
+          "postPredicateStructuredMetadataBytes": 0,
+          "postFilterRows": 0,
+          "pagesScanned": 0,
+          "pagesDownloaded": 0,
+          "pagesDownloadedBytes": 0,
+          "pageBatches": 0,
+          "totalRowsAvailable": 0,
+          "totalPageDownloadTime": 0
+         }
+        }
+       },
+       "cache": {
+        "chunk": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "index": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "result": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "statsResult": {
+         "entriesFound": 1,
+         "entriesRequested": 1,
+         "entriesStored": 0,
+         "bytesReceived": 210,
+         "bytesSent": 0,
+         "requests": 1,
+         "downloadTime": 10259,
+         "queryLengthServed": 120000000000
+        },
+        "volumeResult": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "seriesResult": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "labelResult": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "instantMetricResult": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        }
+       },
+       "index": {
+        "totalChunks": 0,
+        "postFilterChunks": 0,
+        "shardsDuration": 0,
+        "usedBloomFilters": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "request": {
+    "at": 1790934663.365801,
+    "at_rfc3339": "2026-10-02T09:51:03Z",
+    "backend": "logs",
+    "path": "loki/api/v1/query_range",
+    "query_string": "start=1790932803365801216&end=1790932863365801216&query=%7Bnamespace%3D%22careerhub-prod%22%7D&limit=20&direction=backward",
+    "params": {
+     "start": "1790932803365801216",
+     "end": "1790932863365801216",
+     "query": "{namespace=\"careerhub-prod\"}",
+     "limit": "20",
+     "direction": "backward"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "status": "success",
+     "data": {
+      "resultType": "streams",
+      "result": [
+       {
+        "stream": {
+         "app": "careerhub-mongodb-svc",
+         "container": "mongod",
+         "detected_level": "unknown",
+         "env": "prod",
+         "instance": "careerhub-prod/careerhub-mongodb-1:mongod",
+         "job": "loki.source.kubernetes.pod_logs",
+         "namespace": "careerhub-prod",
+         "pod": "careerhub-mongodb-1",
+         "service_name": "careerhub-mongodb-svc"
+        },
+        "values": [
+         [
+          "1790932859598810076",
+          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.598+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":5286306, \"ctx\":\"conn1457842\",\"msg\":\"Successfully authenticated\",\"attr\":{\"client\":\"10.244.8.47:57390\",\"isSpeculative\":true,\"isClusterMember\":false,\"mechanism\":\"SCRAM-SHA-256\",\"user\":\"review-app\",\"db\":\"review\",\"result\":0,\"metrics\":{\"conversation_duration\":{\"micros\":1050,\"summary\":{\"0\":{\"step\":1,\"step_total\":2,\"duration_micros\":97},\"1\":{\"step\":2,\"step_total\":2,\"duration_micros\":23}}}},\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}},\"extraInfo\":{}}}\n"
+         ],
+         [
+          "1790932859597728536",
+          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.597+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":6788604, \"ctx\":\"conn1457842\",\"msg\":\"Auth metrics report\",\"attr\":{\"metric\":\"acquireUser\",\"micros\":0}}\n"
+         ],
+         [
+          "1790932859597443794",
+          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.597+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":51800,   \"ctx\":\"conn1457842\",\"msg\":\"client metadata\",\"attr\":{\"remote\":\"10.244.8.47:57390\",\"client\":\"conn1457842\",\"negotiatedCompressors\":[],\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}}}}\n"
+         ],
+         [
+          "1790932859597088349",
+          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.596+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22943,   \"ctx\":\"listener\",\"msg\":\"Connection accepted\",\"attr\":{\"remote\":\"10.244.8.47:57390\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"906af8af-a1eb-42b6-8758-e51cd9ace0a8\"}},\"connectionId\":1457842,\"connectionCount\":57}}\n"
+         ],
+         [
+          "1790932859595326844",
+          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.595+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":5286306, \"ctx\":\"conn1457841\",\"msg\":\"Successfully authenticated\",\"attr\":{\"client\":\"10.244.8.47:57378\",\"isSpeculative\":true,\"isClusterMember\":false,\"mechanism\":\"SCRAM-SHA-256\",\"user\":\"review-app\",\"db\":\"review\",\"result\":0,\"metrics\":{\"conversation_duration\":{\"micros\":1008,\"summary\":{\"0\":{\"step\":1,\"step_total\":2,\"duration_micros\":229},\"1\":{\"step\":2,\"step_total\":2,\"duration_micros\":21}}}},\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}},\"extraInfo\":{}}}\n"
+         ],
+         [
+          "1790932859594810009",
+          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.594+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":5286306, \"ctx\":\"conn1457840\",\"msg\":\"Successfully authenticated\",\"attr\":{\"client\":\"10.244.8.47:57376\",\"isSpeculative\":true,\"isClusterMember\":false,\"mechanism\":\"SCRAM-SHA-256\",\"user\":\"review-app\",\"db\":\"review\",\"result\":0,\"metrics\":{\"conversation_duration\":{\"micros\":1116,\"summary\":{\"0\":{\"step\":1,\"step_total\":2,\"duration_micros\":126},\"1\":{\"step\":2,\"step_total\":2,\"duration_micros\":20}}}},\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}},\"extraInfo\":{}}}\n"
+         ],
+         [
+          "1790932859594405452",
+          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.594+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":6788604, \"ctx\":\"conn1457841\",\"msg\":\"Auth metrics report\",\"attr\":{\"metric\":\"acquireUser\",\"micros\":0}}\n"
+         ],
+         [
+          "1790932859594061988",
+          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.593+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":51800,   \"ctx\":\"conn1457841\",\"msg\":\"client metadata\",\"attr\":{\"remote\":\"10.244.8.47:57378\",\"client\":\"conn1457841\",\"negotiatedCompressors\":[],\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}}}}\n"
+         ],
+         [
+          "1790932859593670895",
+          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.593+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":6788604, \"ctx\":\"conn1457840\",\"msg\":\"Auth metrics report\",\"attr\":{\"metric\":\"acquireUser\",\"micros\":0}}\n"
+         ],
+         [
+          "1790932859593551431",
+          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.593+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22943,   \"ctx\":\"listener\",\"msg\":\"Connection accepted\",\"attr\":{\"remote\":\"10.244.8.47:57378\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"461a374a-5753-4a5d-a066-1c01ecc00566\"}},\"connectionId\":1457841,\"connectionCount\":56}}\n"
+         ],
+         [
+          "1790932859593551431",
+          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.593+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":51800,   \"ctx\":\"conn1457840\",\"msg\":\"client metadata\",\"attr\":{\"remote\":\"10.244.8.47:57376\",\"client\":\"conn1457840\",\"negotiatedCompressors\":[],\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}}}}\n"
+         ],
+         [
+          "1790932859593221986",
+          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.593+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22943,   \"ctx\":\"listener\",\"msg\":\"Connection accepted\",\"attr\":{\"remote\":\"10.244.8.47:57376\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"878dec4e-589f-4089-8e08-dfadd1b86ad6\"}},\"connectionId\":1457840,\"connectionCount\":55}}\n"
+         ],
+         [
+          "1790932859591933834",
+          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.591+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22944,   \"ctx\":\"conn1457814\",\"msg\":\"Connection ended\",\"attr\":{\"remote\":\"10.244.8.47:37658\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"896ec101-1114-4378-a6ce-ddeb085340e6\"}},\"connectionId\":1457814,\"connectionCount\":54}}\n"
+         ],
+         [
+          "1790932859591933834",
+          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.591+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22944,   \"ctx\":\"conn1457812\",\"msg\":\"Connection ended\",\"attr\":{\"remote\":\"10.244.8.47:37650\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"5c402bf3-d43a-4568-a373-485ba11c63d5\"}},\"connectionId\":1457812,\"connectionCount\":55}}\n"
+         ],
+         [
+          "1790932859591761019",
+          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.591+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22944,   \"ctx\":\"conn1457813\",\"msg\":\"Connection ended\",\"attr\":{\"remote\":\"10.244.8.47:37654\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"4acf7162-22dd-41ae-b6e1-1ab0615e771a\"}},\"connectionId\":1457813,\"connectionCount\":56}}\n"
+         ]
+        ]
+       },
+       {
+        "stream": {
+         "container": "zitadel",
+         "detected_level": "info",
+         "env": "prod",
+         "instance": "careerhub-prod/zitadel-f65b884bd-jm9zg:zitadel",
+         "job": "loki.source.kubernetes.pod_logs",
+         "namespace": "careerhub-prod",
+         "pod": "zitadel-f65b884bd-jm9zg",
+         "service_name": "zitadel"
+        },
+        "values": [
+         [
+          "1790932859675001123",
+          "time=2026-10-02T09:20:59.674Z level=INFO msg=\"request served\" request.id=davneupcm36s73dvkcu0 request.instance_host=id.careerhub.jyo-liar.com request.public_host=id.careerhub.jyo-liar.com request.instance_id=385772681082964180 request.user_id=login-client TraceID=b7148f32fccfb9957807ac4d82cc2629 SpanID=4a230dd7e55ca492 stream=request version=v4.15.3 protocol=connect service=zitadel.settings.v2.SettingsService http_method=POST path=/zitadel.settings.v2.SettingsService/GetGeneralSettings code=code_0 duration=3.042246ms\n"
+         ],
+         [
+          "1790932859674879272",
+          "time=\"2026-10-02T09:20:59Z\" level=info msg=activity caller=\"/home/runner/work/zitadel/zitadel/internal/activity/activity.go:105\" domain=\"https://id.careerhub.jyo-liar.com\" grpcStatus=0 httpStatus=200 instance=385772681082964180 isSystemUser=true method=/zitadel.settings.v2.SettingsService/GetGeneralSettings org= path= requestMethod= trigger=resourceAPI user=login-client\n"
+         ]
+        ]
+       },
+       {
+        "stream": {
+         "container": "zitadel",
+         "detected_level": "warn",
+         "env": "prod",
+         "instance": "careerhub-prod/zitadel-f65b884bd-jm9zg:zitadel",
+         "job": "loki.source.kubernetes.pod_logs",
+         "namespace": "careerhub-prod",
+         "pod": "zitadel-f65b884bd-jm9zg",
+         "service_name": "zitadel"
+        },
+        "values": [
+         [
+          "1790932859674647236",
+          "time=\"2026-10-02T09:20:59Z\" level=warning msg=\"authz: verify access token\" caller=\"/home/runner/work/zitadel/zitadel/internal/api/authz/context.go:114\" error=\"ID=APP-Reb32 Message=invalid token\" org_domain= org_id=\n"
+         ],
+         [
+          "1790932859674647236",
+          "time=\"2026-10-02T09:20:59Z\" level=warning msg=\"token verifier repo: verify JWT access token\" caller=\"/home/runner/work/zitadel/zitadel/internal/authz/repository/eventsourcing/eventstore/token_verifier.go:314\" error=\"issuer does not match: Expected: https://id.careerhub.jyo-liar.com, got: login-client\"\n"
+         ],
+         [
+          "1790932859674647236",
+          "time=\"2026-10-02T09:20:59Z\" level=warning msg=\"token verifier repo: decrypt access token\" caller=\"/home/runner/work/zitadel/zitadel/internal/authz/repository/eventsourcing/eventstore/token_verifier.go:310\" error=\"ID=CRYPT-ha6Oh Message=malformed encrypted value Parent=(go-jose/go-jose: compact JWE format must have five parts)\\nID=CRYPT-Eep6o Message=malformed encrypted value Parent=(illegal base64 data at input byte 20)\"\n"
+         ]
+        ]
+       }
+      ],
+      "stats": {
+       "summary": {
+        "bytesProcessedPerSecond": 75379317,
+        "linesProcessedPerSecond": 180219,
+        "totalBytesProcessed": 898011,
+        "totalLinesProcessed": 2147,
+        "execTime": 0.011913,
+        "queueTime": 0.000115,
+        "subqueries": 0,
+        "totalEntriesReturned": 20,
+        "splits": 0,
+        "shards": 1,
+        "totalPostFilterLines": 2147,
+        "totalStructuredMetadataBytesProcessed": 64300
+       },
+       "querier": {
+        "store": {
+         "totalChunksRef": 0,
+         "totalChunksDownloaded": 0,
+         "chunksDownloadTime": 0,
+         "queryReferencedStructuredMetadata": false,
+         "queryUsedV2Engine": false,
+         "chunk": {
+          "headChunkBytes": 0,
+          "headChunkLines": 0,
+          "decompressedBytes": 0,
+          "decompressedLines": 0,
+          "compressedBytes": 0,
+          "totalDuplicates": 0,
+          "postFilterLines": 0,
+          "headChunkStructuredMetadataBytes": 0,
+          "decompressedStructuredMetadataBytes": 0
+         },
+         "chunkRefsFetchTime": 0,
+         "congestionControlLatency": 0,
+         "pipelineWrapperFilteredLines": 0,
+         "dataobj": {
+          "prePredicateDecompressedRows": 0,
+          "prePredicateDecompressedBytes": 0,
+          "prePredicateDecompressedStructuredMetadataBytes": 0,
+          "postPredicateRows": 0,
+          "postPredicateDecompressedBytes": 0,
+          "postPredicateStructuredMetadataBytes": 0,
+          "postFilterRows": 0,
+          "pagesScanned": 0,
+          "pagesDownloaded": 0,
+          "pagesDownloadedBytes": 0,
+          "pageBatches": 0,
+          "totalRowsAvailable": 0,
+          "totalPageDownloadTime": 0
+         }
+        }
+       },
+       "ingester": {
+        "totalReached": 1,
+        "totalChunksMatched": 5,
+        "totalBatches": 1,
+        "totalLinesSent": 20,
+        "store": {
+         "totalChunksRef": 3,
+         "totalChunksDownloaded": 3,
+         "chunksDownloadTime": 457016,
+         "queryReferencedStructuredMetadata": false,
+         "queryUsedV2Engine": false,
+         "chunk": {
+          "headChunkBytes": 2460,
+          "headChunkLines": 5,
+          "decompressedBytes": 895551,
+          "decompressedLines": 2142,
+          "compressedBytes": 96798,
+          "totalDuplicates": 0,
+          "postFilterLines": 2147,
+          "headChunkStructuredMetadataBytes": 40,
+          "decompressedStructuredMetadataBytes": 64260
+         },
+         "chunkRefsFetchTime": 314739,
+         "congestionControlLatency": 0,
+         "pipelineWrapperFilteredLines": 0,
+         "dataobj": {
+          "prePredicateDecompressedRows": 0,
+          "prePredicateDecompressedBytes": 0,
+          "prePredicateDecompressedStructuredMetadataBytes": 0,
+          "postPredicateRows": 0,
+          "postPredicateDecompressedBytes": 0,
+          "postPredicateStructuredMetadataBytes": 0,
+          "postFilterRows": 0,
+          "pagesScanned": 0,
+          "pagesDownloaded": 0,
+          "pagesDownloadedBytes": 0,
+          "pageBatches": 0,
+          "totalRowsAvailable": 0,
+          "totalPageDownloadTime": 0
+         }
+        }
+       },
+       "cache": {
+        "chunk": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "index": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "result": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "statsResult": {
+         "entriesFound": 1,
+         "entriesRequested": 1,
+         "entriesStored": 0,
+         "bytesReceived": 210,
+         "bytesSent": 0,
+         "requests": 1,
+         "downloadTime": 10314,
+         "queryLengthServed": 90000000000
+        },
+        "volumeResult": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "seriesResult": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "labelResult": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "instantMetricResult": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        }
+       },
+       "index": {
+        "totalChunks": 0,
+        "postFilterChunks": 0,
+        "shardsDuration": 0,
+        "usedBloomFilters": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "request": {
+    "at": 1790934663.365801,
+    "at_rfc3339": "2026-10-02T09:51:03Z",
+    "backend": "logs",
+    "path": "loki/api/v1/query_range",
+    "query_string": "start=1790932863365801216&end=1790932923365801216&query=%7Bnamespace%3D%22careerhub-prod%22%7D&limit=20&direction=forward",
+    "params": {
+     "start": "1790932863365801216",
+     "end": "1790932923365801216",
+     "query": "{namespace=\"careerhub-prod\"}",
+     "limit": "20",
+     "direction": "forward"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "status": "success",
+     "data": {
+      "resultType": "streams",
+      "result": [
+       {
+        "stream": {
+         "app": "careerhub-mongodb-svc",
+         "container": "mongod",
+         "detected_level": "unknown",
+         "env": "prod",
+         "instance": "careerhub-prod/careerhub-mongodb-1:mongod",
+         "job": "loki.source.kubernetes.pod_logs",
+         "namespace": "careerhub-prod",
+         "pod": "careerhub-mongodb-1",
+         "service_name": "careerhub-mongodb-svc"
+        },
+        "values": [
+         [
+          "1790932863598240369",
+          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.598+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22943,   \"ctx\":\"listener\",\"msg\":\"Connection accepted\",\"attr\":{\"remote\":\"10.244.4.109:55968\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"7e85d974-362e-4fbc-b7cb-d2e66884c5cf\"}},\"connectionId\":1457843,\"connectionCount\":58}}\n"
+         ],
+         [
+          "1790932863598365758",
+          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.598+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22943,   \"ctx\":\"listener\",\"msg\":\"Connection accepted\",\"attr\":{\"remote\":\"10.244.4.109:55970\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"68da44d7-d4b4-4fb8-a70d-4c442b6db603\"}},\"connectionId\":1457844,\"connectionCount\":59}}\n"
+         ],
+         [
+          "1790932863598647370",
+          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.598+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":51800,   \"ctx\":\"conn1457844\",\"msg\":\"client metadata\",\"attr\":{\"remote\":\"10.244.4.109:55970\",\"client\":\"conn1457844\",\"negotiatedCompressors\":[],\"doc\":{\"application\":{\"name\":\"MongoDB Automation Agent v108.0.2.8729 (git: ec1573c1fd5d7da3acab288d628b9e9eaaec6b2b)\"},\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"v1.12.0-cloud\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.22.9\"}}}\n"
+         ],
+         [
+          "1790932863598647370",
+          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.598+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":51800,   \"ctx\":\"conn1457843\",\"msg\":\"client metadata\",\"attr\":{\"remote\":\"10.244.4.109:55968\",\"client\":\"conn1457843\",\"negotiatedCompressors\":[],\"doc\":{\"application\":{\"name\":\"MongoDB Automation Agent v108.0.2.8729 (git: ec1573c1fd5d7da3acab288d628b9e9eaaec6b2b)\"},\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"v1.12.0-cloud\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.22.9\"}}}\n"
+         ],
+         [
+          "1790932863599053742",
+          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.598+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":10483900,\"ctx\":\"conn1457844\",\"msg\":\"Connection not authenticating\",\"attr\":{\"client\":\"10.244.4.109:55970\",\"doc\":{\"application\":{\"name\":\"MongoDB Automation Agent v108.0.2.8729 (git: ec1573c1fd5d7da3acab288d628b9e9eaaec6b2b)\"},\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"v1.12.0-cloud\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.22.9\"}}}\n"
+         ],
+         [
+          "1790932863599053742",
+          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.598+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":10483900,\"ctx\":\"conn1457843\",\"msg\":\"Connection not authenticating\",\"attr\":{\"client\":\"10.244.4.109:55968\",\"doc\":{\"application\":{\"name\":\"MongoDB Automation Agent v108.0.2.8729 (git: ec1573c1fd5d7da3acab288d628b9e9eaaec6b2b)\"},\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"v1.12.0-cloud\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.22.9\"}}}\n"
+         ],
+         [
+          "1790932863599559280",
+          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.599+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22943,   \"ctx\":\"listener\",\"msg\":\"Connection accepted\",\"attr\":{\"remote\":\"10.244.4.109:55990\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"3c42bf32-91e1-4835-9c8e-29481b61637f\"}},\"connectionId\":1457845,\"connectionCount\":60}}\n"
+         ],
+         [
+          "1790932863599869929",
+          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.599+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":51800,   \"ctx\":\"conn1457845\",\"msg\":\"client metadata\",\"attr\":{\"remote\":\"10.244.4.109:55990\",\"client\":\"conn1457845\",\"negotiatedCompressors\":[],\"doc\":{\"application\":{\"name\":\"MongoDB Automation Agent v108.0.2.8729 (git: ec1573c1fd5d7da3acab288d628b9e9eaaec6b2b)\"},\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"v1.12.0-cloud\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.22.9\"}}}\n"
+         ],
+         [
+          "1790932863599950152",
+          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.599+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":6788604, \"ctx\":\"conn1457845\",\"msg\":\"Auth metrics report\",\"attr\":{\"metric\":\"acquireUser\",\"micros\":0}}\n"
+         ],
+         [
+          "1790932863606551782",
+          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.606+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":5286306, \"ctx\":\"conn1457845\",\"msg\":\"Successfully authenticated\",\"attr\":{\"client\":\"10.244.4.109:55990\",\"isSpeculative\":true,\"isClusterMember\":true,\"mechanism\":\"SCRAM-SHA-256\",\"user\":\"__system\",\"db\":\"local\",\"result\":0,\"metrics\":{\"conversation_duration\":{\"micros\":6563,\"summary\":{\"0\":{\"step\":1,\"step_total\":2,\"duration_micros\":61},\"1\":{\"step\":2,\"step_total\":2,\"duration_micros\":19}}}},\"doc\":{\"application\":{\"name\":\"MongoDB Automation Agent v108.0.2.8729 (git: ec1573c1fd5d7da3acab288d628b9e9eaaec6b2b)\"},\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"v1.12.0-cloud\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.22.9\"},\"extraInfo\":{}}}\n"
+         ],
+         [
+          "1790932863607900916",
+          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.607+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":6788700, \"ctx\":\"conn1457845\",\"msg\":\"Received first command on ingress connection since session start or auth handshake\",\"attr\":{\"elapsedMillis\":1}}\n"
+         ],
+         [
+          "1790932863608494121",
+          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.608+00:00\"},\"s\":\"I\",  \"c\":\"-\",        \"id\":20883,   \"ctx\":\"conn1457843\",\"msg\":\"Interrupted operation as its client disconnected\",\"attr\":{\"opId\":1580102657}}\n"
+         ],
+         [
+          "1790932863608494121",
+          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.608+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22944,   \"ctx\":\"conn1457844\",\"msg\":\"Connection ended\",\"attr\":{\"remote\":\"10.244.4.109:55970\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"68da44d7-d4b4-4fb8-a70d-4c442b6db603\"}},\"connectionId\":1457844,\"connectionCount\":59}}\n"
+         ],
+         [
+          "1790932863609138493",
+          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.609+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22944,   \"ctx\":\"conn1457843\",\"msg\":\"Connection ended\",\"attr\":{\"remote\":\"10.244.4.109:55968\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"7e85d974-362e-4fbc-b7cb-d2e66884c5cf\"}},\"connectionId\":1457843,\"connectionCount\":58}}\n"
+         ],
+         [
+          "1790932863610031663",
+          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.609+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22944,   \"ctx\":\"conn1457845\",\"msg\":\"Connection ended\",\"attr\":{\"remote\":\"10.244.4.109:55990\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"3c42bf32-91e1-4835-9c8e-29481b61637f\"}},\"connectionId\":1457845,\"connectionCount\":57}}\n"
+         ]
+        ]
+       },
+       {
+        "stream": {
+         "container": "zitadel",
+         "detected_level": "info",
+         "env": "prod",
+         "instance": "careerhub-prod/zitadel-f65b884bd-jm9zg:zitadel",
+         "job": "loki.source.kubernetes.pod_logs",
+         "namespace": "careerhub-prod",
+         "pod": "zitadel-f65b884bd-jm9zg",
+         "service_name": "zitadel"
+        },
+        "values": [
+         [
+          "1790932864674463658",
+          "time=\"2026-10-02T09:21:04Z\" level=info msg=activity caller=\"/home/runner/work/zitadel/zitadel/internal/activity/activity.go:105\" domain=\"https://id.careerhub.jyo-liar.com\" grpcStatus=0 httpStatus=200 instance=385772681082964180 isSystemUser=true method=/zitadel.settings.v2.SettingsService/GetGeneralSettings org= path= requestMethod= trigger=resourceAPI user=login-client\n"
+         ],
+         [
+          "1790932864674511435",
+          "time=2026-10-02T09:21:04.674Z level=INFO msg=\"request served\" request.id=davnf01cm36s73dvkd1g request.instance_host=id.careerhub.jyo-liar.com request.public_host=id.careerhub.jyo-liar.com request.instance_id=385772681082964180 request.user_id=login-client TraceID=a1223ec7ea254fec353963f5298b2b1c SpanID=a0f29fb242a43f53 stream=request version=v4.15.3 protocol=connect service=zitadel.settings.v2.SettingsService http_method=POST path=/zitadel.settings.v2.SettingsService/GetGeneralSettings code=code_0 duration=3.520486ms\n"
+         ]
+        ]
+       },
+       {
+        "stream": {
+         "container": "zitadel",
+         "detected_level": "warn",
+         "env": "prod",
+         "instance": "careerhub-prod/zitadel-f65b884bd-jm9zg:zitadel",
+         "job": "loki.source.kubernetes.pod_logs",
+         "namespace": "careerhub-prod",
+         "pod": "zitadel-f65b884bd-jm9zg",
+         "service_name": "zitadel"
+        },
+        "values": [
+         [
+          "1790932864672965960",
+          "time=\"2026-10-02T09:21:04Z\" level=warning msg=\"token verifier repo: decrypt access token\" caller=\"/home/runner/work/zitadel/zitadel/internal/authz/repository/eventsourcing/eventstore/token_verifier.go:310\" error=\"ID=CRYPT-ha6Oh Message=malformed encrypted value Parent=(go-jose/go-jose: compact JWE format must have five parts)\\nID=CRYPT-Eep6o Message=malformed encrypted value Parent=(illegal base64 data at input byte 20)\"\n"
+         ],
+         [
+          "1790932864673055793",
+          "time=\"2026-10-02T09:21:04Z\" level=warning msg=\"token verifier repo: verify JWT access token\" caller=\"/home/runner/work/zitadel/zitadel/internal/authz/repository/eventsourcing/eventstore/token_verifier.go:314\" error=\"issuer does not match: Expected: https://id.careerhub.jyo-liar.com, got: login-client\"\n"
+         ],
+         [
+          "1790932864673055793",
+          "time=\"2026-10-02T09:21:04Z\" level=warning msg=\"authz: verify access token\" caller=\"/home/runner/work/zitadel/zitadel/internal/api/authz/context.go:114\" error=\"ID=APP-Reb32 Message=invalid token\" org_domain= org_id=\n"
+         ]
+        ]
+       }
+      ],
+      "stats": {
+       "summary": {
+        "bytesProcessedPerSecond": 77028747,
+        "linesProcessedPerSecond": 184252,
+        "totalBytesProcessed": 904686,
+        "totalLinesProcessed": 2164,
+        "execTime": 0.011745,
+        "queueTime": 0.000158,
+        "subqueries": 0,
+        "totalEntriesReturned": 20,
+        "splits": 0,
+        "shards": 1,
+        "totalPostFilterLines": 2164,
+        "totalStructuredMetadataBytesProcessed": 64920
+       },
+       "querier": {
+        "store": {
+         "totalChunksRef": 0,
+         "totalChunksDownloaded": 0,
+         "chunksDownloadTime": 0,
+         "queryReferencedStructuredMetadata": false,
+         "queryUsedV2Engine": false,
+         "chunk": {
+          "headChunkBytes": 0,
+          "headChunkLines": 0,
+          "decompressedBytes": 0,
+          "decompressedLines": 0,
+          "compressedBytes": 0,
+          "totalDuplicates": 0,
+          "postFilterLines": 0,
+          "headChunkStructuredMetadataBytes": 0,
+          "decompressedStructuredMetadataBytes": 0
+         },
+         "chunkRefsFetchTime": 0,
+         "congestionControlLatency": 0,
+         "pipelineWrapperFilteredLines": 0,
+         "dataobj": {
+          "prePredicateDecompressedRows": 0,
+          "prePredicateDecompressedBytes": 0,
+          "prePredicateDecompressedStructuredMetadataBytes": 0,
+          "postPredicateRows": 0,
+          "postPredicateDecompressedBytes": 0,
+          "postPredicateStructuredMetadataBytes": 0,
+          "postFilterRows": 0,
+          "pagesScanned": 0,
+          "pagesDownloaded": 0,
+          "pagesDownloadedBytes": 0,
+          "pageBatches": 0,
+          "totalRowsAvailable": 0,
+          "totalPageDownloadTime": 0
+         }
+        }
+       },
+       "ingester": {
+        "totalReached": 1,
+        "totalChunksMatched": 5,
+        "totalBatches": 1,
+        "totalLinesSent": 20,
+        "store": {
+         "totalChunksRef": 3,
+         "totalChunksDownloaded": 3,
+         "chunksDownloadTime": 412313,
+         "queryReferencedStructuredMetadata": false,
+         "queryUsedV2Engine": false,
+         "chunk": {
+          "headChunkBytes": 0,
+          "headChunkLines": 0,
+          "decompressedBytes": 904686,
+          "decompressedLines": 2164,
+          "compressedBytes": 173381,
+          "totalDuplicates": 0,
+          "postFilterLines": 2164,
+          "headChunkStructuredMetadataBytes": 0,
+          "decompressedStructuredMetadataBytes": 64920
+         },
+         "chunkRefsFetchTime": 234925,
+         "congestionControlLatency": 0,
+         "pipelineWrapperFilteredLines": 0,
+         "dataobj": {
+          "prePredicateDecompressedRows": 0,
+          "prePredicateDecompressedBytes": 0,
+          "prePredicateDecompressedStructuredMetadataBytes": 0,
+          "postPredicateRows": 0,
+          "postPredicateDecompressedBytes": 0,
+          "postPredicateStructuredMetadataBytes": 0,
+          "postFilterRows": 0,
+          "pagesScanned": 0,
+          "pagesDownloaded": 0,
+          "pagesDownloadedBytes": 0,
+          "pageBatches": 0,
+          "totalRowsAvailable": 0,
+          "totalPageDownloadTime": 0
+         }
+        }
+       },
+       "cache": {
+        "chunk": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "index": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "result": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "statsResult": {
+         "entriesFound": 1,
+         "entriesRequested": 1,
+         "entriesStored": 0,
+         "bytesReceived": 210,
+         "bytesSent": 0,
+         "requests": 1,
+         "downloadTime": 10222,
+         "queryLengthServed": 90000000000
+        },
+        "volumeResult": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "seriesResult": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "labelResult": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "instantMetricResult": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        }
+       },
+       "index": {
+        "totalChunks": 0,
+        "postFilterChunks": 0,
+        "shardsDuration": 0,
+        "usedBloomFilters": false
+       }
+      }
+     }
+    }
+   }
+  }
+ ]
+}

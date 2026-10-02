@@ -1,0 +1,1235 @@
+{
+ "format": "obs-fixture/1",
+ "recorded": "tests/record.py",
+ "calls": [
+  {
+   "request": {
+    "at": 1790934663.365801,
+    "at_rfc3339": "2026-10-02T09:51:03Z",
+    "backend": "logs",
+    "path": "loki/api/v1/query_range",
+    "query_string": "start=1790931063365801216&end=1790934663365801216&query=sum+by+%28detected_level%29+%28count_over_time%28%7Bnamespace%3D%22careerhub-prod%22%7D%5B60s%5D%29%29&step=60s",
+    "params": {
+     "start": "1790931063365801216",
+     "end": "1790934663365801216",
+     "query": "sum by (detected_level) (count_over_time({namespace=\"careerhub-prod\"}[60s]))",
+     "step": "60s"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "status": "success",
+     "data": {
+      "resultType": "matrix",
+      "result": [
+       {
+        "metric": {
+         "detected_level": "debug"
+        },
+        "values": [
+         [
+          1790931060,
+          "3"
+         ],
+         [
+          1790931120,
+          "3"
+         ],
+         [
+          1790931180,
+          "3"
+         ],
+         [
+          1790931240,
+          "3"
+         ],
+         [
+          1790931300,
+          "3"
+         ],
+         [
+          1790931360,
+          "3"
+         ],
+         [
+          1790931420,
+          "3"
+         ],
+         [
+          1790931480,
+          "3"
+         ],
+         [
+          1790931540,
+          "3"
+         ],
+         [
+          1790931600,
+          "3"
+         ],
+         [
+          1790931660,
+          "3"
+         ],
+         [
+          1790931720,
+          "3"
+         ],
+         [
+          1790931780,
+          "3"
+         ],
+         [
+          1790931840,
+          "3"
+         ],
+         [
+          1790931900,
+          "3"
+         ],
+         [
+          1790931960,
+          "3"
+         ],
+         [
+          1790932020,
+          "3"
+         ],
+         [
+          1790932080,
+          "3"
+         ],
+         [
+          1790932140,
+          "3"
+         ],
+         [
+          1790932200,
+          "3"
+         ],
+         [
+          1790932260,
+          "3"
+         ],
+         [
+          1790932320,
+          "3"
+         ],
+         [
+          1790932380,
+          "3"
+         ],
+         [
+          1790932440,
+          "3"
+         ],
+         [
+          1790932500,
+          "3"
+         ],
+         [
+          1790932560,
+          "3"
+         ],
+         [
+          1790932620,
+          "3"
+         ],
+         [
+          1790932680,
+          "3"
+         ],
+         [
+          1790932740,
+          "3"
+         ],
+         [
+          1790932800,
+          "3"
+         ],
+         [
+          1790932860,
+          "3"
+         ],
+         [
+          1790932920,
+          "3"
+         ],
+         [
+          1790932980,
+          "3"
+         ],
+         [
+          1790933040,
+          "3"
+         ],
+         [
+          1790933100,
+          "3"
+         ],
+         [
+          1790933160,
+          "3"
+         ],
+         [
+          1790933220,
+          "3"
+         ],
+         [
+          1790933280,
+          "3"
+         ],
+         [
+          1790933340,
+          "3"
+         ],
+         [
+          1790933400,
+          "3"
+         ],
+         [
+          1790933460,
+          "3"
+         ],
+         [
+          1790933520,
+          "3"
+         ],
+         [
+          1790933580,
+          "3"
+         ],
+         [
+          1790933640,
+          "3"
+         ],
+         [
+          1790933700,
+          "3"
+         ],
+         [
+          1790933760,
+          "3"
+         ],
+         [
+          1790933820,
+          "3"
+         ],
+         [
+          1790933880,
+          "3"
+         ],
+         [
+          1790933940,
+          "3"
+         ],
+         [
+          1790934000,
+          "3"
+         ],
+         [
+          1790934060,
+          "3"
+         ],
+         [
+          1790934120,
+          "3"
+         ],
+         [
+          1790934180,
+          "3"
+         ],
+         [
+          1790934240,
+          "3"
+         ],
+         [
+          1790934300,
+          "3"
+         ],
+         [
+          1790934360,
+          "3"
+         ],
+         [
+          1790934420,
+          "3"
+         ],
+         [
+          1790934480,
+          "3"
+         ],
+         [
+          1790934540,
+          "3"
+         ],
+         [
+          1790934600,
+          "3"
+         ],
+         [
+          1790934660,
+          "3"
+         ]
+        ]
+       },
+       {
+        "metric": {
+         "detected_level": "error"
+        },
+        "values": [
+         [
+          1790931420,
+          "1"
+         ],
+         [
+          1790934360,
+          "1"
+         ]
+        ]
+       },
+       {
+        "metric": {
+         "detected_level": "info"
+        },
+        "values": [
+         [
+          1790931060,
+          "79"
+         ],
+         [
+          1790931120,
+          "72"
+         ],
+         [
+          1790931180,
+          "73"
+         ],
+         [
+          1790931240,
+          "72"
+         ],
+         [
+          1790931300,
+          "72"
+         ],
+         [
+          1790931360,
+          "79"
+         ],
+         [
+          1790931420,
+          "79"
+         ],
+         [
+          1790931480,
+          "72"
+         ],
+         [
+          1790931540,
+          "72"
+         ],
+         [
+          1790931600,
+          "72"
+         ],
+         [
+          1790931660,
+          "79"
+         ],
+         [
+          1790931720,
+          "72"
+         ],
+         [
+          1790931780,
+          "72"
+         ],
+         [
+          1790931840,
+          "72"
+         ],
+         [
+          1790931900,
+          "72"
+         ],
+         [
+          1790931960,
+          "79"
+         ],
+         [
+          1790932020,
+          "72"
+         ],
+         [
+          1790932080,
+          "72"
+         ],
+         [
+          1790932140,
+          "72"
+         ],
+         [
+          1790932200,
+          "72"
+         ],
+         [
+          1790932260,
+          "79"
+         ],
+         [
+          1790932320,
+          "76"
+         ],
+         [
+          1790932380,
+          "72"
+         ],
+         [
+          1790932440,
+          "73"
+         ],
+         [
+          1790932500,
+          "72"
+         ],
+         [
+          1790932560,
+          "79"
+         ],
+         [
+          1790932620,
+          "72"
+         ],
+         [
+          1790932680,
+          "72"
+         ],
+         [
+          1790932740,
+          "72"
+         ],
+         [
+          1790932800,
+          "72"
+         ],
+         [
+          1790932860,
+          "79"
+         ],
+         [
+          1790932920,
+          "72"
+         ],
+         [
+          1790932980,
+          "73"
+         ],
+         [
+          1790933040,
+          "72"
+         ],
+         [
+          1790933100,
+          "72"
+         ],
+         [
+          1790933160,
+          "79"
+         ],
+         [
+          1790933220,
+          "72"
+         ],
+         [
+          1790933280,
+          "72"
+         ],
+         [
+          1790933340,
+          "72"
+         ],
+         [
+          1790933400,
+          "72"
+         ],
+         [
+          1790933460,
+          "79"
+         ],
+         [
+          1790933520,
+          "72"
+         ],
+         [
+          1790933580,
+          "72"
+         ],
+         [
+          1790933640,
+          "72"
+         ],
+         [
+          1790933700,
+          "72"
+         ],
+         [
+          1790933760,
+          "79"
+         ],
+         [
+          1790933820,
+          "72"
+         ],
+         [
+          1790933880,
+          "72"
+         ],
+         [
+          1790933940,
+          "72"
+         ],
+         [
+          1790934000,
+          "72"
+         ],
+         [
+          1790934060,
+          "79"
+         ],
+         [
+          1790934120,
+          "72"
+         ],
+         [
+          1790934180,
+          "72"
+         ],
+         [
+          1790934240,
+          "73"
+         ],
+         [
+          1790934300,
+          "72"
+         ],
+         [
+          1790934360,
+          "86"
+         ],
+         [
+          1790934420,
+          "72"
+         ],
+         [
+          1790934480,
+          "72"
+         ],
+         [
+          1790934540,
+          "72"
+         ],
+         [
+          1790934600,
+          "72"
+         ],
+         [
+          1790934660,
+          "79"
+         ]
+        ]
+       },
+       {
+        "metric": {
+         "detected_level": "unknown"
+        },
+        "values": [
+         [
+          1790931060,
+          "810"
+         ],
+         [
+          1790931120,
+          "814"
+         ],
+         [
+          1790931180,
+          "801"
+         ],
+         [
+          1790931240,
+          "807"
+         ],
+         [
+          1790931300,
+          "804"
+         ],
+         [
+          1790931360,
+          "786"
+         ],
+         [
+          1790931420,
+          "821"
+         ],
+         [
+          1790931480,
+          "806"
+         ],
+         [
+          1790931540,
+          "816"
+         ],
+         [
+          1790931600,
+          "812"
+         ],
+         [
+          1790931660,
+          "800"
+         ],
+         [
+          1790931720,
+          "814"
+         ],
+         [
+          1790931780,
+          "806"
+         ],
+         [
+          1790931840,
+          "800"
+         ],
+         [
+          1790931900,
+          "798"
+         ],
+         [
+          1790931960,
+          "805"
+         ],
+         [
+          1790932020,
+          "814"
+         ],
+         [
+          1790932080,
+          "799"
+         ],
+         [
+          1790932140,
+          "800"
+         ],
+         [
+          1790932200,
+          "798"
+         ],
+         [
+          1790932260,
+          "799"
+         ],
+         [
+          1790932320,
+          "828"
+         ],
+         [
+          1790932380,
+          "802"
+         ],
+         [
+          1790932440,
+          "810"
+         ],
+         [
+          1790932500,
+          "783"
+         ],
+         [
+          1790932560,
+          "809"
+         ],
+         [
+          1790932620,
+          "820"
+         ],
+         [
+          1790932680,
+          "800"
+         ],
+         [
+          1790932740,
+          "804"
+         ],
+         [
+          1790932800,
+          "800"
+         ],
+         [
+          1790932860,
+          "805"
+         ],
+         [
+          1790932920,
+          "814"
+         ],
+         [
+          1790932980,
+          "806"
+         ],
+         [
+          1790933040,
+          "800"
+         ],
+         [
+          1790933100,
+          "804"
+         ],
+         [
+          1790933160,
+          "801"
+         ],
+         [
+          1790933220,
+          "828"
+         ],
+         [
+          1790933280,
+          "783"
+         ],
+         [
+          1790933340,
+          "807"
+         ],
+         [
+          1790933400,
+          "800"
+         ],
+         [
+          1790933460,
+          "799"
+         ],
+         [
+          1790933520,
+          "805"
+         ],
+         [
+          1790933580,
+          "814"
+         ],
+         [
+          1790933640,
+          "793"
+         ],
+         [
+          1790933700,
+          "800"
+         ],
+         [
+          1790933760,
+          "805"
+         ],
+         [
+          1790933820,
+          "820"
+         ],
+         [
+          1790933880,
+          "806"
+         ],
+         [
+          1790933940,
+          "806"
+         ],
+         [
+          1790934000,
+          "800"
+         ],
+         [
+          1790934060,
+          "799"
+         ],
+         [
+          1790934120,
+          "822"
+         ],
+         [
+          1790934180,
+          "798"
+         ],
+         [
+          1790934240,
+          "812"
+         ],
+         [
+          1790934300,
+          "798"
+         ],
+         [
+          1790934360,
+          "807"
+         ],
+         [
+          1790934420,
+          "814"
+         ],
+         [
+          1790934480,
+          "793"
+         ],
+         [
+          1790934540,
+          "804"
+         ],
+         [
+          1790934600,
+          "806"
+         ],
+         [
+          1790934660,
+          "807"
+         ]
+        ]
+       },
+       {
+        "metric": {
+         "detected_level": "warn"
+        },
+        "values": [
+         [
+          1790931060,
+          "36"
+         ],
+         [
+          1790931120,
+          "36"
+         ],
+         [
+          1790931180,
+          "36"
+         ],
+         [
+          1790931240,
+          "36"
+         ],
+         [
+          1790931300,
+          "36"
+         ],
+         [
+          1790931360,
+          "36"
+         ],
+         [
+          1790931420,
+          "37"
+         ],
+         [
+          1790931480,
+          "36"
+         ],
+         [
+          1790931540,
+          "36"
+         ],
+         [
+          1790931600,
+          "36"
+         ],
+         [
+          1790931660,
+          "36"
+         ],
+         [
+          1790931720,
+          "36"
+         ],
+         [
+          1790931780,
+          "36"
+         ],
+         [
+          1790931840,
+          "36"
+         ],
+         [
+          1790931900,
+          "36"
+         ],
+         [
+          1790931960,
+          "36"
+         ],
+         [
+          1790932020,
+          "36"
+         ],
+         [
+          1790932080,
+          "36"
+         ],
+         [
+          1790932140,
+          "36"
+         ],
+         [
+          1790932200,
+          "36"
+         ],
+         [
+          1790932260,
+          "36"
+         ],
+         [
+          1790932320,
+          "36"
+         ],
+         [
+          1790932380,
+          "36"
+         ],
+         [
+          1790932440,
+          "36"
+         ],
+         [
+          1790932500,
+          "36"
+         ],
+         [
+          1790932560,
+          "36"
+         ],
+         [
+          1790932620,
+          "36"
+         ],
+         [
+          1790932680,
+          "36"
+         ],
+         [
+          1790932740,
+          "36"
+         ],
+         [
+          1790932800,
+          "36"
+         ],
+         [
+          1790932860,
+          "36"
+         ],
+         [
+          1790932920,
+          "36"
+         ],
+         [
+          1790932980,
+          "36"
+         ],
+         [
+          1790933040,
+          "36"
+         ],
+         [
+          1790933100,
+          "36"
+         ],
+         [
+          1790933160,
+          "36"
+         ],
+         [
+          1790933220,
+          "36"
+         ],
+         [
+          1790933280,
+          "36"
+         ],
+         [
+          1790933340,
+          "36"
+         ],
+         [
+          1790933400,
+          "36"
+         ],
+         [
+          1790933460,
+          "36"
+         ],
+         [
+          1790933520,
+          "36"
+         ],
+         [
+          1790933580,
+          "36"
+         ],
+         [
+          1790933640,
+          "36"
+         ],
+         [
+          1790933700,
+          "36"
+         ],
+         [
+          1790933760,
+          "36"
+         ],
+         [
+          1790933820,
+          "36"
+         ],
+         [
+          1790933880,
+          "36"
+         ],
+         [
+          1790933940,
+          "36"
+         ],
+         [
+          1790934000,
+          "36"
+         ],
+         [
+          1790934060,
+          "36"
+         ],
+         [
+          1790934120,
+          "36"
+         ],
+         [
+          1790934180,
+          "36"
+         ],
+         [
+          1790934240,
+          "36"
+         ],
+         [
+          1790934300,
+          "36"
+         ],
+         [
+          1790934360,
+          "37"
+         ],
+         [
+          1790934420,
+          "36"
+         ],
+         [
+          1790934480,
+          "36"
+         ],
+         [
+          1790934540,
+          "36"
+         ],
+         [
+          1790934600,
+          "36"
+         ],
+         [
+          1790934660,
+          "36"
+         ]
+        ]
+       }
+      ],
+      "stats": {
+       "summary": {
+        "bytesProcessedPerSecond": 44442785,
+        "linesProcessedPerSecond": 107557,
+        "totalBytesProcessed": 26529606,
+        "totalLinesProcessed": 64205,
+        "execTime": 0.596938423,
+        "queueTime": 0.375639277,
+        "subqueries": 0,
+        "totalEntriesReturned": 5,
+        "splits": 5,
+        "shards": 5,
+        "totalPostFilterLines": 64205,
+        "totalStructuredMetadataBytesProcessed": 1898166
+       },
+       "querier": {
+        "store": {
+         "totalChunksRef": 0,
+         "totalChunksDownloaded": 0,
+         "chunksDownloadTime": 0,
+         "queryReferencedStructuredMetadata": false,
+         "queryUsedV2Engine": false,
+         "chunk": {
+          "headChunkBytes": 0,
+          "headChunkLines": 0,
+          "decompressedBytes": 0,
+          "decompressedLines": 0,
+          "compressedBytes": 0,
+          "totalDuplicates": 0,
+          "postFilterLines": 0,
+          "headChunkStructuredMetadataBytes": 0,
+          "decompressedStructuredMetadataBytes": 0
+         },
+         "chunkRefsFetchTime": 0,
+         "congestionControlLatency": 0,
+         "pipelineWrapperFilteredLines": 0,
+         "dataobj": {
+          "prePredicateDecompressedRows": 0,
+          "prePredicateDecompressedBytes": 0,
+          "prePredicateDecompressedStructuredMetadataBytes": 0,
+          "postPredicateRows": 0,
+          "postPredicateDecompressedBytes": 0,
+          "postPredicateStructuredMetadataBytes": 0,
+          "postFilterRows": 0,
+          "pagesScanned": 0,
+          "pagesDownloaded": 0,
+          "pagesDownloadedBytes": 0,
+          "pageBatches": 0,
+          "totalRowsAvailable": 0,
+          "totalPageDownloadTime": 0
+         }
+        }
+       },
+       "ingester": {
+        "totalReached": 5,
+        "totalChunksMatched": 22,
+        "totalBatches": 116,
+        "totalLinesSent": 56010,
+        "store": {
+         "totalChunksRef": 25,
+         "totalChunksDownloaded": 25,
+         "chunksDownloadTime": 90717118,
+         "queryReferencedStructuredMetadata": true,
+         "queryUsedV2Engine": false,
+         "chunk": {
+          "headChunkBytes": 478650,
+          "headChunkLines": 1272,
+          "decompressedBytes": 26050956,
+          "decompressedLines": 62933,
+          "compressedBytes": 2383325,
+          "totalDuplicates": 1,
+          "postFilterLines": 64205,
+          "headChunkStructuredMetadataBytes": 10176,
+          "decompressedStructuredMetadataBytes": 1887990
+         },
+         "chunkRefsFetchTime": 2243380,
+         "congestionControlLatency": 0,
+         "pipelineWrapperFilteredLines": 0,
+         "dataobj": {
+          "prePredicateDecompressedRows": 0,
+          "prePredicateDecompressedBytes": 0,
+          "prePredicateDecompressedStructuredMetadataBytes": 0,
+          "postPredicateRows": 0,
+          "postPredicateDecompressedBytes": 0,
+          "postPredicateStructuredMetadataBytes": 0,
+          "postFilterRows": 0,
+          "pagesScanned": 0,
+          "pagesDownloaded": 0,
+          "pagesDownloadedBytes": 0,
+          "pageBatches": 0,
+          "totalRowsAvailable": 0,
+          "totalPageDownloadTime": 0
+         }
+        }
+       },
+       "cache": {
+        "chunk": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "index": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "result": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "statsResult": {
+         "entriesFound": 0,
+         "entriesRequested": 3,
+         "entriesStored": 3,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 6,
+         "downloadTime": 31907,
+         "queryLengthServed": 0
+        },
+        "volumeResult": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "seriesResult": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "labelResult": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        },
+        "instantMetricResult": {
+         "entriesFound": 0,
+         "entriesRequested": 0,
+         "entriesStored": 0,
+         "bytesReceived": 0,
+         "bytesSent": 0,
+         "requests": 0,
+         "downloadTime": 0,
+         "queryLengthServed": 0
+        }
+       },
+       "index": {
+        "totalChunks": 0,
+        "postFilterChunks": 0,
+        "shardsDuration": 0,
+        "usedBloomFilters": false
+       }
+      }
+     }
+    }
+   }
+  }
+ ]
+}

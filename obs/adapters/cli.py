@@ -24,12 +24,16 @@ from typing import Callable, Mapping, Sequence
 
 from obs.core import (
     JSON, Client, DoctorReport, Evidence, Lines, ObsError, Params, Window, doctor, fmt_ts, load_config,
-    SPILL_RAW, SPILL_SUMMARY, json_int, json_labels, json_list, json_obj, json_pair, json_str, json_strs,
+    SPILL_RAW, SPILL_SUMMARY, json_int, json_labels, json_list, json_obj, json_str, json_strs,
     parse_duration, parse_time, now, spill, spill_ref, to_json, token_from_env,
 )
+from obs.logs import (
+    DEFAULT_AROUND_LIMIT, DEFAULT_AROUND_SPAN, DEFAULT_TEMPLATES_K, Context, FirstSeen, Histogram, LogEntry, LogResult, Stream,
+    Templates, parse_logs,
+)
 from obs.metrics import (
-    DEFAULT_BASELINE, DEFAULT_TOP_AGG, DEFAULT_TOP_K, TOP_AGGS, Comparison, MetricResult, Series, Summary, Top,
-    auto_step, check_status, compare, parse_metric, series_items, summarize, top,
+    DEFAULT_BASELINE, DEFAULT_TOP_AGG, DEFAULT_TOP_K, TOP_AGGS, Comparison, MetricResult, Summary, Top,
+    auto_step, check_status, compare, parse_metric, summarize, top,
 )
 
 DEFAULT_MAX_LINES: int = 40
@@ -39,21 +43,7 @@ RunResult = tuple[Evidence[Lines], JSON, str]
 """(근거, 원본 body, spill 종류 이름)"""
 
 
-# ── 응답 dataclass + 파서 — Loki (Prometheus 형 파서는 obs.metrics) ────────────────
-
-@dataclass(frozen=True)
-class Stream:
-    """Loki 로그 스트림 — 레이블 집합과 (나노초, 줄) 목록."""
-    labels: dict[str, str]
-    values: list[tuple[int, str]]
-
-
-@dataclass(frozen=True)
-class LogResult:
-    result_type: str            # streams · matrix
-    streams: list[Stream]
-    series: list[Series]
-
+# ── 응답 dataclass + 파서 — Loki 의 로그 파서(Stream · LogResult · parse_logs)는 obs.logs 에, Prometheus 형은 obs.metrics 에 ──
 
 def parse_strings(body: dict[str, JSON]) -> list[str]:
     """labels · label values 응답 — `data: [str]`."""
@@ -63,23 +53,6 @@ def parse_strings(body: dict[str, JSON]) -> list[str]:
 def parse_label_sets(body: dict[str, JSON]) -> list[dict[str, str]]:
     """series 응답 — `data: [{label: value}]`."""
     return [json_labels(m) for m in json_list(body.get("data"))]
-
-
-def parse_logs(body: dict[str, JSON]) -> LogResult:
-    data = json_obj(body.get("data"))
-    rtype = json_str(data.get("resultType"))
-    if rtype == "matrix":
-        return LogResult(result_type=rtype, streams=[], series=series_items(data.get("result")))
-    streams: list[Stream] = []
-    for item in json_list(data.get("result")):
-        o = json_obj(item)
-        values: list[tuple[int, str]] = []
-        for v in json_list(o.get("values")):
-            pr = json_pair(v)
-            if pr is not None:
-                values.append((json_int(pr[0]), pr[1]))
-        streams.append(Stream(labels=json_labels(o.get("stream")), values=values))
-    return LogResult(result_type=rtype, streams=streams, series=[])
 
 
 # ── 응답 dataclass + 파서 — Tempo ───────────────────────────────────────────────
@@ -606,20 +579,13 @@ def common_labels(streams: Sequence[Stream]) -> dict[str, str]:
     return common
 
 
-@dataclass(frozen=True)
-class _Entry:
-    ts_ns: int
-    labels: dict[str, str]
-    line: str
-
-
 def stream_lines(res: LogResult, direction: str, width: int) -> list[str]:
     common = common_labels(res.streams)
-    entries: list[_Entry] = []
+    entries: list[LogEntry] = []
     for s in res.streams:
         labels = {k: v for k, v in s.labels.items() if k not in common}
         for ts, line in s.values:
-            entries.append(_Entry(ts, labels, line))
+            entries.append(LogEntry(ts, labels, line))
     entries.sort(key=lambda e: e.ts_ns, reverse=(direction == "backward"))
     lines: list[str] = []
     if common:
@@ -708,6 +674,53 @@ def logql_main(argv: Sequence[str] | None = None) -> None:
                      width=a.width, labels=a.labels, label_values=a.label_values, series=a.series)
     ev, body, kind = logql_run(_client(), args)
     _finish(ev, body, kind, a.max_lines, a.json)
+
+
+# ── 환원 연산 — logql.py 의 서브커맨드 (계산은 obs.logs, 표는 여기) ────────────────────
+
+LOGS_SUBCOMMANDS: tuple[str, ...] = ("histogram", "templates", "around", "first-seen")
+
+
+def histogram_lines(value: Histogram, window: Window) -> list[str]:
+    raise NotImplementedError("histogram_lines")
+
+
+def templates_lines(value: Templates, window: Window) -> list[str]:
+    raise NotImplementedError("templates_lines")
+
+
+def around_lines(value: Context, window: Window) -> list[str]:
+    raise NotImplementedError("around_lines")
+
+
+def first_seen_lines(value: FirstSeen, window: Window) -> list[str]:
+    raise NotImplementedError("first_seen_lines")
+
+
+@dataclass
+class LogsArgs:
+    cmd: str                    # histogram · templates · around · first-seen
+    selector: str
+    since: str = "1h"
+    end: str | None = None
+    by: str = "detected_level"          # histogram
+    step: str | None = None             # histogram · templates
+    k: int = DEFAULT_TEMPLATES_K        # templates
+    ts: str | None = None               # around — None = 거부
+    span: str = DEFAULT_AROUND_SPAN     # around
+    limit: int = DEFAULT_AROUND_LIMIT   # around
+    template: str | None = None         # first-seen — None = 거부
+
+    def validate(self) -> None:
+        raise NotImplementedError("LogsArgs.validate")
+
+
+def logs_run(client: Client, a: LogsArgs, at: float | None = None) -> RunResult:
+    raise NotImplementedError("logs_run")
+
+
+def logs_main(argv: Sequence[str]) -> None:
+    raise NotImplementedError("logs_main")
 
 
 # ── traceql ──────────────────────────────────────────────────────────────────────
