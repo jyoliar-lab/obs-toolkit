@@ -4,14 +4,14 @@
  "calls": [
   {
    "request": {
-    "at": 1790934663.365801,
-    "at_rfc3339": "2026-10-02T09:51:03Z",
+    "at": 1790943228.36111,
+    "at_rfc3339": "2026-10-02T12:13:48Z",
     "backend": "logs",
     "path": "loki/api/v1/query_range",
-    "query_string": "start=1790931063365801216&end=1790934663365801216&query=sum+by+%28detected_level%29+%28count_over_time%28%7Bnamespace%3D%22no-such-namespace%22%7D%5B60s%5D%29%29&step=60s",
+    "query_string": "start=1790939628361110016&end=1790943228361110016&query=sum+by+%28detected_level%29+%28count_over_time%28%7Bnamespace%3D%22no-such-namespace%22%7D%5B60s%5D%29%29&step=60s",
     "params": {
-     "start": "1790931063365801216",
-     "end": "1790934663365801216",
+     "start": "1790939628361110016",
+     "end": "1790943228361110016",
      "query": "sum by (detected_level) (count_over_time({namespace=\"no-such-namespace\"}[60s]))",
      "step": "60s"
     }
@@ -29,8 +29,8 @@
         "linesProcessedPerSecond": 0,
         "totalBytesProcessed": 0,
         "totalLinesProcessed": 0,
-        "execTime": 0.022026037,
-        "queueTime": 0.004822963,
+        "execTime": 0.020258255,
+        "queueTime": 0.005335998,
         "subqueries": 0,
         "totalEntriesReturned": 0,
         "splits": 5,
@@ -98,7 +98,7 @@
           "headChunkStructuredMetadataBytes": 0,
           "decompressedStructuredMetadataBytes": 0
          },
-         "chunkRefsFetchTime": 979792,
+         "chunkRefsFetchTime": 3084581,
          "congestionControlLatency": 0,
          "pipelineWrapperFilteredLines": 0,
          "dataobj": {
@@ -151,12 +151,12 @@
         },
         "statsResult": {
          "entriesFound": 0,
-         "entriesRequested": 3,
-         "entriesStored": 3,
+         "entriesRequested": 4,
+         "entriesStored": 4,
          "bytesReceived": 0,
          "bytesSent": 0,
-         "requests": 6,
-         "downloadTime": 23870,
+         "requests": 8,
+         "downloadTime": 39389,
          "queryLengthServed": 0
         },
         "volumeResult": {

@@ -4,14 +4,14 @@
  "calls": [
   {
    "request": {
-    "at": 1790934663.365801,
-    "at_rfc3339": "2026-10-02T09:51:03Z",
+    "at": 1790943228.36111,
+    "at_rfc3339": "2026-10-02T12:13:48Z",
     "backend": "logs",
     "path": "loki/api/v1/query_range",
-    "query_string": "start=1790931063365801216&end=1790934663365801216&query=%7Bnamespace%3D%22careerhub-prod%22%7D+%7C%3E+%60%7B%22t%22%3A%7B%22%24date%22%3A%22%3C_%3E%22%7D%2C%22s%22%3A%22I%22%2C++%22c%22%3A%22ACCESS%22%2C+++%22id%22%3A6788604%2C+%22ctx%22%3A%22%3C_%3E%22%2C%22msg%22%3A%22Auth+metrics+report%22%2C%22attr%22%3A%7B%22metric%22%3A%22acquireUser%22%2C%22micros%22%3C_%3E%7D%7D%0A%60&limit=1&direction=forward",
+    "query_string": "start=1790939628361110016&end=1790943228361110016&query=%7Bnamespace%3D%22careerhub-prod%22%7D+%7C%3E+%60%7B%22t%22%3A%7B%22%24date%22%3A%22%3C_%3E%22%7D%2C%22s%22%3A%22I%22%2C++%22c%22%3A%22ACCESS%22%2C+++%22id%22%3A6788604%2C+%22ctx%22%3A%22%3C_%3E%22%2C%22msg%22%3A%22Auth+metrics+report%22%2C%22attr%22%3A%7B%22metric%22%3A%22acquireUser%22%2C%22micros%22%3C_%3E%7D%7D%0A%60&limit=1&direction=forward",
     "params": {
-     "start": "1790931063365801216",
-     "end": "1790934663365801216",
+     "start": "1790939628361110016",
+     "end": "1790943228361110016",
      "query": "{namespace=\"careerhub-prod\"} |> `{\"t\":{\"$date\":\"<_>\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":6788604, \"ctx\":\"<_>\",\"msg\":\"Auth metrics report\",\"attr\":{\"metric\":\"acquireUser\",\"micros\"<_>}}\n`",
      "limit": "1",
      "direction": "forward"
@@ -30,34 +30,34 @@
          "container": "mongod",
          "detected_level": "unknown",
          "env": "prod",
-         "instance": "careerhub-prod/careerhub-mongodb-arb-0:mongod",
+         "instance": "careerhub-prod/careerhub-mongodb-1:mongod",
          "job": "loki.source.kubernetes.pod_logs",
          "namespace": "careerhub-prod",
-         "pod": "careerhub-mongodb-arb-0",
+         "pod": "careerhub-mongodb-1",
          "service_name": "careerhub-mongodb-svc"
         },
         "values": [
          [
-          "1790931066729926134",
-          "{\"t\":{\"$date\":\"2026-10-02T08:51:06.729+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":6788604, \"ctx\":\"conn4891744\",\"msg\":\"Auth metrics report\",\"attr\":{\"metric\":\"acquireUser\",\"micros\":0}}\n"
+          "1790939629354953487",
+          "{\"t\":{\"$date\":\"2026-10-02T11:13:49.354+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":6788604, \"ctx\":\"conn1463983\",\"msg\":\"Auth metrics report\",\"attr\":{\"metric\":\"acquireUser\",\"micros\":0}}\n"
          ]
         ]
        }
       ],
       "stats": {
        "summary": {
-        "bytesProcessedPerSecond": 73902503,
-        "linesProcessedPerSecond": 173893,
-        "totalBytesProcessed": 1112618,
-        "totalLinesProcessed": 2618,
-        "execTime": 0.015055,
-        "queueTime": 0.000202,
+        "bytesProcessedPerSecond": 69256392,
+        "linesProcessedPerSecond": 163753,
+        "totalBytesProcessed": 944406,
+        "totalLinesProcessed": 2233,
+        "execTime": 0.013636,
+        "queueTime": 0.000467,
         "subqueries": 0,
         "totalEntriesReturned": 1,
         "splits": 1,
         "shards": 1,
-        "totalPostFilterLines": 157,
-        "totalStructuredMetadataBytesProcessed": 78540
+        "totalPostFilterLines": 196,
+        "totalStructuredMetadataBytesProcessed": 66990
        },
        "querier": {
         "store": {
@@ -99,27 +99,27 @@
        },
        "ingester": {
         "totalReached": 1,
-        "totalChunksMatched": 1,
+        "totalChunksMatched": 2,
         "totalBatches": 1,
         "totalLinesSent": 1,
         "store": {
          "totalChunksRef": 8,
          "totalChunksDownloaded": 8,
-         "chunksDownloadTime": 687942,
+         "chunksDownloadTime": 865385,
          "queryReferencedStructuredMetadata": false,
          "queryUsedV2Engine": false,
          "chunk": {
           "headChunkBytes": 0,
           "headChunkLines": 0,
-          "decompressedBytes": 1112618,
-          "decompressedLines": 2618,
-          "compressedBytes": 379011,
+          "decompressedBytes": 944406,
+          "decompressedLines": 2233,
+          "compressedBytes": 155055,
           "totalDuplicates": 0,
-          "postFilterLines": 157,
+          "postFilterLines": 196,
           "headChunkStructuredMetadataBytes": 0,
-          "decompressedStructuredMetadataBytes": 78540
+          "decompressedStructuredMetadataBytes": 66990
          },
-         "chunkRefsFetchTime": 250314,
+         "chunkRefsFetchTime": 409091,
          "congestionControlLatency": 0,
          "pipelineWrapperFilteredLines": 0,
          "dataobj": {
@@ -174,11 +174,11 @@
          "entriesFound": 1,
          "entriesRequested": 1,
          "entriesStored": 1,
-         "bytesReceived": 209,
+         "bytesReceived": 210,
          "bytesSent": 0,
          "requests": 2,
-         "downloadTime": 4222,
-         "queryLengthServed": 507000000000
+         "downloadTime": 9722,
+         "queryLengthServed": 60000000000
         },
         "volumeResult": {
          "entriesFound": 0,

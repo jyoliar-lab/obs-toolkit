@@ -13,11 +13,11 @@ Loki 응답 파서(`Stream` · `LogResult` · `parse_logs` · `LogEntry`)는 어
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Sequence
 
-from obs.core import JSON, Client, Evidence, Window, json_int, json_labels, json_list, json_obj, json_pair, json_str
-from obs.metrics import Series, series_items
+from obs.core import JSON, Client, Evidence, ObsError, Params, Window, json_int, json_labels, json_list, json_obj, json_pair, json_str
+from obs.metrics import Series, auto_step, check_status, parse_metric, series_items
 
 DEFAULT_MAX_GROUPS: int = 20
 DEFAULT_TEMPLATES_K: int = 10
@@ -87,12 +87,35 @@ class Histogram:
 
 
 def histogram_query(selector: str, by: Sequence[str], step: str) -> str:
-    raise NotImplementedError("histogram_query")
+    """`sum by (<by>) (count_over_time(<selector>[<step>]))` — 축은 다듬어 쉼표로 잇는다. 축이 없으면 ObsError."""
+    axes = [a.strip() for a in by if a.strip()]
+    if not axes:
+        raise ObsError("레이블 축(--by)이 필요하다 — 예: detected_level · app,pod")
+    return "sum by (%s) (count_over_time(%s[%s]))" % (", ".join(axes), selector, step)
 
 
 def histogram(client: Client, selector: str, window: Window, by: Sequence[str] = ("detected_level",),
               step: str | None = None, max_groups: int = DEFAULT_MAX_GROUPS) -> tuple[Evidence[Histogram], JSON]:
-    raise NotImplementedError("histogram")
+    """by 값별 · 구간별 건수 표 — `count_over_time` matrix 를 query_range 한 번으로 받아 편다. 행은 total 내림차순, max_groups 까지."""
+    if not selector.strip():
+        raise ObsError("LogQL selector 가 필요하다")
+    if max_groups < 1:
+        raise ObsError("max_groups 는 1 이상이어야 한다: %d" % max_groups)
+    step = step or auto_step(window.seconds)
+    q = histogram_query(selector, by, step)
+    params: Params = {"start": int(window.start * 1e9), "end": int(window.end * 1e9), "query": q, "step": step}
+    body = check_status(client.get("logs", "loki/api/v1/query_range", params).body, "logs")
+    series = parse_logs(body).series
+    times = sorted({ts for s in series for ts, _ in s.values})
+    groups: list[GroupCount] = []
+    for s in series:
+        at = {ts: json_int(v) for ts, v in s.values}
+        counts = [at.get(t, 0) for t in times]
+        groups.append(GroupCount(labels=dict(s.labels), total=sum(counts), counts=counts))
+    groups.sort(key=lambda g: -g.total)
+    value = Histogram(by=[a.strip() for a in by if a.strip()], step=step, times=times, groups=groups[:max_groups],
+                      folded=max(0, len(groups) - max_groups))
+    return Evidence(backend="logs", query=q, window=window, value=value), body
 
 
 # ── templates ────────────────────────────────────────────────────────────────────
@@ -131,20 +154,75 @@ class Templates:
 
 
 def pattern_filter(selector: str, pattern: str) -> str:
-    raise NotImplementedError("pattern_filter")
+    """`<selector> |> <패턴 리터럴>` — 백틱이 없으면 백틱 리터럴(escape 없음), 있으면 따옴표 리터럴(역슬래시 · 따옴표 escape)."""
+    if not pattern.strip():
+        raise ObsError("패턴(템플릿)이 필요하다")
+    if "`" not in pattern:
+        return "%s |> `%s`" % (selector, pattern)
+    return '%s |> "%s"' % (selector, pattern.replace("\\", "\\\\").replace('"', '\\"'))
 
 
 def parse_patterns(body: dict[str, JSON]) -> list[Pattern]:
-    raise NotImplementedError("parse_patterns")
+    """Patterns API 응답(`data: [{pattern, samples: [[ts, count]…]}]`) → Pattern 목록, 응답 순서 그대로.
+    [ts, count] 꼴이 아닌 sample 은 조용히 빼지 않고 ObsError 다 — 건수가 틀린 표보다 멈추는 편이 낫다."""
+    out: list[Pattern] = []
+    for item in json_list(body.get("data")):
+        o = json_obj(item)
+        samples: list[Sample] = []
+        for v in json_list(o.get("samples")):
+            pair = json_list(v)
+            ts, n = (pair[0], pair[1]) if len(pair) == 2 else (None, None)
+            if isinstance(ts, bool) or isinstance(n, bool) or not isinstance(ts, (int, float)) or not isinstance(n, (int, float)):
+                raise ObsError("logs 백엔드의 Patterns API 응답이 형식([ts, count])을 벗어났다: sample %r — 사람에게" % (v,))
+            samples.append(Sample(ts=float(ts), count=int(n)))
+        out.append(Pattern(pattern=json_str(o.get("pattern")), samples=samples))
+    return out
 
 
 def clusters_of(patterns: Sequence[Pattern], k: int, step: str) -> Templates:
-    raise NotImplementedError("clusters_of")
+    """Pattern → 군집 — 건수가 있는 패턴만, count 내림차순 · template 사전순으로 k 개. 넘친 건수는 other. example 은 비워 둔다."""
+    counted: list[Template] = []
+    for p in patterns:
+        hits = [x for x in p.samples if x.count > 0]
+        if hits:
+            counted.append(Template(template=p.pattern, count=sum(x.count for x in hits), ratio=0.0,
+                                    first_ts=min(x.ts for x in hits), last_ts=max(x.ts for x in hits), example=None))
+    total = sum(c.count for c in counted)
+    counted.sort(key=lambda c: (-c.count, c.template))
+    kept = [replace(c, ratio=c.count / total) for c in counted[:k]]
+    return Templates(k=k, step=step, total=total, clusters=kept, other=sum(c.count for c in counted[k:]))
+
+
+def _first_line(client: Client, query: str, window: Window) -> tuple[LogEntry | None, JSON]:
+    """창 안에서 질의에 걸리는 가장 이른 줄 — query_range forward · limit 1. 없으면 None."""
+    params: Params = {"start": int(window.start * 1e9), "end": int(window.end * 1e9), "query": query, "limit": 1, "direction": "forward"}
+    body = check_status(client.get("logs", "loki/api/v1/query_range", params).body, "logs")
+    entries = [LogEntry(ts, s.labels, line) for s in parse_logs(body).streams for ts, line in s.values]
+    return (min(entries, key=lambda e: e.ts_ns) if entries else None), body
 
 
 def templates(client: Client, selector: str, window: Window, k: int = DEFAULT_TEMPLATES_K,
               step: str | None = None) -> tuple[Evidence[Templates], JSON]:
-    raise NotImplementedError("templates")
+    """창 안의 로그 군집 상위 k — Patterns API 한 번 + 남긴 군집마다 예시 한 줄(pattern_filter · forward · limit 1)."""
+    if not selector.strip():
+        raise ObsError("LogQL selector 가 필요하다")
+    if k < 1:
+        raise ObsError("k 는 1 이상이어야 한다: %d" % k)
+    step = step or auto_step(window.seconds)
+    params: Params = {"query": selector, "start": int(window.start * 1e9), "end": int(window.end * 1e9), "step": step}
+    try:
+        resp = client.get("logs", "loki/api/v1/patterns", params)
+    except ObsError as e:
+        if "(404)" in str(e):
+            raise ObsError("logs 백엔드에 Patterns API 가 없다(404) — Loki 의 pattern_ingester 가 꺼져 있을 수 있다. 사람에게")
+        raise
+    body = check_status(resp.body, "logs")
+    t = clusters_of(parse_patterns(body), k, step)
+    clusters: list[Template] = []
+    for c in t.clusters:
+        first, _ = _first_line(client, pattern_filter(selector, c.template), window)
+        clusters.append(replace(c, example=first.line if first else None))
+    return Evidence(backend="logs", query=selector, window=window, value=replace(t, clusters=clusters)), body
 
 
 # ── around ───────────────────────────────────────────────────────────────────────
@@ -168,19 +246,45 @@ class Context:
 
     @property
     def shown(self) -> int:
-        raise NotImplementedError("Context.shown")
+        return self.before.shown + self.after.shown
 
     @property
     def truncated(self) -> bool:
-        raise NotImplementedError("Context.truncated")
+        return self.before.truncated or self.after.truncated
 
 
 def count_query(selector: str, seconds: float) -> str:
-    raise NotImplementedError("count_query")
+    """`sum(count_over_time(<selector>[<n>s]))` — 창 끝에서 평가하면 창 전체 건수."""
+    return "sum(count_over_time(%s[%ds]))" % (selector, int(round(seconds)))
+
+
+def _side(client: Client, selector: str, start: float, end: float, direction: str, limit: int) -> tuple[list[LogEntry], Side, JSON]:
+    """[start, end) 의 ts 쪽 줄 limit 개 — limit+1 개를 물어 넘치면 잘림이다. direction 이 ts 에 가까운 것부터 받게 한다."""
+    params: Params = {"start": int(start * 1e9), "end": int(end * 1e9), "query": selector, "limit": limit + 1, "direction": direction}
+    body = check_status(client.get("logs", "loki/api/v1/query_range", params).body, "logs")
+    entries = [LogEntry(ts, s.labels, line) for s in parse_logs(body).streams for ts, line in s.values]
+    entries.sort(key=lambda e: e.ts_ns, reverse=(direction == "backward"))
+    kept = entries[:limit]
+    return kept, Side(shown=len(kept), truncated=len(entries) > limit), body
 
 
 def around(client: Client, selector: str, ts: float, span: float, limit: int = DEFAULT_AROUND_LIMIT) -> tuple[Evidence[Context], JSON]:
-    raise NotImplementedError("around")
+    """ts 앞뒤 span 의 문맥 — 창 전체 건수(count 질의) + 앞(backward [ts−span, ts)) · 뒤(forward [ts, ts+span)) 각 limit 줄."""
+    if not selector.strip():
+        raise ObsError("LogQL selector 가 필요하다")
+    if span <= 0:
+        raise ObsError("span 은 0 보다 커야 한다: %g" % span)
+    if limit < 1:
+        raise ObsError("limit 은 1 이상이어야 한다: %d" % limit)
+    count_body = check_status(client.get("logs", "loki/api/v1/query", {"query": count_query(selector, 2 * span),
+                                                                       "time": int((ts + span) * 1e9)}).body, "logs")
+    total = sum(json_int(v) for s in parse_metric(count_body).series for _, v in s.values)
+    before, before_side, before_body = _side(client, selector, ts - span, ts, "backward", limit)
+    after, after_side, after_body = _side(client, selector, ts, ts + span, "forward", limit)
+    entries = sorted([*before, *after], key=lambda e: e.ts_ns)
+    value = Context(center=ts, span=span, limit=limit, total=total, before=before_side, after=after_side, entries=entries)
+    raw: JSON = {"count": count_body, "before": before_body, "after": after_body}
+    return Evidence(backend="logs", query=selector, window=Window(ts - span, ts + span), value=value), raw
 
 
 # ── first_seen ───────────────────────────────────────────────────────────────────
@@ -193,4 +297,10 @@ class FirstSeen:
 
 
 def first_seen(client: Client, selector: str, template: str, window: Window) -> tuple[Evidence[FirstSeen], JSON]:
-    raise NotImplementedError("first_seen")
+    """템플릿(패턴)에 걸리는 창 안의 첫 줄 — pattern_filter 질의를 forward · limit 1 로 한 번. 없으면 ts · line 이 None."""
+    if not selector.strip():
+        raise ObsError("LogQL selector 가 필요하다")
+    q = pattern_filter(selector, template)
+    first, body = _first_line(client, q, window)
+    value = FirstSeen(template=template, ts=first.ts_ns / 1e9 if first else None, line=first.line if first else None)
+    return Evidence(backend="logs", query=q, window=window, value=value), body

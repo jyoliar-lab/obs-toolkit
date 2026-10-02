@@ -4,14 +4,14 @@
  "calls": [
   {
    "request": {
-    "at": 1790934663.365801,
-    "at_rfc3339": "2026-10-02T09:51:03Z",
+    "at": 1790943228.36111,
+    "at_rfc3339": "2026-10-02T12:13:48Z",
     "backend": "logs",
     "path": "loki/api/v1/query",
-    "query_string": "query=sum%28count_over_time%28%7Bnamespace%3D%22careerhub-prod%22%7D%5B120s%5D%29%29&time=1790932923365801216",
+    "query_string": "query=sum%28count_over_time%28%7Bnamespace%3D%22careerhub-prod%22%7D%5B120s%5D%29%29&time=1790941488361110016",
     "params": {
      "query": "sum(count_over_time({namespace=\"careerhub-prod\"}[120s]))",
-     "time": "1790932923365801216"
+     "time": "1790941488361110016"
     }
    },
    "response": {
@@ -24,25 +24,25 @@
        {
         "metric": {},
         "value": [
-         1790932923.365,
-         "1833"
+         1790941488.361,
+         "1823"
         ]
        }
       ],
       "stats": {
        "summary": {
-        "bytesProcessedPerSecond": 88394671,
-        "linesProcessedPerSecond": 212191,
-        "totalBytesProcessed": 1279735,
-        "totalLinesProcessed": 3072,
-        "execTime": 0.014477513,
-        "queueTime": 0.000120222,
+        "bytesProcessedPerSecond": 103092740,
+        "linesProcessedPerSecond": 248357,
+        "totalBytesProcessed": 1322501,
+        "totalLinesProcessed": 3186,
+        "execTime": 0.012828265,
+        "queueTime": 0.000135092,
         "subqueries": 0,
         "totalEntriesReturned": 1,
         "splits": 0,
         "shards": 1,
-        "totalPostFilterLines": 3072,
-        "totalStructuredMetadataBytesProcessed": 92050
+        "totalPostFilterLines": 3186,
+        "totalStructuredMetadataBytesProcessed": 95580
        },
        "querier": {
         "store": {
@@ -84,27 +84,27 @@
        },
        "ingester": {
         "totalReached": 1,
-        "totalChunksMatched": 5,
+        "totalChunksMatched": 6,
         "totalBatches": 5,
-        "totalLinesSent": 1833,
+        "totalLinesSent": 1823,
         "store": {
          "totalChunksRef": 3,
          "totalChunksDownloaded": 3,
-         "chunksDownloadTime": 446498,
+         "chunksDownloadTime": 291684,
          "queryReferencedStructuredMetadata": false,
          "queryUsedV2Engine": false,
          "chunk": {
-          "headChunkBytes": 2460,
-          "headChunkLines": 5,
-          "decompressedBytes": 1277275,
-          "decompressedLines": 3067,
-          "compressedBytes": 173381,
-          "totalDuplicates": 0,
-          "postFilterLines": 3072,
-          "headChunkStructuredMetadataBytes": 40,
-          "decompressedStructuredMetadataBytes": 92010
+          "headChunkBytes": 0,
+          "headChunkLines": 0,
+          "decompressedBytes": 1322501,
+          "decompressedLines": 3186,
+          "compressedBytes": 143458,
+          "totalDuplicates": 1,
+          "postFilterLines": 3186,
+          "headChunkStructuredMetadataBytes": 0,
+          "decompressedStructuredMetadataBytes": 95580
          },
-         "chunkRefsFetchTime": 228518,
+         "chunkRefsFetchTime": 321092,
          "congestionControlLatency": 0,
          "pipelineWrapperFilteredLines": 0,
          "dataobj": {
@@ -159,10 +159,10 @@
          "entriesFound": 1,
          "entriesRequested": 1,
          "entriesStored": 0,
-         "bytesReceived": 210,
+         "bytesReceived": 346,
          "bytesSent": 0,
          "requests": 1,
-         "downloadTime": 10259,
+         "downloadTime": 8851,
          "queryLengthServed": 120000000000
         },
         "volumeResult": {
@@ -219,16 +219,16 @@
   },
   {
    "request": {
-    "at": 1790934663.365801,
-    "at_rfc3339": "2026-10-02T09:51:03Z",
+    "at": 1790943228.36111,
+    "at_rfc3339": "2026-10-02T12:13:48Z",
     "backend": "logs",
     "path": "loki/api/v1/query_range",
-    "query_string": "start=1790932803365801216&end=1790932863365801216&query=%7Bnamespace%3D%22careerhub-prod%22%7D&limit=20&direction=backward",
+    "query_string": "start=1790941368361110016&end=1790941428361110016&query=%7Bnamespace%3D%22careerhub-prod%22%7D&limit=21&direction=backward",
     "params": {
-     "start": "1790932803365801216",
-     "end": "1790932863365801216",
+     "start": "1790941368361110016",
+     "end": "1790941428361110016",
      "query": "{namespace=\"careerhub-prod\"}",
-     "limit": "20",
+     "limit": "21",
      "direction": "backward"
     }
    },
@@ -245,6 +245,37 @@
          "container": "mongod",
          "detected_level": "unknown",
          "env": "prod",
+         "instance": "careerhub-prod/careerhub-mongodb-0:mongod",
+         "job": "loki.source.kubernetes.pod_logs",
+         "namespace": "careerhub-prod",
+         "pod": "careerhub-mongodb-0",
+         "service_name": "careerhub-mongodb-svc"
+        },
+        "values": [
+         [
+          "1790941428311947163",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.311+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":5286306, \"ctx\":\"conn1073404\",\"msg\":\"Successfully authenticated\",\"attr\":{\"client\":\"10.244.7.188:42052\",\"isSpeculative\":true,\"isClusterMember\":false,\"mechanism\":\"SCRAM-SHA-256\",\"user\":\"posting-app\",\"db\":\"posting\",\"result\":0,\"metrics\":{\"conversation_duration\":{\"micros\":1392,\"summary\":{\"0\":{\"step\":1,\"step_total\":2,\"duration_micros\":53},\"1\":{\"step\":2,\"step_total\":2,\"duration_micros\":14}}}},\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}},\"extraInfo\":{}}}\n"
+         ],
+         [
+          "1790941428311777718",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.311+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":5286306, \"ctx\":\"conn1073403\",\"msg\":\"Successfully authenticated\",\"attr\":{\"client\":\"10.244.7.188:42040\",\"isSpeculative\":true,\"isClusterMember\":false,\"mechanism\":\"SCRAM-SHA-256\",\"user\":\"posting-app\",\"db\":\"posting\",\"result\":0,\"metrics\":{\"conversation_duration\":{\"micros\":1316,\"summary\":{\"0\":{\"step\":1,\"step_total\":2,\"duration_micros\":56},\"1\":{\"step\":2,\"step_total\":2,\"duration_micros\":18}}}},\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}},\"extraInfo\":{}}}\n"
+         ],
+         [
+          "1790941428310553455",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.310+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":6788604, \"ctx\":\"conn1073404\",\"msg\":\"Auth metrics report\",\"attr\":{\"metric\":\"acquireUser\",\"micros\":0}}\n"
+         ],
+         [
+          "1790941428310475603",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.310+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":51800,   \"ctx\":\"conn1073404\",\"msg\":\"client metadata\",\"attr\":{\"remote\":\"10.244.7.188:42052\",\"client\":\"conn1073404\",\"negotiatedCompressors\":[],\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}}}}\n"
+         ]
+        ]
+       },
+       {
+        "stream": {
+         "app": "careerhub-mongodb-svc",
+         "container": "mongod",
+         "detected_level": "unknown",
+         "env": "prod",
          "instance": "careerhub-prod/careerhub-mongodb-1:mongod",
          "job": "loki.source.kubernetes.pod_logs",
          "namespace": "careerhub-prod",
@@ -253,130 +284,105 @@
         },
         "values": [
          [
-          "1790932859598810076",
-          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.598+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":5286306, \"ctx\":\"conn1457842\",\"msg\":\"Successfully authenticated\",\"attr\":{\"client\":\"10.244.8.47:57390\",\"isSpeculative\":true,\"isClusterMember\":false,\"mechanism\":\"SCRAM-SHA-256\",\"user\":\"review-app\",\"db\":\"review\",\"result\":0,\"metrics\":{\"conversation_duration\":{\"micros\":1050,\"summary\":{\"0\":{\"step\":1,\"step_total\":2,\"duration_micros\":97},\"1\":{\"step\":2,\"step_total\":2,\"duration_micros\":23}}}},\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}},\"extraInfo\":{}}}\n"
+          "1790941428311895251",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.311+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":5286306, \"ctx\":\"conn1465623\",\"msg\":\"Successfully authenticated\",\"attr\":{\"client\":\"10.244.7.188:33758\",\"isSpeculative\":true,\"isClusterMember\":false,\"mechanism\":\"SCRAM-SHA-256\",\"user\":\"posting-app\",\"db\":\"posting\",\"result\":0,\"metrics\":{\"conversation_duration\":{\"micros\":1482,\"summary\":{\"0\":{\"step\":1,\"step_total\":2,\"duration_micros\":55},\"1\":{\"step\":2,\"step_total\":2,\"duration_micros\":16}}}},\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}},\"extraInfo\":{}}}\n"
          ],
          [
-          "1790932859597728536",
-          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.597+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":6788604, \"ctx\":\"conn1457842\",\"msg\":\"Auth metrics report\",\"attr\":{\"metric\":\"acquireUser\",\"micros\":0}}\n"
-         ],
-         [
-          "1790932859597443794",
-          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.597+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":51800,   \"ctx\":\"conn1457842\",\"msg\":\"client metadata\",\"attr\":{\"remote\":\"10.244.8.47:57390\",\"client\":\"conn1457842\",\"negotiatedCompressors\":[],\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}}}}\n"
-         ],
-         [
-          "1790932859597088349",
-          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.596+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22943,   \"ctx\":\"listener\",\"msg\":\"Connection accepted\",\"attr\":{\"remote\":\"10.244.8.47:57390\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"906af8af-a1eb-42b6-8758-e51cd9ace0a8\"}},\"connectionId\":1457842,\"connectionCount\":57}}\n"
-         ],
-         [
-          "1790932859595326844",
-          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.595+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":5286306, \"ctx\":\"conn1457841\",\"msg\":\"Successfully authenticated\",\"attr\":{\"client\":\"10.244.8.47:57378\",\"isSpeculative\":true,\"isClusterMember\":false,\"mechanism\":\"SCRAM-SHA-256\",\"user\":\"review-app\",\"db\":\"review\",\"result\":0,\"metrics\":{\"conversation_duration\":{\"micros\":1008,\"summary\":{\"0\":{\"step\":1,\"step_total\":2,\"duration_micros\":229},\"1\":{\"step\":2,\"step_total\":2,\"duration_micros\":21}}}},\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}},\"extraInfo\":{}}}\n"
-         ],
-         [
-          "1790932859594810009",
-          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.594+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":5286306, \"ctx\":\"conn1457840\",\"msg\":\"Successfully authenticated\",\"attr\":{\"client\":\"10.244.8.47:57376\",\"isSpeculative\":true,\"isClusterMember\":false,\"mechanism\":\"SCRAM-SHA-256\",\"user\":\"review-app\",\"db\":\"review\",\"result\":0,\"metrics\":{\"conversation_duration\":{\"micros\":1116,\"summary\":{\"0\":{\"step\":1,\"step_total\":2,\"duration_micros\":126},\"1\":{\"step\":2,\"step_total\":2,\"duration_micros\":20}}}},\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}},\"extraInfo\":{}}}\n"
-         ],
-         [
-          "1790932859594405452",
-          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.594+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":6788604, \"ctx\":\"conn1457841\",\"msg\":\"Auth metrics report\",\"attr\":{\"metric\":\"acquireUser\",\"micros\":0}}\n"
-         ],
-         [
-          "1790932859594061988",
-          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.593+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":51800,   \"ctx\":\"conn1457841\",\"msg\":\"client metadata\",\"attr\":{\"remote\":\"10.244.8.47:57378\",\"client\":\"conn1457841\",\"negotiatedCompressors\":[],\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}}}}\n"
-         ],
-         [
-          "1790932859593670895",
-          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.593+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":6788604, \"ctx\":\"conn1457840\",\"msg\":\"Auth metrics report\",\"attr\":{\"metric\":\"acquireUser\",\"micros\":0}}\n"
-         ],
-         [
-          "1790932859593551431",
-          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.593+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22943,   \"ctx\":\"listener\",\"msg\":\"Connection accepted\",\"attr\":{\"remote\":\"10.244.8.47:57378\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"461a374a-5753-4a5d-a066-1c01ecc00566\"}},\"connectionId\":1457841,\"connectionCount\":56}}\n"
-         ],
-         [
-          "1790932859593551431",
-          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.593+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":51800,   \"ctx\":\"conn1457840\",\"msg\":\"client metadata\",\"attr\":{\"remote\":\"10.244.8.47:57376\",\"client\":\"conn1457840\",\"negotiatedCompressors\":[],\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}}}}\n"
-         ],
-         [
-          "1790932859593221986",
-          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.593+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22943,   \"ctx\":\"listener\",\"msg\":\"Connection accepted\",\"attr\":{\"remote\":\"10.244.8.47:57376\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"878dec4e-589f-4089-8e08-dfadd1b86ad6\"}},\"connectionId\":1457840,\"connectionCount\":55}}\n"
-         ],
-         [
-          "1790932859591933834",
-          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.591+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22944,   \"ctx\":\"conn1457814\",\"msg\":\"Connection ended\",\"attr\":{\"remote\":\"10.244.8.47:37658\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"896ec101-1114-4378-a6ce-ddeb085340e6\"}},\"connectionId\":1457814,\"connectionCount\":54}}\n"
-         ],
-         [
-          "1790932859591933834",
-          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.591+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22944,   \"ctx\":\"conn1457812\",\"msg\":\"Connection ended\",\"attr\":{\"remote\":\"10.244.8.47:37650\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"5c402bf3-d43a-4568-a373-485ba11c63d5\"}},\"connectionId\":1457812,\"connectionCount\":55}}\n"
-         ],
-         [
-          "1790932859591761019",
-          "{\"t\":{\"$date\":\"2026-10-02T09:20:59.591+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22944,   \"ctx\":\"conn1457813\",\"msg\":\"Connection ended\",\"attr\":{\"remote\":\"10.244.8.47:37654\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"4acf7162-22dd-41ae-b6e1-1ab0615e771a\"}},\"connectionId\":1457813,\"connectionCount\":56}}\n"
+          "1790941428311658250",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.311+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":5286306, \"ctx\":\"conn1465622\",\"msg\":\"Successfully authenticated\",\"attr\":{\"client\":\"10.244.7.188:33752\",\"isSpeculative\":true,\"isClusterMember\":false,\"mechanism\":\"SCRAM-SHA-256\",\"user\":\"posting-app\",\"db\":\"posting\",\"result\":0,\"metrics\":{\"conversation_duration\":{\"micros\":1360,\"summary\":{\"0\":{\"step\":1,\"step_total\":2,\"duration_micros\":50},\"1\":{\"step\":2,\"step_total\":2,\"duration_micros\":20}}}},\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}},\"extraInfo\":{}}}\n"
          ]
         ]
        },
        {
         "stream": {
-         "container": "zitadel",
-         "detected_level": "info",
+         "app": "careerhub-mongodb-svc",
+         "container": "mongod",
+         "detected_level": "unknown",
          "env": "prod",
-         "instance": "careerhub-prod/zitadel-f65b884bd-jm9zg:zitadel",
+         "instance": "careerhub-prod/careerhub-mongodb-arb-0:mongod",
          "job": "loki.source.kubernetes.pod_logs",
          "namespace": "careerhub-prod",
-         "pod": "zitadel-f65b884bd-jm9zg",
-         "service_name": "zitadel"
+         "pod": "careerhub-mongodb-arb-0",
+         "service_name": "careerhub-mongodb-svc"
         },
         "values": [
          [
-          "1790932859675001123",
-          "time=2026-10-02T09:20:59.674Z level=INFO msg=\"request served\" request.id=davneupcm36s73dvkcu0 request.instance_host=id.careerhub.jyo-liar.com request.public_host=id.careerhub.jyo-liar.com request.instance_id=385772681082964180 request.user_id=login-client TraceID=b7148f32fccfb9957807ac4d82cc2629 SpanID=4a230dd7e55ca492 stream=request version=v4.15.3 protocol=connect service=zitadel.settings.v2.SettingsService http_method=POST path=/zitadel.settings.v2.SettingsService/GetGeneralSettings code=code_0 duration=3.042246ms\n"
+          "1790941428317097716",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.317+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":5286307, \"ctx\":\"conn4901075\",\"msg\":\"Failed to authenticate\",\"attr\":{\"client\":\"10.244.7.188:60712\",\"isSpeculative\":true,\"isClusterMember\":false,\"mechanism\":\"SCRAM-SHA-256\",\"user\":\"posting-app\",\"db\":\"posting\",\"error\":\"UserNotFound: Could not find user \\\"posting-app\\\" for db \\\"posting\\\"\",\"result\":11,\"metrics\":{\"conversation_duration\":{\"micros\":247,\"summary\":{\"0\":{\"step\":1,\"step_total\":2,\"duration_micros\":216}}}},\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}},\"extraInfo\":{}}}\n"
          ],
          [
-          "1790932859674879272",
-          "time=\"2026-10-02T09:20:59Z\" level=info msg=activity caller=\"/home/runner/work/zitadel/zitadel/internal/activity/activity.go:105\" domain=\"https://id.careerhub.jyo-liar.com\" grpcStatus=0 httpStatus=200 instance=385772681082964180 isSystemUser=true method=/zitadel.settings.v2.SettingsService/GetGeneralSettings org= path= requestMethod= trigger=resourceAPI user=login-client\n"
-         ]
-        ]
-       },
-       {
-        "stream": {
-         "container": "zitadel",
-         "detected_level": "warn",
-         "env": "prod",
-         "instance": "careerhub-prod/zitadel-f65b884bd-jm9zg:zitadel",
-         "job": "loki.source.kubernetes.pod_logs",
-         "namespace": "careerhub-prod",
-         "pod": "zitadel-f65b884bd-jm9zg",
-         "service_name": "zitadel"
-        },
-        "values": [
-         [
-          "1790932859674647236",
-          "time=\"2026-10-02T09:20:59Z\" level=warning msg=\"authz: verify access token\" caller=\"/home/runner/work/zitadel/zitadel/internal/api/authz/context.go:114\" error=\"ID=APP-Reb32 Message=invalid token\" org_domain= org_id=\n"
+          "1790941428316822458",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.316+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":6788604, \"ctx\":\"conn4901075\",\"msg\":\"Auth metrics report\",\"attr\":{\"metric\":\"acquireUser\",\"micros\":0}}\n"
          ],
          [
-          "1790932859674647236",
-          "time=\"2026-10-02T09:20:59Z\" level=warning msg=\"token verifier repo: verify JWT access token\" caller=\"/home/runner/work/zitadel/zitadel/internal/authz/repository/eventsourcing/eventstore/token_verifier.go:314\" error=\"issuer does not match: Expected: https://id.careerhub.jyo-liar.com, got: login-client\"\n"
+          "1790941428316783755",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.316+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":20251,   \"ctx\":\"conn4901075\",\"msg\":\"Supported SASL mechanisms requested for unknown user\",\"attr\":{\"user\":{\"user\":\"posting-app\",\"db\":\"posting\"}}}\n"
          ],
          [
-          "1790932859674647236",
-          "time=\"2026-10-02T09:20:59Z\" level=warning msg=\"token verifier repo: decrypt access token\" caller=\"/home/runner/work/zitadel/zitadel/internal/authz/repository/eventsourcing/eventstore/token_verifier.go:310\" error=\"ID=CRYPT-ha6Oh Message=malformed encrypted value Parent=(go-jose/go-jose: compact JWE format must have five parts)\\nID=CRYPT-Eep6o Message=malformed encrypted value Parent=(illegal base64 data at input byte 20)\"\n"
+          "1790941428316199369",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.316+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":51800,   \"ctx\":\"conn4901075\",\"msg\":\"client metadata\",\"attr\":{\"remote\":\"10.244.7.188:60712\",\"client\":\"conn4901075\",\"negotiatedCompressors\":[],\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}}}}\n"
+         ],
+         [
+          "1790941428316052777",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.315+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22943,   \"ctx\":\"listener\",\"msg\":\"Connection accepted\",\"attr\":{\"remote\":\"10.244.7.188:60712\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"b9c818f9-a338-4c6c-9972-bb6e5d5d6934\"}},\"connectionId\":4901075,\"connectionCount\":54}}\n"
+         ],
+         [
+          "1790941428313137183",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.313+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":5286307, \"ctx\":\"conn4901073\",\"msg\":\"Failed to authenticate\",\"attr\":{\"client\":\"10.244.7.188:60698\",\"isSpeculative\":true,\"isClusterMember\":false,\"mechanism\":\"SCRAM-SHA-256\",\"user\":\"posting-app\",\"db\":\"posting\",\"error\":\"UserNotFound: Could not find user \\\"posting-app\\\" for db \\\"posting\\\"\",\"result\":11,\"metrics\":{\"conversation_duration\":{\"micros\":904,\"summary\":{\"0\":{\"step\":1,\"step_total\":2,\"duration_micros\":858}}}},\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}},\"extraInfo\":{}}}\n"
+         ],
+         [
+          "1790941428313077942",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.313+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":5286307, \"ctx\":\"conn4901074\",\"msg\":\"Failed to authenticate\",\"attr\":{\"client\":\"10.244.7.188:60706\",\"isSpeculative\":true,\"isClusterMember\":false,\"mechanism\":\"SCRAM-SHA-256\",\"user\":\"posting-app\",\"db\":\"posting\",\"error\":\"UserNotFound: Could not find user \\\"posting-app\\\" for db \\\"posting\\\"\",\"result\":11,\"metrics\":{\"conversation_duration\":{\"micros\":809,\"summary\":{\"0\":{\"step\":1,\"step_total\":2,\"duration_micros\":732}}}},\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}},\"extraInfo\":{}}}\n"
+         ],
+         [
+          "1790941428312278854",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.312+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":6788604, \"ctx\":\"conn4901074\",\"msg\":\"Auth metrics report\",\"attr\":{\"metric\":\"acquireUser\",\"micros\":0}}\n"
+         ],
+         [
+          "1790941428312195651",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.312+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":20251,   \"ctx\":\"conn4901074\",\"msg\":\"Supported SASL mechanisms requested for unknown user\",\"attr\":{\"user\":{\"user\":\"posting-app\",\"db\":\"posting\"}}}\n"
+         ],
+         [
+          "1790941428312158929",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.312+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":6788604, \"ctx\":\"conn4901073\",\"msg\":\"Auth metrics report\",\"attr\":{\"metric\":\"acquireUser\",\"micros\":0}}\n"
+         ],
+         [
+          "1790941428312158929",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.312+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":20251,   \"ctx\":\"conn4901073\",\"msg\":\"Supported SASL mechanisms requested for unknown user\",\"attr\":{\"user\":{\"user\":\"posting-app\",\"db\":\"posting\"}}}\n"
+         ],
+         [
+          "1790941428311196675",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.311+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":51800,   \"ctx\":\"conn4901074\",\"msg\":\"client metadata\",\"attr\":{\"remote\":\"10.244.7.188:60706\",\"client\":\"conn4901074\",\"negotiatedCompressors\":[],\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}}}}\n"
+         ],
+         [
+          "1790941428311140823",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.311+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":51800,   \"ctx\":\"conn4901073\",\"msg\":\"client metadata\",\"attr\":{\"remote\":\"10.244.7.188:60698\",\"client\":\"conn4901073\",\"negotiatedCompressors\":[],\"doc\":{\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"2.5.0\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.25.13\",\"env\":{\"container\":{\"orchestrator\":\"kubernetes\"}}}}}\n"
+         ],
+         [
+          "1790941428311090361",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.310+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22943,   \"ctx\":\"listener\",\"msg\":\"Connection accepted\",\"attr\":{\"remote\":\"10.244.7.188:60706\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"7a3f9bc2-9ae6-4c8c-b2bf-d0c29fb36fea\"}},\"connectionId\":4901074,\"connectionCount\":53}}\n"
+         ],
+         [
+          "1790941428311090361",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.310+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22943,   \"ctx\":\"listener\",\"msg\":\"Connection accepted\",\"attr\":{\"remote\":\"10.244.7.188:60698\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"716d92ba-d653-4156-92af-7438e2d8a67b\"}},\"connectionId\":4901073,\"connectionCount\":52}}\n"
          ]
         ]
        }
       ],
       "stats": {
        "summary": {
-        "bytesProcessedPerSecond": 75379317,
-        "linesProcessedPerSecond": 180219,
-        "totalBytesProcessed": 898011,
-        "totalLinesProcessed": 2147,
-        "execTime": 0.011913,
-        "queueTime": 0.000115,
+        "bytesProcessedPerSecond": 49070783,
+        "linesProcessedPerSecond": 116132,
+        "totalBytesProcessed": 651135,
+        "totalLinesProcessed": 1541,
+        "execTime": 0.013269,
+        "queueTime": 0.000393,
         "subqueries": 0,
-        "totalEntriesReturned": 20,
+        "totalEntriesReturned": 21,
         "splits": 0,
         "shards": 1,
-        "totalPostFilterLines": 2147,
-        "totalStructuredMetadataBytesProcessed": 64300
+        "totalPostFilterLines": 1541,
+        "totalStructuredMetadataBytesProcessed": 46230
        },
        "querier": {
         "store": {
@@ -418,27 +424,27 @@
        },
        "ingester": {
         "totalReached": 1,
-        "totalChunksMatched": 5,
+        "totalChunksMatched": 6,
         "totalBatches": 1,
-        "totalLinesSent": 20,
+        "totalLinesSent": 21,
         "store": {
          "totalChunksRef": 3,
          "totalChunksDownloaded": 3,
-         "chunksDownloadTime": 457016,
+         "chunksDownloadTime": 357239,
          "queryReferencedStructuredMetadata": false,
          "queryUsedV2Engine": false,
          "chunk": {
-          "headChunkBytes": 2460,
-          "headChunkLines": 5,
-          "decompressedBytes": 895551,
-          "decompressedLines": 2142,
-          "compressedBytes": 96798,
+          "headChunkBytes": 0,
+          "headChunkLines": 0,
+          "decompressedBytes": 651135,
+          "decompressedLines": 1541,
+          "compressedBytes": 123523,
           "totalDuplicates": 0,
-          "postFilterLines": 2147,
-          "headChunkStructuredMetadataBytes": 40,
-          "decompressedStructuredMetadataBytes": 64260
+          "postFilterLines": 1541,
+          "headChunkStructuredMetadataBytes": 0,
+          "decompressedStructuredMetadataBytes": 46230
          },
-         "chunkRefsFetchTime": 314739,
+         "chunkRefsFetchTime": 425832,
          "congestionControlLatency": 0,
          "pipelineWrapperFilteredLines": 0,
          "dataobj": {
@@ -493,10 +499,10 @@
          "entriesFound": 1,
          "entriesRequested": 1,
          "entriesStored": 0,
-         "bytesReceived": 210,
+         "bytesReceived": 346,
          "bytesSent": 0,
          "requests": 1,
-         "downloadTime": 10314,
+         "downloadTime": 8852,
          "queryLengthServed": 90000000000
         },
         "volumeResult": {
@@ -553,16 +559,16 @@
   },
   {
    "request": {
-    "at": 1790934663.365801,
-    "at_rfc3339": "2026-10-02T09:51:03Z",
+    "at": 1790943228.36111,
+    "at_rfc3339": "2026-10-02T12:13:48Z",
     "backend": "logs",
     "path": "loki/api/v1/query_range",
-    "query_string": "start=1790932863365801216&end=1790932923365801216&query=%7Bnamespace%3D%22careerhub-prod%22%7D&limit=20&direction=forward",
+    "query_string": "start=1790941428361110016&end=1790941488361110016&query=%7Bnamespace%3D%22careerhub-prod%22%7D&limit=21&direction=forward",
     "params": {
-     "start": "1790932863365801216",
-     "end": "1790932923365801216",
+     "start": "1790941428361110016",
+     "end": "1790941488361110016",
      "query": "{namespace=\"careerhub-prod\"}",
-     "limit": "20",
+     "limit": "21",
      "direction": "forward"
     }
    },
@@ -579,6 +585,81 @@
          "container": "mongod",
          "detected_level": "unknown",
          "env": "prod",
+         "instance": "careerhub-prod/careerhub-mongodb-0:mongod",
+         "job": "loki.source.kubernetes.pod_logs",
+         "namespace": "careerhub-prod",
+         "pod": "careerhub-mongodb-0",
+         "service_name": "careerhub-mongodb-svc"
+        },
+        "values": [
+         [
+          "1790941428419747051",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.419+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22943,   \"ctx\":\"listener\",\"msg\":\"Connection accepted\",\"attr\":{\"remote\":\"10.244.5.211:51930\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"0a69a5c9-f2e3-4cce-8a86-8e92b393dff9\"}},\"connectionId\":1073405,\"connectionCount\":61}}\n"
+         ],
+         [
+          "1790941428419929793",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.419+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22943,   \"ctx\":\"listener\",\"msg\":\"Connection accepted\",\"attr\":{\"remote\":\"10.244.5.211:51932\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"2bde452c-3ed2-4a79-af25-19e752aaaa43\"}},\"connectionId\":1073406,\"connectionCount\":62}}\n"
+         ],
+         [
+          "1790941428420046756",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.419+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":51800,   \"ctx\":\"conn1073405\",\"msg\":\"client metadata\",\"attr\":{\"remote\":\"10.244.5.211:51930\",\"client\":\"conn1073405\",\"negotiatedCompressors\":[],\"doc\":{\"application\":{\"name\":\"MongoDB Automation Agent v108.0.2.8729 (git: ec1573c1fd5d7da3acab288d628b9e9eaaec6b2b)\"},\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"v1.12.0-cloud\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.22.9\"}}}\n"
+         ],
+         [
+          "1790941428420104701",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.420+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":10483900,\"ctx\":\"conn1073405\",\"msg\":\"Connection not authenticating\",\"attr\":{\"client\":\"10.244.5.211:51930\",\"doc\":{\"application\":{\"name\":\"MongoDB Automation Agent v108.0.2.8729 (git: ec1573c1fd5d7da3acab288d628b9e9eaaec6b2b)\"},\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"v1.12.0-cloud\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.22.9\"}}}\n"
+         ],
+         [
+          "1790941428420261664",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.420+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":51800,   \"ctx\":\"conn1073406\",\"msg\":\"client metadata\",\"attr\":{\"remote\":\"10.244.5.211:51932\",\"client\":\"conn1073406\",\"negotiatedCompressors\":[],\"doc\":{\"application\":{\"name\":\"MongoDB Automation Agent v108.0.2.8729 (git: ec1573c1fd5d7da3acab288d628b9e9eaaec6b2b)\"},\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"v1.12.0-cloud\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.22.9\"}}}\n"
+         ],
+         [
+          "1790941428420328275",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.420+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":10483900,\"ctx\":\"conn1073406\",\"msg\":\"Connection not authenticating\",\"attr\":{\"client\":\"10.244.5.211:51932\",\"doc\":{\"application\":{\"name\":\"MongoDB Automation Agent v108.0.2.8729 (git: ec1573c1fd5d7da3acab288d628b9e9eaaec6b2b)\"},\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"v1.12.0-cloud\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.22.9\"}}}\n"
+         ],
+         [
+          "1790941428422231170",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.421+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22943,   \"ctx\":\"listener\",\"msg\":\"Connection accepted\",\"attr\":{\"remote\":\"10.244.5.211:51950\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"9c2277d1-abbf-400b-9d92-6e52b0b3c865\"}},\"connectionId\":1073407,\"connectionCount\":63}}\n"
+         ],
+         [
+          "1790941428422427949",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.422+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":51800,   \"ctx\":\"conn1073407\",\"msg\":\"client metadata\",\"attr\":{\"remote\":\"10.244.5.211:51950\",\"client\":\"conn1073407\",\"negotiatedCompressors\":[],\"doc\":{\"application\":{\"name\":\"MongoDB Automation Agent v108.0.2.8729 (git: ec1573c1fd5d7da3acab288d628b9e9eaaec6b2b)\"},\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"v1.12.0-cloud\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.22.9\"}}}\n"
+         ],
+         [
+          "1790941428422506078",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.422+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":6788604, \"ctx\":\"conn1073407\",\"msg\":\"Auth metrics report\",\"attr\":{\"metric\":\"acquireUser\",\"micros\":0}}\n"
+         ],
+         [
+          "1790941428429661749",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.429+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":5286306, \"ctx\":\"conn1073407\",\"msg\":\"Successfully authenticated\",\"attr\":{\"client\":\"10.244.5.211:51950\",\"isSpeculative\":true,\"isClusterMember\":true,\"mechanism\":\"SCRAM-SHA-256\",\"user\":\"__system\",\"db\":\"local\",\"result\":0,\"metrics\":{\"conversation_duration\":{\"micros\":7113,\"summary\":{\"0\":{\"step\":1,\"step_total\":2,\"duration_micros\":53},\"1\":{\"step\":2,\"step_total\":2,\"duration_micros\":19}}}},\"doc\":{\"application\":{\"name\":\"MongoDB Automation Agent v108.0.2.8729 (git: ec1573c1fd5d7da3acab288d628b9e9eaaec6b2b)\"},\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"v1.12.0-cloud\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.22.9\"},\"extraInfo\":{}}}\n"
+         ],
+         [
+          "1790941428430343695",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.430+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":6788700, \"ctx\":\"conn1073407\",\"msg\":\"Received first command on ingress connection since session start or auth handshake\",\"attr\":{\"elapsedMillis\":0}}\n"
+         ],
+         [
+          "1790941428430742863",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.430+00:00\"},\"s\":\"I\",  \"c\":\"-\",        \"id\":20883,   \"ctx\":\"conn1073406\",\"msg\":\"Interrupted operation as its client disconnected\",\"attr\":{\"opId\":1162857473}}\n"
+         ],
+         [
+          "1790941428430821734",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.430+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22944,   \"ctx\":\"conn1073405\",\"msg\":\"Connection ended\",\"attr\":{\"remote\":\"10.244.5.211:51930\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"0a69a5c9-f2e3-4cce-8a86-8e92b393dff9\"}},\"connectionId\":1073405,\"connectionCount\":62}}\n"
+         ],
+         [
+          "1790941428432164331",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.432+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22944,   \"ctx\":\"conn1073407\",\"msg\":\"Connection ended\",\"attr\":{\"remote\":\"10.244.5.211:51950\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"9c2277d1-abbf-400b-9d92-6e52b0b3c865\"}},\"connectionId\":1073407,\"connectionCount\":61}}\n"
+         ],
+         [
+          "1790941428433166519",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:48.432+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22944,   \"ctx\":\"conn1073406\",\"msg\":\"Connection ended\",\"attr\":{\"remote\":\"10.244.5.211:51932\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"2bde452c-3ed2-4a79-af25-19e752aaaa43\"}},\"connectionId\":1073406,\"connectionCount\":60}}\n"
+         ]
+        ]
+       },
+       {
+        "stream": {
+         "app": "careerhub-mongodb-svc",
+         "container": "mongod",
+         "detected_level": "unknown",
+         "env": "prod",
          "instance": "careerhub-prod/careerhub-mongodb-1:mongod",
          "job": "loki.source.kubernetes.pod_logs",
          "namespace": "careerhub-prod",
@@ -587,130 +668,46 @@
         },
         "values": [
          [
-          "1790932863598240369",
-          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.598+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22943,   \"ctx\":\"listener\",\"msg\":\"Connection accepted\",\"attr\":{\"remote\":\"10.244.4.109:55968\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"7e85d974-362e-4fbc-b7cb-d2e66884c5cf\"}},\"connectionId\":1457843,\"connectionCount\":58}}\n"
+          "1790941429126164062",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:49.126+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22943,   \"ctx\":\"listener\",\"msg\":\"Connection accepted\",\"attr\":{\"remote\":\"10.244.4.109:46610\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"57ca19df-1b74-49f6-8b77-7b863411a8c5\"}},\"connectionId\":1465624,\"connectionCount\":57}}\n"
          ],
          [
-          "1790932863598365758",
-          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.598+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22943,   \"ctx\":\"listener\",\"msg\":\"Connection accepted\",\"attr\":{\"remote\":\"10.244.4.109:55970\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"68da44d7-d4b4-4fb8-a70d-4c442b6db603\"}},\"connectionId\":1457844,\"connectionCount\":59}}\n"
+          "1790941429126628101",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:49.126+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":51800,   \"ctx\":\"conn1465624\",\"msg\":\"client metadata\",\"attr\":{\"remote\":\"10.244.4.109:46610\",\"client\":\"conn1465624\",\"negotiatedCompressors\":[],\"doc\":{\"application\":{\"name\":\"MongoDB Automation Agent v108.0.2.8729 (git: ec1573c1fd5d7da3acab288d628b9e9eaaec6b2b)\"},\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"v1.12.0-cloud\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.22.9\"}}}\n"
          ],
          [
-          "1790932863598647370",
-          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.598+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":51800,   \"ctx\":\"conn1457844\",\"msg\":\"client metadata\",\"attr\":{\"remote\":\"10.244.4.109:55970\",\"client\":\"conn1457844\",\"negotiatedCompressors\":[],\"doc\":{\"application\":{\"name\":\"MongoDB Automation Agent v108.0.2.8729 (git: ec1573c1fd5d7da3acab288d628b9e9eaaec6b2b)\"},\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"v1.12.0-cloud\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.22.9\"}}}\n"
+          "1790941429126667175",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:49.126+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22943,   \"ctx\":\"listener\",\"msg\":\"Connection accepted\",\"attr\":{\"remote\":\"10.244.4.109:46618\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"064548ea-4afb-4610-8371-59980e5e1623\"}},\"connectionId\":1465625,\"connectionCount\":58}}\n"
          ],
          [
-          "1790932863598647370",
-          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.598+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":51800,   \"ctx\":\"conn1457843\",\"msg\":\"client metadata\",\"attr\":{\"remote\":\"10.244.4.109:55968\",\"client\":\"conn1457843\",\"negotiatedCompressors\":[],\"doc\":{\"application\":{\"name\":\"MongoDB Automation Agent v108.0.2.8729 (git: ec1573c1fd5d7da3acab288d628b9e9eaaec6b2b)\"},\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"v1.12.0-cloud\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.22.9\"}}}\n"
+          "1790941429126832379",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:49.126+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":10483900,\"ctx\":\"conn1465624\",\"msg\":\"Connection not authenticating\",\"attr\":{\"client\":\"10.244.4.109:46610\",\"doc\":{\"application\":{\"name\":\"MongoDB Automation Agent v108.0.2.8729 (git: ec1573c1fd5d7da3acab288d628b9e9eaaec6b2b)\"},\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"v1.12.0-cloud\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.22.9\"}}}\n"
          ],
          [
-          "1790932863599053742",
-          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.598+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":10483900,\"ctx\":\"conn1457844\",\"msg\":\"Connection not authenticating\",\"attr\":{\"client\":\"10.244.4.109:55970\",\"doc\":{\"application\":{\"name\":\"MongoDB Automation Agent v108.0.2.8729 (git: ec1573c1fd5d7da3acab288d628b9e9eaaec6b2b)\"},\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"v1.12.0-cloud\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.22.9\"}}}\n"
+          "1790941429127512844",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:49.127+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":51800,   \"ctx\":\"conn1465625\",\"msg\":\"client metadata\",\"attr\":{\"remote\":\"10.244.4.109:46618\",\"client\":\"conn1465625\",\"negotiatedCompressors\":[],\"doc\":{\"application\":{\"name\":\"MongoDB Automation Agent v108.0.2.8729 (git: ec1573c1fd5d7da3acab288d628b9e9eaaec6b2b)\"},\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"v1.12.0-cloud\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.22.9\"}}}\n"
          ],
          [
-          "1790932863599053742",
-          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.598+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":10483900,\"ctx\":\"conn1457843\",\"msg\":\"Connection not authenticating\",\"attr\":{\"client\":\"10.244.4.109:55968\",\"doc\":{\"application\":{\"name\":\"MongoDB Automation Agent v108.0.2.8729 (git: ec1573c1fd5d7da3acab288d628b9e9eaaec6b2b)\"},\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"v1.12.0-cloud\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.22.9\"}}}\n"
-         ],
-         [
-          "1790932863599559280",
-          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.599+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22943,   \"ctx\":\"listener\",\"msg\":\"Connection accepted\",\"attr\":{\"remote\":\"10.244.4.109:55990\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"3c42bf32-91e1-4835-9c8e-29481b61637f\"}},\"connectionId\":1457845,\"connectionCount\":60}}\n"
-         ],
-         [
-          "1790932863599869929",
-          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.599+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":51800,   \"ctx\":\"conn1457845\",\"msg\":\"client metadata\",\"attr\":{\"remote\":\"10.244.4.109:55990\",\"client\":\"conn1457845\",\"negotiatedCompressors\":[],\"doc\":{\"application\":{\"name\":\"MongoDB Automation Agent v108.0.2.8729 (git: ec1573c1fd5d7da3acab288d628b9e9eaaec6b2b)\"},\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"v1.12.0-cloud\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.22.9\"}}}\n"
-         ],
-         [
-          "1790932863599950152",
-          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.599+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":6788604, \"ctx\":\"conn1457845\",\"msg\":\"Auth metrics report\",\"attr\":{\"metric\":\"acquireUser\",\"micros\":0}}\n"
-         ],
-         [
-          "1790932863606551782",
-          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.606+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":5286306, \"ctx\":\"conn1457845\",\"msg\":\"Successfully authenticated\",\"attr\":{\"client\":\"10.244.4.109:55990\",\"isSpeculative\":true,\"isClusterMember\":true,\"mechanism\":\"SCRAM-SHA-256\",\"user\":\"__system\",\"db\":\"local\",\"result\":0,\"metrics\":{\"conversation_duration\":{\"micros\":6563,\"summary\":{\"0\":{\"step\":1,\"step_total\":2,\"duration_micros\":61},\"1\":{\"step\":2,\"step_total\":2,\"duration_micros\":19}}}},\"doc\":{\"application\":{\"name\":\"MongoDB Automation Agent v108.0.2.8729 (git: ec1573c1fd5d7da3acab288d628b9e9eaaec6b2b)\"},\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"v1.12.0-cloud\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.22.9\"},\"extraInfo\":{}}}\n"
-         ],
-         [
-          "1790932863607900916",
-          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.607+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":6788700, \"ctx\":\"conn1457845\",\"msg\":\"Received first command on ingress connection since session start or auth handshake\",\"attr\":{\"elapsedMillis\":1}}\n"
-         ],
-         [
-          "1790932863608494121",
-          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.608+00:00\"},\"s\":\"I\",  \"c\":\"-\",        \"id\":20883,   \"ctx\":\"conn1457843\",\"msg\":\"Interrupted operation as its client disconnected\",\"attr\":{\"opId\":1580102657}}\n"
-         ],
-         [
-          "1790932863608494121",
-          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.608+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22944,   \"ctx\":\"conn1457844\",\"msg\":\"Connection ended\",\"attr\":{\"remote\":\"10.244.4.109:55970\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"68da44d7-d4b4-4fb8-a70d-4c442b6db603\"}},\"connectionId\":1457844,\"connectionCount\":59}}\n"
-         ],
-         [
-          "1790932863609138493",
-          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.609+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22944,   \"ctx\":\"conn1457843\",\"msg\":\"Connection ended\",\"attr\":{\"remote\":\"10.244.4.109:55968\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"7e85d974-362e-4fbc-b7cb-d2e66884c5cf\"}},\"connectionId\":1457843,\"connectionCount\":58}}\n"
-         ],
-         [
-          "1790932863610031663",
-          "{\"t\":{\"$date\":\"2026-10-02T09:21:03.609+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22944,   \"ctx\":\"conn1457845\",\"msg\":\"Connection ended\",\"attr\":{\"remote\":\"10.244.4.109:55990\",\"isLoadBalanced\":false,\"uuid\":{\"uuid\":{\"$uuid\":\"3c42bf32-91e1-4835-9c8e-29481b61637f\"}},\"connectionId\":1457845,\"connectionCount\":57}}\n"
-         ]
-        ]
-       },
-       {
-        "stream": {
-         "container": "zitadel",
-         "detected_level": "info",
-         "env": "prod",
-         "instance": "careerhub-prod/zitadel-f65b884bd-jm9zg:zitadel",
-         "job": "loki.source.kubernetes.pod_logs",
-         "namespace": "careerhub-prod",
-         "pod": "zitadel-f65b884bd-jm9zg",
-         "service_name": "zitadel"
-        },
-        "values": [
-         [
-          "1790932864674463658",
-          "time=\"2026-10-02T09:21:04Z\" level=info msg=activity caller=\"/home/runner/work/zitadel/zitadel/internal/activity/activity.go:105\" domain=\"https://id.careerhub.jyo-liar.com\" grpcStatus=0 httpStatus=200 instance=385772681082964180 isSystemUser=true method=/zitadel.settings.v2.SettingsService/GetGeneralSettings org= path= requestMethod= trigger=resourceAPI user=login-client\n"
-         ],
-         [
-          "1790932864674511435",
-          "time=2026-10-02T09:21:04.674Z level=INFO msg=\"request served\" request.id=davnf01cm36s73dvkd1g request.instance_host=id.careerhub.jyo-liar.com request.public_host=id.careerhub.jyo-liar.com request.instance_id=385772681082964180 request.user_id=login-client TraceID=a1223ec7ea254fec353963f5298b2b1c SpanID=a0f29fb242a43f53 stream=request version=v4.15.3 protocol=connect service=zitadel.settings.v2.SettingsService http_method=POST path=/zitadel.settings.v2.SettingsService/GetGeneralSettings code=code_0 duration=3.520486ms\n"
-         ]
-        ]
-       },
-       {
-        "stream": {
-         "container": "zitadel",
-         "detected_level": "warn",
-         "env": "prod",
-         "instance": "careerhub-prod/zitadel-f65b884bd-jm9zg:zitadel",
-         "job": "loki.source.kubernetes.pod_logs",
-         "namespace": "careerhub-prod",
-         "pod": "zitadel-f65b884bd-jm9zg",
-         "service_name": "zitadel"
-        },
-        "values": [
-         [
-          "1790932864672965960",
-          "time=\"2026-10-02T09:21:04Z\" level=warning msg=\"token verifier repo: decrypt access token\" caller=\"/home/runner/work/zitadel/zitadel/internal/authz/repository/eventsourcing/eventstore/token_verifier.go:310\" error=\"ID=CRYPT-ha6Oh Message=malformed encrypted value Parent=(go-jose/go-jose: compact JWE format must have five parts)\\nID=CRYPT-Eep6o Message=malformed encrypted value Parent=(illegal base64 data at input byte 20)\"\n"
-         ],
-         [
-          "1790932864673055793",
-          "time=\"2026-10-02T09:21:04Z\" level=warning msg=\"token verifier repo: verify JWT access token\" caller=\"/home/runner/work/zitadel/zitadel/internal/authz/repository/eventsourcing/eventstore/token_verifier.go:314\" error=\"issuer does not match: Expected: https://id.careerhub.jyo-liar.com, got: login-client\"\n"
-         ],
-         [
-          "1790932864673055793",
-          "time=\"2026-10-02T09:21:04Z\" level=warning msg=\"authz: verify access token\" caller=\"/home/runner/work/zitadel/zitadel/internal/api/authz/context.go:114\" error=\"ID=APP-Reb32 Message=invalid token\" org_domain= org_id=\n"
+          "1790941429127596085",
+          "{\"t\":{\"$date\":\"2026-10-02T11:43:49.127+00:00\"},\"s\":\"I\",  \"c\":\"ACCESS\",   \"id\":10483900,\"ctx\":\"conn1465625\",\"msg\":\"Connection not authenticating\",\"attr\":{\"client\":\"10.244.4.109:46618\",\"doc\":{\"application\":{\"name\":\"MongoDB Automation Agent v108.0.2.8729 (git: ec1573c1fd5d7da3acab288d628b9e9eaaec6b2b)\"},\"driver\":{\"name\":\"mongo-go-driver\",\"version\":\"v1.12.0-cloud\"},\"os\":{\"type\":\"linux\",\"architecture\":\"arm64\"},\"platform\":\"go1.22.9\"}}}\n"
          ]
         ]
        }
       ],
       "stats": {
        "summary": {
-        "bytesProcessedPerSecond": 77028747,
-        "linesProcessedPerSecond": 184252,
-        "totalBytesProcessed": 904686,
-        "totalLinesProcessed": 2164,
-        "execTime": 0.011745,
-        "queueTime": 0.000158,
+        "bytesProcessedPerSecond": 90247397,
+        "linesProcessedPerSecond": 213643,
+        "totalBytesProcessed": 661088,
+        "totalLinesProcessed": 1565,
+        "execTime": 0.007325,
+        "queueTime": 0.000143,
         "subqueries": 0,
-        "totalEntriesReturned": 20,
+        "totalEntriesReturned": 21,
         "splits": 0,
         "shards": 1,
-        "totalPostFilterLines": 2164,
-        "totalStructuredMetadataBytesProcessed": 64920
+        "totalPostFilterLines": 1565,
+        "totalStructuredMetadataBytesProcessed": 46950
        },
        "querier": {
         "store": {
@@ -752,27 +749,27 @@
        },
        "ingester": {
         "totalReached": 1,
-        "totalChunksMatched": 5,
+        "totalChunksMatched": 6,
         "totalBatches": 1,
-        "totalLinesSent": 20,
+        "totalLinesSent": 21,
         "store": {
          "totalChunksRef": 3,
          "totalChunksDownloaded": 3,
-         "chunksDownloadTime": 412313,
+         "chunksDownloadTime": 308073,
          "queryReferencedStructuredMetadata": false,
          "queryUsedV2Engine": false,
          "chunk": {
           "headChunkBytes": 0,
           "headChunkLines": 0,
-          "decompressedBytes": 904686,
-          "decompressedLines": 2164,
-          "compressedBytes": 173381,
+          "decompressedBytes": 661088,
+          "decompressedLines": 1565,
+          "compressedBytes": 118361,
           "totalDuplicates": 0,
-          "postFilterLines": 2164,
+          "postFilterLines": 1565,
           "headChunkStructuredMetadataBytes": 0,
-          "decompressedStructuredMetadataBytes": 64920
+          "decompressedStructuredMetadataBytes": 46950
          },
-         "chunkRefsFetchTime": 234925,
+         "chunkRefsFetchTime": 286610,
          "congestionControlLatency": 0,
          "pipelineWrapperFilteredLines": 0,
          "dataobj": {
@@ -827,10 +824,10 @@
          "entriesFound": 1,
          "entriesRequested": 1,
          "entriesStored": 0,
-         "bytesReceived": 210,
+         "bytesReceived": 346,
          "bytesSent": 0,
          "requests": 1,
-         "downloadTime": 10222,
+         "downloadTime": 8445,
          "queryLengthServed": 90000000000
         },
         "volumeResult": {
