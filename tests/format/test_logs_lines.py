@@ -6,7 +6,7 @@ import pytest
 
 from obs import logs
 from obs.adapters import cli
-from obs.core import Window
+from obs.core import Window, parse_duration
 from obs.metrics import auto_step
 from tests.conftest import ReplayFactory, assert_snapshot, load_response, window_of
 from tests.record import EMPTY_LOG_SELECTOR, FIRST_SEEN_TEMPLATE, LOG_SELECTOR
@@ -118,9 +118,10 @@ def test_around_lines_empty(replay: ReplayFactory, request: pytest.FixtureReques
 # ── first_seen ───────────────────────────────────────────────────────────────────
 
 def test_first_seen_lines(replay: ReplayFactory, request: pytest.FixtureRequest) -> None:
-    """templates 의 첫 군집 템플릿을 그대로 넣은 first_seen 의 렌더링은 "첫 발생" 으로 시작하고, 그 시각은 군집의 first_ts 보다 이르거나 같다."""
+    """templates 의 첫 군집 템플릿을 그대로 넣은 first_seen 의 렌더링은 "첫 발생" 으로 시작하고, 그 시각은 그 줄을 센 sample 구간(first_ts 부터 step 폭) 안에 있다."""
     # given — 첫 군집은 templates fixture 의 patterns 응답에서 유도한다(first_seen fixture 는 그 실행의 예시 호출)
-    first = logs.clusters_of(_recorded_patterns(), 5, auto_step(3600)).clusters[0]
+    step = auto_step(3600)
+    first = logs.clusters_of(_recorded_patterns(), 5, step).clusters[0]
     client, t = replay("logql-first-seen-careerhub-prod.json")
     # when
     ev, _ = logs.first_seen(client, LOG_SELECTOR, first.template, _hour(t.at))
@@ -128,7 +129,8 @@ def test_first_seen_lines(replay: ReplayFactory, request: pytest.FixtureRequest)
     # then
     assert lines[0].startswith("첫 발생")
     assert ev.value.ts is not None
-    assert ev.value.ts <= first.first_ts
+    assert first.first_ts <= ev.value.ts
+    assert ev.value.ts < first.first_ts + parse_duration(step)
     assert_snapshot(request, lines)
     t.assert_exhausted()
 

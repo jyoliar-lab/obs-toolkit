@@ -376,6 +376,18 @@ def test_templates_requests_patterns_then_one_example_per_cluster(make_client: C
         assert e["limit"] == "1"
 
 
+def test_templates_raw_carries_patterns_and_examples(make_client: ClientFactory) -> None:
+    """templates 의 원본은 온 응답 전부다 — patterns 응답 그대로와 군집 수만큼의 예시 응답 그대로."""
+    # given
+    client, _ = make_client({("logs", PATTERNS): (200, THREE), ("logs", RANGE): (200, EXAMPLE)})
+    # when
+    ev, raw = logs.templates(client, SEL, W)
+    # then
+    assert isinstance(raw, dict)
+    assert raw["patterns"] == THREE
+    assert raw["examples"] == [EXAMPLE] * len(ev.value.clusters)
+
+
 def test_templates_default_step_is_auto(make_client: ClientFactory) -> None:
     """step 을 주지 않으면 patterns 요청의 step 과 Templates.step 이 auto_step(창) 이다."""
     # given
@@ -525,6 +537,20 @@ def test_around_keeps_only_lines_inside_window_in_order(make_loki: LokiFactory) 
     # then
     assert [e.line for e in ev.value.entries] == ["b0", "b1", "a0", "a1"]
     assert [e.ts_ns for e in ev.value.entries] == sorted(e.ts_ns for e in ev.value.entries)
+
+
+def test_around_raw_carries_count_and_both_sides(make_client: ClientFactory) -> None:
+    """around 의 원본은 온 응답 셋 전부다 — count · backward(before) · forward(after) 응답 그대로."""
+    # given
+    count, lines = _vector(({}, "0")), _streams()
+    client, _ = make_client({("logs", INSTANT): (200, count), ("logs", RANGE): (200, lines)})
+    # when
+    _, raw = logs.around(client, SEL, TS, 60)
+    # then
+    assert isinstance(raw, dict)
+    assert raw["count"] == count
+    assert raw["before"] == lines
+    assert raw["after"] == lines
 
 
 def test_around_evidence_window_is_ts_plus_minus_span(make_client: ClientFactory) -> None:
