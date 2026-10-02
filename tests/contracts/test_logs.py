@@ -271,16 +271,18 @@ def test_clusters_of_counts_ratio_first_last() -> None:
     # given — 패턴 셋, samples 에 0 인 구간이 섞여 있다
     # when
     t = logs.clusters_of([P1, P2, P3], 10, "60s")
-    # then
+    # then — 세 군집 모두: (count, ratio, first_ts, last_ts)
+    expected = {"one <_>": (5, 0.5, 20.0, 30.0), "two <_>": (4, 0.4, 10.0, 10.0), "three <_>": (1, 0.1, 30.0, 30.0)}
     by_name = {c.template: c for c in t.clusters}
     assert t.total == 10
-    assert by_name["one <_>"].count == 5
-    assert by_name["one <_>"].ratio == pytest.approx(0.5)
-    assert by_name["one <_>"].first_ts == 20.0
-    assert by_name["one <_>"].last_ts == 30.0
-    assert by_name["two <_>"].first_ts == 10.0
-    assert by_name["two <_>"].last_ts == 10.0
-    assert all(c.example is None for c in t.clusters)
+    assert set(by_name) == set(expected)
+    for name, (count, ratio, first_ts, last_ts) in expected.items():
+        c = by_name[name]
+        assert c.count == count, name
+        assert c.ratio == pytest.approx(ratio), name
+        assert c.first_ts == first_ts, name
+        assert c.last_ts == last_ts, name
+        assert c.example is None, name
 
 
 def test_clusters_of_is_order_independent() -> None:
