@@ -163,8 +163,8 @@ def test_histogram_sends_one_metric_range_query(make_client: ClientFactory) -> N
     assert len(t.calls) == 1
     assert _path(t.calls[0]).endswith(RANGE)
     params = _params(t.calls[0])
-    assert params["query"].startswith("sum by (detected_level)")
-    assert "step" in params
+    assert params["query"] == logs.histogram_query(SEL, ["detected_level"], "60s")
+    assert params["step"] == "60s"
     assert "limit" not in params
 
 
@@ -405,8 +405,9 @@ def test_templates_asks_examples_only_for_top_k(make_client: ClientFactory) -> N
     client, t = make_client({("logs", PATTERNS): (200, five), ("logs", RANGE): (200, EXAMPLE)})
     # when
     logs.templates(client, SEL, W, k=2)
-    # then
+    # then — 예시 질의는 상위 둘(50 · 40)의 것뿐이다
     assert len(t.calls) == 3
+    assert sorted(_params(c)["query"] for c in t.calls[1:]) == sorted(logs.pattern_filter(SEL, p) for p in ("p50 <_>", "p40 <_>"))
 
 
 def test_templates_example_missing_is_none(make_client: ClientFactory) -> None:
