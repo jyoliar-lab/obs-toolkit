@@ -268,8 +268,10 @@ def count_query(selector: str, seconds: float) -> str:
 
 def _side(client: Client, selector: str, start: float, end: float, direction: str, limit: int) -> tuple[list[LogEntry], Side, Response]:
     """[start, end) 의 ts 쪽 줄 limit 개 — limit+1 개를 물어 넘치면 잘림이다. direction 이 ts 에 가까운 것부터 받게 한다."""
-    params: Params = {"start": int(start * 1e9), "end": int(end * 1e9), "query": selector, "limit": limit + 1, "direction": direction}
+    start_ns, end_ns = int(start * 1e9), int(end * 1e9)
+    params: Params = {"start": start_ns, "end": end_ns, "query": selector, "limit": limit + 1, "direction": direction}
     entries, resp = _query_range(client, params)
+    entries = [e for e in entries if start_ns <= e.ts_ns < end_ns]
     entries.sort(key=lambda e: e.ts_ns, reverse=(direction == "backward"))
     kept = entries[:limit]
     return kept, Side(shown=len(kept), truncated=len(entries) > limit), resp

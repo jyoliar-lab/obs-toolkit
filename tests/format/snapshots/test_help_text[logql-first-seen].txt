@@ -1,7 +1,6 @@
-usage: logql.py first-seen [-h] [--since SINCE] [--end END] [--max-lines MAX_LINES] [--json] [--template TEMPLATE]
-                           selector
+usage: logql.py first-seen [-h] [--since SINCE] [--end END] [--max-lines MAX_LINES] [--json] selector template
 
-logql.py first-seen '<selector>' --template '<패턴>' [--since 1h] [--end <시각>]
+logql.py first-seen '<selector>' '<패턴>' [--since 1h] [--end <시각>]
 
 템플릿(패턴 — templates 의 출력 그대로, `<_>` 가 자리표시)에 걸리는 창 안의 첫 줄 — `|>` 패턴 필터를 forward · limit 1 로 한 번.
 `첫 발생 <시각>  <템플릿>` 과 그 줄, 창 안에 없으면 `창 안에 없음`.
@@ -11,6 +10,7 @@ logql.py first-seen '<selector>' --template '<패턴>' [--since 1h] [--end <시�
 
 positional arguments:
   selector              LogQL 스트림 selector — 예: '{namespace="x"}'
+  template              패턴 — templates 출력의 템플릿 그대로
 
 options:
   -h, --help            show this help message and exit
@@ -19,4 +19,3 @@ options:
   --max-lines MAX_LINES
                         stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
   --json                stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 항상 남는다)
-  --template TEMPLATE   패턴 — templates 출력의 템플릿 그대로. 필수

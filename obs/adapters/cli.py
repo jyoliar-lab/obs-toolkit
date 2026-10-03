@@ -554,6 +554,12 @@ LOGQL_DOC = """logql — 로그 조회 (logs 백엔드, GET 만).
   logql.py --label-values <name> [--since 1h]             레이블 값
   logql.py --series '<selector>' [--since 1h]             스트림 목록
 
+환원 연산 — 서브커맨드. 각각의 --help 에 설명 전부:
+  logql.py histogram '<selector>' [--by detected_level]   by 값별 · 구간별 건수 표
+  logql.py templates '<selector>' [--k 10]                로그 군집 상위 k + 예시
+  logql.py around '<selector>' --ts <시각>                시각 앞뒤의 문맥
+  logql.py first-seen '<selector>' '<패턴>'               템플릿의 첫 발생
+
 옵션:
   --since <기간>     조회 구간 길이 (5m · 1h · 2d). 기본 1h
   --end <시각>       구간 끝 (now · -10m · unix초 · RFC3339). 기본 now
@@ -758,7 +764,7 @@ class LogsArgs:
         if self.cmd == "around" and self.ts is None:
             raise ObsError("around 는 중심 시각(--ts)이 필요하다")
         if self.cmd == "first-seen" and self.template is None:
-            raise ObsError("first-seen 은 템플릿(--template)이 필요하다")
+            raise ObsError("first-seen 은 템플릿이 필요하다")
 
 
 def logs_run(client: Client, a: LogsArgs, at: float | None = None) -> RunResult:
@@ -809,7 +815,7 @@ AROUND_DOC = """logql.py around '<selector>' --ts <시각> [--span 5m] [--limit 
 
 """ + LOGS_COMMON_DOC
 
-FIRST_SEEN_DOC = """logql.py first-seen '<selector>' --template '<패턴>' [--since 1h] [--end <시각>]
+FIRST_SEEN_DOC = """logql.py first-seen '<selector>' '<패턴>' [--since 1h] [--end <시각>]
 
 템플릿(패턴 — templates 의 출력 그대로, `<_>` 가 자리표시)에 걸리는 창 안의 첫 줄 — `|>` 패턴 필터를 forward · limit 1 로 한 번.
 `첫 발생 <시각>  <템플릿>` 과 그 줄, 창 안에 없으면 `창 안에 없음`.
@@ -845,7 +851,7 @@ def logs_main(argv: Sequence[str]) -> None:
     sp_a.add_argument("--limit", type=int, default=DEFAULT_AROUND_LIMIT, help="한 쪽 줄 수 상한. 기본 %d" % DEFAULT_AROUND_LIMIT)
     sp_f = sub.add_parser("first-seen", help="템플릿의 첫 발생", description=FIRST_SEEN_DOC, formatter_class=fmt)
     common(sp_f)
-    sp_f.add_argument("--template", default=None, help="패턴 — templates 출력의 템플릿 그대로. 필수")
+    sp_f.add_argument("template", help="패턴 — templates 출력의 템플릿 그대로")
     a = ap.parse_args(argv)
     args = LogsArgs(cmd=a.cmd, selector=a.selector, since=getattr(a, "since", "1h"), end=getattr(a, "end", None),
                     by=getattr(a, "by", "detected_level"), step=getattr(a, "step", None), k=getattr(a, "k", DEFAULT_TEMPLATES_K),
