@@ -8,7 +8,7 @@ import pytest
 
 from obs import metrics
 from obs.adapters import cli
-from obs.core import JSON, Client, Evidence, Lines, ObsError, Window, to_json
+from obs.core import JSON, Client, Evidence, Lines, ObsError, Response, Window, to_json
 from tests.conftest import AT, DAY, HOUR, MINUTE, WEEK, ClientFactory, _stat, _vector
 from tests.record import CPU_QUERY
 
@@ -164,6 +164,48 @@ def test_each_operation_makes_one_get(make_client: ClientFactory, op: str) -> No
     client, t = make_client({("metrics", "api/v1/query"): (200, _vector())})
     _run(client, op)
     assert len(t.calls) == 1
+
+
+def _raw(client: Client, op: str) -> tuple[str, list[Response]]:
+    """세 연산을 같은 창으로 부르고 (Evidence.query, 원본) 을 돌려준다 — 원본 검사의 공통 입구."""
+    if op == "summarize":
+        ev_s, raw = metrics.summarize(client, CPU_QUERY, W)
+        return ev_s.query, raw
+    if op == "compare":
+        ev_c, raw = metrics.compare(client, CPU_QUERY, W.with_baseline("1d"))
+        return ev_c.query, raw
+    ev_t, raw = metrics.top(client, "up", W, k=3, by=["pod"])
+    return ev_t.query, raw
+
+
+@pytest.mark.parametrize("op", ["summarize", "compare", "top"])
+def test_single_call_raw_is_one_response(make_client: ClientFactory, op: str) -> None:
+    """단일 호출 연산의 원본은 그 호출 하나의 Response 를 담은 길이 1 목록이다 — 경로 · 받은 응답 · 보낸 질의가 실린다."""
+    # given
+    body = _vector(_stat("a", "n", "1"))
+    client, _ = make_client({("metrics", "api/v1/query"): (200, body)})
+    # when
+    query, raw = _raw(client, op)
+    # then
+    assert isinstance(raw, list)
+    assert len(raw) == 1
+    assert isinstance(raw[0], Response)
+    assert raw[0].path == "api/v1/query"
+    assert raw[0].body == body
+    assert raw[0].params["query"] == query
+
+
+@pytest.mark.parametrize("op", ["summarize", "compare", "top"])
+def test_single_call_raw_is_one_response_even_when_empty(make_client: ClientFactory, op: str) -> None:
+    """응답이 "데이터 없음" 이어도 원본은 빈 목록이 아니라 그 응답 하나다 — "데이터 없음" 과 "호출 없음" 이 갈린다."""
+    # given — 시계열이 없는 응답
+    body = _vector()
+    client, _ = make_client({("metrics", "api/v1/query"): (200, body)})
+    # when
+    _, raw = _raw(client, op)
+    # then
+    assert len(raw) == 1
+    assert raw[0].body == body
 
 
 @pytest.mark.parametrize("op", ["summarize", "compare", "top"])

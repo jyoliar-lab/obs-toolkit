@@ -8,7 +8,7 @@ from typing import Callable
 import pytest
 
 from obs.adapters import cli
-from obs.core import JSON, Client, Evidence, Lines, Window
+from obs.core import JSON, Client, Evidence, Lines, Response, Window
 from tests.conftest import AT, MINUTE, ClientFactory, _no_physical, _vector
 
 
@@ -82,6 +82,21 @@ def test_emit_always_writes_even_when_fits(tmp_path: Path) -> None:
     assert sorted(q.name for q in (tmp_path / res.ref).iterdir()) == ["raw.json", "summary.txt"]
 
 
+def test_emit_writes_responses_as_items_with_five_keys(tmp_path: Path) -> None:
+    """Response 목록은 raw.json 에 같은 순서의 목록으로 쓰이고 항목마다 backend · path · params · status · body 키가 있다 — params 가 비어도."""
+    # given — 하나는 파라미터 없이 보낸 호출
+    env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+    raw = [Response(backend="metrics", path="api/v1/query", status=200, body={"a": 1}, params={"query": "up"}),
+           Response(backend="traces", path="api/traces/abc", status=200, body={"b": 2})]
+    # when
+    res = cli.emit(["x"], raw, "k", max_lines=3, env=env, out=lambda _: None)
+    # then
+    items = json.loads((tmp_path / res.ref / "raw.json").read_text())
+    assert [(i["backend"], i["path"]) for i in items] == [(r.backend, r.path) for r in raw]
+    for item in items:
+        assert set(item) == {"backend", "path", "params", "status", "body"}
+
+
 # ── 인터페이스 — 물리 인자가 없다 ────────────────────────────────────────────────
 
 HELP_SCREENS: tuple[tuple[Callable[[list[str]], None], list[str]], ...] = (
@@ -145,7 +160,7 @@ def test_logql_main_routes_subcommand_to_logs_run(argv: list[str], expected: dic
 
     def fake_run(client: Client, a: cli.LogsArgs, at: float | None = None) -> cli.RunResult:
         seen.append(a)
-        return Evidence(backend="logs", query=a.selector, window=Window(AT - MINUTE, AT), value=Lines(["x"])), {}, "logql-histogram"
+        return Evidence(backend="logs", query=a.selector, window=Window(AT - MINUTE, AT), value=Lines(["x"])), [], "logql-histogram"
 
     client, _ = make_client()
     monkeypatch.setattr(cli, "logs_run", fake_run)
@@ -217,6 +232,45 @@ def test_run_outputs_carry_no_physical(make_client: ClientFactory, backend: str)
     client, _ = make_client({("metrics", "api/v1/query"): (200, _vector(({"__name__": "up", "job": "j"}, "1"))),
                              ("logs", "loki/api/v1/query_range"): (200, STREAMS), ("traces", "api/search"): (200, SEARCH)})
     _no_physical("\n".join(_lines_of(client, backend)))
+
+
+# ── 원본 — 단일 호출 분기마다 Response 하나 ───────────────────────────────────────
+
+STRINGS: dict[str, JSON] = {"status": "success", "data": ["a"]}
+LABEL_SETS: dict[str, JSON] = {"status": "success", "data": [{"a": "b"}]}
+
+RUN_BRANCHES: list[tuple[str, Callable[[Client], cli.RunResult], str, str, dict[str, JSON]]] = [
+    ("promql-labels", lambda c: cli.promql_run(c, cli.PromqlArgs(labels=True), at=AT), "metrics", "api/v1/labels", STRINGS),
+    ("promql-label-values", lambda c: cli.promql_run(c, cli.PromqlArgs(label_values="job"), at=AT), "metrics", "api/v1/label/job/values", STRINGS),
+    ("promql-series", lambda c: cli.promql_run(c, cli.PromqlArgs(series='{a="b"}'), at=AT), "metrics", "api/v1/series", LABEL_SETS),
+    ("promql-range", lambda c: cli.promql_run(c, cli.PromqlArgs(query="up", range_="1h"), at=AT), "metrics", "api/v1/query_range", EMPTY_MATRIX),
+    ("promql-instant", lambda c: cli.promql_run(c, cli.PromqlArgs(query="up"), at=AT), "metrics", "api/v1/query", _vector(({"job": "j"}, "1"))),
+    ("logql-labels", lambda c: cli.logql_run(c, cli.LogqlArgs(labels=True), at=AT), "logs", "loki/api/v1/labels", STRINGS),
+    ("logql-label-values", lambda c: cli.logql_run(c, cli.LogqlArgs(label_values="app"), at=AT), "logs", "loki/api/v1/label/app/values", STRINGS),
+    ("logql-series", lambda c: cli.logql_run(c, cli.LogqlArgs(series='{a="b"}'), at=AT), "logs", "loki/api/v1/series", LABEL_SETS),
+    ("logql-query", lambda c: cli.logql_run(c, cli.LogqlArgs(query='{namespace="n"}'), at=AT), "logs", "loki/api/v1/query_range", STREAMS),
+    ("traceql-search", lambda c: cli.traceql_run(c, cli.TraceqlArgs(cmd="search"), at=AT), "traces", "api/search", SEARCH),
+    ("traceql-trace", lambda c: cli.traceql_run(c, cli.TraceqlArgs(cmd="trace", arg="abc123"), at=AT), "traces", "api/traces/abc123", {"batches": []}),
+    ("traceql-tags", lambda c: cli.traceql_run(c, cli.TraceqlArgs(cmd="tags"), at=AT), "traces", "api/v2/search/tags", {"scopes": []}),
+    ("traceql-tag-values", lambda c: cli.traceql_run(c, cli.TraceqlArgs(cmd="tag-values", arg="service.name"), at=AT), "traces",
+     "api/v2/search/tag/service.name/values", {"tagValues": []}),
+]
+
+
+@pytest.mark.parametrize("run,backend,path,body", [b[1:] for b in RUN_BRANCHES], ids=[b[0] for b in RUN_BRANCHES])
+def test_single_call_run_raw_is_one_response(make_client: ClientFactory, run: Callable[[Client], cli.RunResult], backend: str, path: str,
+                                             body: dict[str, JSON]) -> None:
+    """단일 호출 분기의 원본은 그 호출 하나의 Response 를 담은 길이 1 목록이다 — 그 분기의 경로와 받은 응답이 실린다."""
+    # given
+    client, _ = make_client({(backend, path): (200, body)})
+    # when
+    _, raw, _ = run(client)
+    # then
+    assert isinstance(raw, list)
+    assert len(raw) == 1
+    assert isinstance(raw[0], Response)
+    assert raw[0].path == path
+    assert raw[0].body == body
 
 
 # ── 값의 표기 — fmt_val · fmt_signed 의 경계 ─────────────────────────────────────

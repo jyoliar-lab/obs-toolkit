@@ -95,7 +95,7 @@ def histogram_query(selector: str, by: Sequence[str], step: str) -> str:
 
 
 def histogram(client: Client, selector: str, window: Window, by: Sequence[str] = ("detected_level",),
-              step: str | None = None, max_groups: int = DEFAULT_MAX_GROUPS) -> tuple[Evidence[Histogram], JSON]:
+              step: str | None = None, max_groups: int = DEFAULT_MAX_GROUPS) -> tuple[Evidence[Histogram], list[Response]]:
     """by 값별 · 구간별 건수 표 — `count_over_time` matrix 를 query_range 한 번으로 받아 편다. 행은 total 내림차순, max_groups 까지."""
     if not selector.strip():
         raise ObsError("LogQL selector 가 필요하다")
@@ -104,8 +104,8 @@ def histogram(client: Client, selector: str, window: Window, by: Sequence[str] =
     step = step or auto_step(window.seconds)
     q = histogram_query(selector, by, step)
     params: Params = {"start": int(window.start * 1e9), "end": int(window.end * 1e9), "query": q, "step": step}
-    body = check_status(client.get("logs", "loki/api/v1/query_range", params).body, "logs")
-    series = parse_logs(body).series
+    resp = client.get("logs", "loki/api/v1/query_range", params)
+    series = parse_logs(check_status(resp.body, "logs")).series
     times = sorted({ts for s in series for ts, _ in s.values})
     groups: list[GroupCount] = []
     for s in series:
@@ -115,7 +115,7 @@ def histogram(client: Client, selector: str, window: Window, by: Sequence[str] =
     groups.sort(key=lambda g: -g.total)
     value = Histogram(by=[a.strip() for a in by if a.strip()], step=step, times=times, groups=groups[:max_groups],
                       folded=max(0, len(groups) - max_groups))
-    return Evidence(backend="logs", query=q, window=window, value=value), body
+    return Evidence(backend="logs", query=q, window=window, value=value), [resp]
 
 
 # ── templates ────────────────────────────────────────────────────────────────────
@@ -304,11 +304,11 @@ class FirstSeen:
     line: str | None
 
 
-def first_seen(client: Client, selector: str, template: str, window: Window) -> tuple[Evidence[FirstSeen], JSON]:
+def first_seen(client: Client, selector: str, template: str, window: Window) -> tuple[Evidence[FirstSeen], list[Response]]:
     """템플릿(패턴)에 걸리는 창 안의 첫 줄 — pattern_filter 질의를 forward · limit 1 로 한 번. 없으면 ts · line 이 None."""
     if not selector.strip():
         raise ObsError("LogQL selector 가 필요하다")
     q = pattern_filter(selector, template)
     first, resp = _first_line(client, q, window)
     value = FirstSeen(template=template, ts=first.ts_ns / 1e9 if first else None, line=first.line if first else None)
-    return Evidence(backend="logs", query=q, window=window, value=value), resp.body
+    return Evidence(backend="logs", query=q, window=window, value=value), [resp]
