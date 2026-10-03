@@ -20,40 +20,30 @@ import argparse
 import re
 import sys
 from dataclasses import dataclass, field
-from typing import Callable, Mapping, Sequence
+from typing import Callable, Mapping, Sequence, TypeAlias
 
 from obs.core import (
-    JSON, Client, DoctorReport, Evidence, Lines, ObsError, Params, Window, doctor, fmt_ts, load_config,
-    SPILL_RAW, SPILL_SUMMARY, json_int, json_labels, json_list, json_obj, json_pair, json_str, json_strs,
+    JSON, Client, DoctorReport, Evidence, Lines, ObsError, Params, Response, Window, doctor, fmt_ts, load_config,
+    SPILL_RAW, SPILL_SUMMARY, json_int, json_labels, json_list, json_obj, json_str, json_strs,
     parse_duration, parse_time, now, spill, spill_ref, to_json, token_from_env,
 )
+from obs.logs import (
+    DEFAULT_AROUND_LIMIT, DEFAULT_AROUND_SPAN, DEFAULT_TEMPLATES_K, Context, FirstSeen, Histogram, LogEntry, LogResult, Stream,
+    Side, Templates, around, first_seen, histogram, parse_logs, templates,
+)
 from obs.metrics import (
-    DEFAULT_BASELINE, DEFAULT_TOP_AGG, DEFAULT_TOP_K, TOP_AGGS, Comparison, MetricResult, Series, Summary, Top,
-    auto_step, check_status, compare, parse_metric, series_items, summarize, top,
+    DEFAULT_BASELINE, DEFAULT_TOP_AGG, DEFAULT_TOP_K, TOP_AGGS, Comparison, MetricResult, Summary, Top,
+    auto_step, check_status, compare, parse_metric, summarize, top,
 )
 
 DEFAULT_MAX_LINES: int = 40
 DEFAULT_LOG_LIMIT: int = 30
 
-RunResult = tuple[Evidence[Lines], JSON, str]
+RunResult: TypeAlias = "tuple[Evidence[Lines], JSON | list[Response], str]"   # 둘째 자리(원본) — 다중 호출 연산(templates · around)은 Response 목록
 """(근거, 원본 body, spill 종류 이름)"""
 
 
-# ── 응답 dataclass + 파서 — Loki (Prometheus 형 파서는 obs.metrics) ────────────────
-
-@dataclass(frozen=True)
-class Stream:
-    """Loki 로그 스트림 — 레이블 집합과 (나노초, 줄) 목록."""
-    labels: dict[str, str]
-    values: list[tuple[int, str]]
-
-
-@dataclass(frozen=True)
-class LogResult:
-    result_type: str            # streams · matrix
-    streams: list[Stream]
-    series: list[Series]
-
+# ── 응답 dataclass + 파서 — Loki 의 로그 파서(Stream · LogResult · parse_logs)는 obs.logs 에, Prometheus 형은 obs.metrics 에 ──
 
 def parse_strings(body: dict[str, JSON]) -> list[str]:
     """labels · label values 응답 — `data: [str]`."""
@@ -63,23 +53,6 @@ def parse_strings(body: dict[str, JSON]) -> list[str]:
 def parse_label_sets(body: dict[str, JSON]) -> list[dict[str, str]]:
     """series 응답 — `data: [{label: value}]`."""
     return [json_labels(m) for m in json_list(body.get("data"))]
-
-
-def parse_logs(body: dict[str, JSON]) -> LogResult:
-    data = json_obj(body.get("data"))
-    rtype = json_str(data.get("resultType"))
-    if rtype == "matrix":
-        return LogResult(result_type=rtype, streams=[], series=series_items(data.get("result")))
-    streams: list[Stream] = []
-    for item in json_list(data.get("result")):
-        o = json_obj(item)
-        values: list[tuple[int, str]] = []
-        for v in json_list(o.get("values")):
-            pr = json_pair(v)
-            if pr is not None:
-                values.append((json_int(pr[0]), pr[1]))
-        streams.append(Stream(labels=json_labels(o.get("stream")), values=values))
-    return LogResult(result_type=rtype, streams=streams, series=[])
 
 
 # ── 응답 dataclass + 파서 — Tempo ───────────────────────────────────────────────
@@ -247,7 +220,7 @@ def evidence_preamble(ev: Evidence[Lines]) -> list[str]:
     return lines
 
 
-def _finish(ev: Evidence[Lines], body: JSON, kind: str, max_lines: int, as_json: bool) -> None:
+def _finish(ev: Evidence[Lines], body: JSON | list[Response], kind: str, max_lines: int, as_json: bool) -> None:
     """Evidence 를 stdout 규약으로. as_json 은 stdout 에 요약을 찍지 않고 경로만(파일은 어느 쪽이든 같다).
     summary.txt 는 머리(질의·창) + 요약 전체다."""
     emit(ev.value.lines or ["(결과 없음)"], body, kind, max_lines, quiet=as_json, preamble=evidence_preamble(ev))
@@ -581,6 +554,12 @@ LOGQL_DOC = """logql — 로그 조회 (logs 백엔드, GET 만).
   logql.py --label-values <name> [--since 1h]             레이블 값
   logql.py --series '<selector>' [--since 1h]             스트림 목록
 
+환원 연산 — 서브커맨드. 각각의 --help 에 설명 전부:
+  logql.py histogram '<selector>' [--by detected_level]   by 값별 · 구간별 건수 표
+  logql.py templates '<selector>' [--k 10]                로그 군집 상위 k + 예시
+  logql.py around '<selector>' --ts <시각>                시각 앞뒤의 문맥
+  logql.py first-seen '<selector>' '<패턴>'               템플릿의 첫 발생
+
 옵션:
   --since <기간>     조회 구간 길이 (5m · 1h · 2d). 기본 1h
   --end <시각>       구간 끝 (now · -10m · unix초 · RFC3339). 기본 now
@@ -606,20 +585,13 @@ def common_labels(streams: Sequence[Stream]) -> dict[str, str]:
     return common
 
 
-@dataclass(frozen=True)
-class _Entry:
-    ts_ns: int
-    labels: dict[str, str]
-    line: str
-
-
 def stream_lines(res: LogResult, direction: str, width: int) -> list[str]:
     common = common_labels(res.streams)
-    entries: list[_Entry] = []
+    entries: list[LogEntry] = []
     for s in res.streams:
         labels = {k: v for k, v in s.labels.items() if k not in common}
         for ts, line in s.values:
-            entries.append(_Entry(ts, labels, line))
+            entries.append(LogEntry(ts, labels, line))
     entries.sort(key=lambda e: e.ts_ns, reverse=(direction == "backward"))
     lines: list[str] = []
     if common:
@@ -691,6 +663,10 @@ def logql_run(client: Client, a: LogqlArgs, at: float | None = None) -> RunResul
 
 
 def logql_main(argv: Sequence[str] | None = None) -> None:
+    args_list = list(sys.argv[1:] if argv is None else argv)
+    if args_list and args_list[0] in LOGS_SUBCOMMANDS:
+        logs_main(args_list)
+        return
     ap = argparse.ArgumentParser(prog="logql.py", description=LOGQL_DOC,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("query", nargs="?", help="LogQL")
@@ -707,6 +683,181 @@ def logql_main(argv: Sequence[str] | None = None) -> None:
     args = LogqlArgs(query=a.query, since=a.since, end=a.end, limit=a.limit, direction=a.direction,
                      width=a.width, labels=a.labels, label_values=a.label_values, series=a.series)
     ev, body, kind = logql_run(_client(), args)
+    _finish(ev, body, kind, a.max_lines, a.json)
+
+
+# ── 환원 연산 — logql.py 의 서브커맨드 (계산은 obs.logs, 표는 여기) ────────────────────
+
+LOGS_SUBCOMMANDS: tuple[str, ...] = ("histogram", "templates", "around", "first-seen")
+
+
+def histogram_lines(value: Histogram, window: Window) -> list[str]:
+    """헤더 한 줄 + 행(by 값)마다 `합  {레이블}  구간별 건수…` 한 줄 + 접힌 행이 있으면 꼬리 한 줄."""
+    if not value.groups:
+        return ["(데이터 없음 — %s 에 로그가 없다. step=%s)" % (window_str(window), value.step)]
+    span = "%s ~ %s" % (fmt_ts(value.times[0]), fmt_ts(value.times[-1])) if value.times else "-"
+    lines = ["창 %s  by %s  step=%s  구간 %d개(%s)  (합  {레이블}  구간별 건수 — 오래된 것부터)" % (
+        window_str(window), ",".join(value.by), value.step, len(value.times), span)]
+    lines += ["%d  %s  %s" % (g.total, labels_str(g.labels), " ".join(str(c) for c in g.counts)) for g in value.groups]
+    if value.folded:
+        lines.append("… %d행 더 — 합이 작아 표에서 뺐다" % value.folded)
+    return lines
+
+
+def templates_lines(value: Templates, window: Window) -> list[str]:
+    """헤더 한 줄 + 군집마다 두 줄(`건수  비율  첫~마지막  템플릿` · 예시) + other 가 있으면 꼬리 한 줄."""
+    if not value.clusters:
+        return ["(데이터 없음 — %s 에 로그 군집이 없다. step=%s)" % (window_str(window), value.step)]
+    lines = ["창 %s  총 %d건  군집 상위 %d  step=%s  (건수  비율  첫~마지막 발생  템플릿)" % (
+        window_str(window), value.total, value.k, value.step)]
+    for c in value.clusters:
+        lines.append("%d  %.1f%%  %s ~ %s  %s" % (c.count, c.ratio * 100, fmt_ts(c.first_ts), fmt_ts(c.last_ts), clip(c.template, 200)))
+        lines.append("    예: %s" % (clip(c.example, 200) if c.example is not None else "(없음)"))
+    if value.other:
+        lines.append("그 밖 %d건 — 상위 %d 밖의 군집" % (value.other, value.k))
+    return lines
+
+
+def around_lines(value: Context, window: Window) -> list[str]:
+    """헤더(총 · 보임 · 앞/뒤와 잘림) 한 줄 + 보인 줄마다 `시각  {레이블 차이}  줄` 한 줄."""
+    if not value.entries:
+        return ["(데이터 없음 — %s 에 로그가 없다)" % window_str(window)]
+
+    def side(name: str, s: Side) -> str:
+        return "%s %d%s" % (name, s.shown, " 잘림" if s.truncated else "")
+
+    lines = ["중심 %s  ±%s  총 %d  보임 %d (%s · %s, 쪽별 상한 %d)" % (
+        fmt_ts(value.center), fmt_val(value.span) + "s", value.total, value.shown, side("앞", value.before), side("뒤", value.after), value.limit)]
+    common = common_labels([Stream(e.labels, []) for e in value.entries])
+    for e in value.entries:
+        diff = {k: v for k, v in e.labels.items() if k not in common}
+        tag = (" " + labels_str(diff)) if diff else ""
+        lines.append("%s%s  %s" % (fmt_ts(e.ts_ns / 1e9), tag, clip(e.line, 200)))
+    return lines
+
+
+def first_seen_lines(value: FirstSeen, window: Window) -> list[str]:
+    """`첫 발생 <시각>  <템플릿>` + 그 줄, 또는 `창 안에 없음 …` 한 줄."""
+    if value.ts is None:
+        return ["창 안에 없음 — %s 에 템플릿 %s 에 걸리는 줄이 없다" % (window_str(window), clip(value.template, 200))]
+    return ["첫 발생 %s  %s" % (fmt_ts(value.ts), clip(value.template, 200)), "    %s" % clip(value.line or "", 200)]
+
+
+@dataclass
+class LogsArgs:
+    cmd: str                    # histogram · templates · around · first-seen
+    selector: str
+    since: str = "1h"
+    end: str | None = None
+    by: str = "detected_level"          # histogram
+    step: str | None = None             # histogram · templates
+    k: int = DEFAULT_TEMPLATES_K        # templates
+    ts: str | None = None               # around — None = 거부
+    span: str = DEFAULT_AROUND_SPAN     # around
+    limit: int = DEFAULT_AROUND_LIMIT   # around
+    template: str | None = None         # first-seen — None = 거부
+
+    def validate(self) -> None:
+        """요청 전 검사 — 모르는 cmd · around 의 ts 없음 · first-seen 의 template 없음은 ObsError."""
+        if self.cmd not in LOGS_SUBCOMMANDS:
+            raise ObsError("알 수 없는 명령 %r — %s" % (self.cmd, " · ".join(LOGS_SUBCOMMANDS)))
+        if self.cmd == "around" and self.ts is None:
+            raise ObsError("around 는 중심 시각(--ts)이 필요하다")
+        if self.cmd == "first-seen" and self.template is None:
+            raise ObsError("first-seen 은 템플릿이 필요하다")
+
+
+def logs_run(client: Client, a: LogsArgs, at: float | None = None) -> RunResult:
+    """→ (Evidence[Lines], 원본, kind). 검사(validate)가 요청 앞이다. 계산은 obs.logs 가, 표는 *_lines 가. stdout 을 만지지 않는다."""
+    a.validate()
+    window = Window.last(a.since, a.end, at)
+    if a.cmd == "histogram":
+        ev_h, raw = histogram(client, a.selector, window, by=a.by.split(","), step=a.step)
+        w = ev_h.window or window
+        return _evidence("logs", ev_h.query, w, histogram_lines(ev_h.value, w)), raw, "logql-histogram"
+    if a.cmd == "templates":
+        ev_t, raw = templates(client, a.selector, window, k=a.k, step=a.step)
+        w = ev_t.window or window
+        return _evidence("logs", ev_t.query, w, templates_lines(ev_t.value, w)), raw, "logql-templates"
+    if a.cmd == "around":
+        ts = parse_time(a.ts, now() if at is None else at)
+        ev_a, raw = around(client, a.selector, ts, parse_duration(a.span), limit=a.limit)
+        w = ev_a.window or window
+        return _evidence("logs", ev_a.query, w, around_lines(ev_a.value, w)), raw, "logql-around"
+    ev_f, raw = first_seen(client, a.selector, a.template or "", window)
+    w = ev_f.window or window
+    return _evidence("logs", ev_f.query, w, first_seen_lines(ev_f.value, w)), raw, "logql-first-seen"
+
+
+LOGS_COMMON_DOC = """계산은 백엔드(Loki)가 한다 — count_over_time · Patterns API 의 환원 결과만 받고, 원본 로그 줄은 예시 · 첫 발생 · 문맥에만 온다.
+실제로 보낸 질의와 창은 호출 디렉터리의 summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만."""
+
+HISTOGRAM_DOC = """logql.py histogram '<selector>' [--by detected_level] [--since 1h] [--end <시각>] [--step 60s]
+
+by 값별 · 구간별 건수 표 — `sum by (<by>) (count_over_time(<selector>[<step>]))` 를 구간 조회 한 번으로.
+첫 줄은 창 · step · 구간 수 헤더, 그 뒤 행마다 `합  {레이블}  구간별 건수(오래된 것부터)`. 행은 합 내림차순이고 상한을 넘으면 꼬리에 뺀 행 수.
+로그가 없으면 "데이터 없음"(0 과 다르다 — 건수 0 인 행은 0 으로 실린다).
+
+""" + LOGS_COMMON_DOC
+
+TEMPLATES_DOC = """logql.py templates '<selector>' [--k 10] [--since 1h] [--end <시각>] [--step 60s]
+
+로그 군집(패턴) 상위 k — Patterns API 한 번 + 군집마다 예시 한 줄. 군집마다 두 줄:
+`건수  비율  첫~마지막 발생(정밀도 step)  템플릿` · `예: <그 패턴에 걸린 첫 줄>`. 상위 k 밖의 건수는 꼬리 한 줄.
+템플릿을 그대로 first-seen 에 넣으면 정확한 첫 발생 시각이 나온다.
+
+""" + LOGS_COMMON_DOC
+
+AROUND_DOC = """logql.py around '<selector>' --ts <시각> [--span 5m] [--limit 50]
+
+시각 ts 앞뒤 span 의 문맥 — 창(ts±span) 전체 건수 한 번 + 앞(ts 이전) · 뒤(ts 부터) 각각 ts 에 가까운 줄 limit 개.
+첫 줄은 `총 N  보임 M (앞 a · 뒤 b, 잘림 표시)` 헤더, 그 뒤 보인 줄을 시각 오름차순으로. 줄이 없으면 "데이터 없음".
+
+""" + LOGS_COMMON_DOC
+
+FIRST_SEEN_DOC = """logql.py first-seen '<selector>' '<패턴>' [--since 1h] [--end <시각>]
+
+템플릿(패턴 — templates 의 출력 그대로, `<_>` 가 자리표시)에 걸리는 창 안의 첫 줄 — `|>` 패턴 필터를 forward · limit 1 로 한 번.
+`첫 발생 <시각>  <템플릿>` 과 그 줄, 창 안에 없으면 `창 안에 없음`.
+
+""" + LOGS_COMMON_DOC
+
+
+def logs_main(argv: Sequence[str]) -> None:
+    ap = argparse.ArgumentParser(prog="logql.py", description="로그 환원 연산 — %s. 각 서브커맨드의 --help 에 설명 전부." % " · ".join(LOGS_SUBCOMMANDS),
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True, metavar="<%s>" % "|".join(LOGS_SUBCOMMANDS))
+    fmt = argparse.RawDescriptionHelpFormatter
+
+    def common(sp: argparse.ArgumentParser, window: bool = True) -> None:
+        sp.add_argument("selector", help="LogQL 스트림 selector — 예: '{namespace=\"x\"}'")
+        if window:
+            sp.add_argument("--since", default="1h", help="창 길이. 기본 1h")
+            sp.add_argument("--end", default=None, help="창 끝 (now · -10m · unix초 · RFC3339). 기본 now")
+        _common(sp)
+
+    sp_h = sub.add_parser("histogram", help="by 값별 · 구간별 건수 표", description=HISTOGRAM_DOC, formatter_class=fmt)
+    common(sp_h)
+    sp_h.add_argument("--by", default="detected_level", help="행의 레이블 축. 쉼표로 여러 개. 기본 detected_level")
+    sp_h.add_argument("--step", default=None, help="구간 폭. 기본 창 길이/60 (최소 15s)")
+    sp_t = sub.add_parser("templates", help="로그 군집 상위 k + 예시", description=TEMPLATES_DOC, formatter_class=fmt)
+    common(sp_t)
+    sp_t.add_argument("--k", type=int, default=DEFAULT_TEMPLATES_K, help="상위 k. 기본 %d" % DEFAULT_TEMPLATES_K)
+    sp_t.add_argument("--step", default=None, help="sample 구간 폭. 기본 창 길이/60 (최소 15s)")
+    sp_a = sub.add_parser("around", help="시각 앞뒤의 문맥", description=AROUND_DOC, formatter_class=fmt)
+    common(sp_a, window=False)
+    sp_a.add_argument("--ts", default=None, help="중심 시각 (--ts=-30m · unix초 · RFC3339). 필수")
+    sp_a.add_argument("--span", default=DEFAULT_AROUND_SPAN, help="한 쪽 폭. 기본 %s" % DEFAULT_AROUND_SPAN)
+    sp_a.add_argument("--limit", type=int, default=DEFAULT_AROUND_LIMIT, help="한 쪽 줄 수 상한. 기본 %d" % DEFAULT_AROUND_LIMIT)
+    sp_f = sub.add_parser("first-seen", help="템플릿의 첫 발생", description=FIRST_SEEN_DOC, formatter_class=fmt)
+    common(sp_f)
+    sp_f.add_argument("template", help="패턴 — templates 출력의 템플릿 그대로")
+    a = ap.parse_args(argv)
+    args = LogsArgs(cmd=a.cmd, selector=a.selector, since=getattr(a, "since", "1h"), end=getattr(a, "end", None),
+                    by=getattr(a, "by", "detected_level"), step=getattr(a, "step", None), k=getattr(a, "k", DEFAULT_TEMPLATES_K),
+                    ts=getattr(a, "ts", None), span=getattr(a, "span", DEFAULT_AROUND_SPAN), limit=getattr(a, "limit", DEFAULT_AROUND_LIMIT),
+                    template=getattr(a, "template", None))
+    ev, body, kind = logs_run(_client(), args)
     _finish(ev, body, kind, a.max_lines, a.json)
 
 

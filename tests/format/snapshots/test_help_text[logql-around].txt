@@ -1,0 +1,21 @@
+usage: logql.py around [-h] [--max-lines MAX_LINES] [--json] [--ts TS] [--span SPAN] [--limit LIMIT] selector
+
+logql.py around '<selector>' --ts <시각> [--span 5m] [--limit 50]
+
+시각 ts 앞뒤 span 의 문맥 — 창(ts±span) 전체 건수 한 번 + 앞(ts 이전) · 뒤(ts 부터) 각각 ts 에 가까운 줄 limit 개.
+첫 줄은 `총 N  보임 M (앞 a · 뒤 b, 잘림 표시)` 헤더, 그 뒤 보인 줄을 시각 오름차순으로. 줄이 없으면 "데이터 없음".
+
+계산은 백엔드(Loki)가 한다 — count_over_time · Patterns API 의 환원 결과만 받고, 원본 로그 줄은 예시 · 첫 발생 · 문맥에만 온다.
+실제로 보낸 질의와 창은 호출 디렉터리의 summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만.
+
+positional arguments:
+  selector              LogQL 스트림 selector — 예: '{namespace="x"}'
+
+options:
+  -h, --help            show this help message and exit
+  --max-lines MAX_LINES
+                        stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
+  --json                stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 항상 남는다)
+  --ts TS               중심 시각 (--ts=-30m · unix초 · RFC3339). 필수
+  --span SPAN           한 쪽 폭. 기본 5m
+  --limit LIMIT         한 쪽 줄 수 상한. 기본 50

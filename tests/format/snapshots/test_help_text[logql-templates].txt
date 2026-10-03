@@ -1,0 +1,24 @@
+usage: logql.py templates [-h] [--since SINCE] [--end END] [--max-lines MAX_LINES] [--json] [--k K] [--step STEP]
+                          selector
+
+logql.py templates '<selector>' [--k 10] [--since 1h] [--end <시각>] [--step 60s]
+
+로그 군집(패턴) 상위 k — Patterns API 한 번 + 군집마다 예시 한 줄. 군집마다 두 줄:
+`건수  비율  첫~마지막 발생(정밀도 step)  템플릿` · `예: <그 패턴에 걸린 첫 줄>`. 상위 k 밖의 건수는 꼬리 한 줄.
+템플릿을 그대로 first-seen 에 넣으면 정확한 첫 발생 시각이 나온다.
+
+계산은 백엔드(Loki)가 한다 — count_over_time · Patterns API 의 환원 결과만 받고, 원본 로그 줄은 예시 · 첫 발생 · 문맥에만 온다.
+실제로 보낸 질의와 창은 호출 디렉터리의 summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만.
+
+positional arguments:
+  selector              LogQL 스트림 selector — 예: '{namespace="x"}'
+
+options:
+  -h, --help            show this help message and exit
+  --since SINCE         창 길이. 기본 1h
+  --end END             창 끝 (now · -10m · unix초 · RFC3339). 기본 now
+  --max-lines MAX_LINES
+                        stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
+  --json                stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 항상 남는다)
+  --k K                 상위 k. 기본 10
+  --step STEP           sample 구간 폭. 기본 창 길이/60 (최소 15s)

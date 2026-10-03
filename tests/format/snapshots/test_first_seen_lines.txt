@@ -1,0 +1,2 @@
+첫 발생 10-02 11:13:49Z  {"t":{"$date":"<_>"},"s":"I",  "c":"ACCESS",   "id":6788604, "ctx":"<_>","msg":"Auth metrics report","attr":{"metric":"acquireUser","micros"<_>}}⏎
+    {"t":{"$date":"2026-10-02T11:13:49.354+00:00"},"s":"I",  "c":"ACCESS",   "id":6788604, "ctx":"conn1463983","msg":"Auth metrics report","attr":{"metric":"acquireUser","micros":0}}⏎

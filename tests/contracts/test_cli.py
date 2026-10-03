@@ -8,7 +8,7 @@ from typing import Callable
 import pytest
 
 from obs.adapters import cli
-from obs.core import JSON, Client
+from obs.core import JSON, Client, Evidence, Lines, Window
 from tests.conftest import AT, MINUTE, ClientFactory, _no_physical, _vector
 
 
@@ -87,10 +87,13 @@ def test_emit_always_writes_even_when_fits(tmp_path: Path) -> None:
 HELP_SCREENS: tuple[tuple[Callable[[list[str]], None], list[str]], ...] = (
     (cli.promql_main, ["--help"]), (cli.promql_main, ["summarize", "--help"]), (cli.promql_main, ["compare", "--help"]),
     (cli.promql_main, ["top", "--help"]), (cli.logql_main, ["--help"]), (cli.traceql_main, ["--help"]),
+    (cli.logql_main, ["histogram", "--help"]), (cli.logql_main, ["templates", "--help"]), (cli.logql_main, ["around", "--help"]),
+    (cli.logql_main, ["first-seen", "--help"]),
 )
 
 
-@pytest.mark.parametrize("main,argv", HELP_SCREENS, ids=["promql", "promql-summarize", "promql-compare", "promql-top", "logql", "traceql"])
+@pytest.mark.parametrize("main,argv", HELP_SCREENS, ids=["promql", "promql-summarize", "promql-compare", "promql-top", "logql", "traceql",
+                                                         "logql-histogram", "logql-templates", "logql-around", "logql-first-seen"])
 def test_help_has_no_physical_flags_or_strings(main: Callable[[list[str]], None], argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
     """모든 --help 화면에 --uid · --url · --token · --host 가 없고 물리 문자열도 없다."""
     with pytest.raises(SystemExit) as ei:
@@ -100,6 +103,20 @@ def test_help_has_no_physical_flags_or_strings(main: Callable[[list[str]], None]
     for flag in ("--uid", "--url", "--token", "--host"):
         assert flag not in text
     _no_physical(text)
+
+
+def test_logql_help_lists_logs_subcommands(capsys: pytest.CaptureFixture[str]) -> None:
+    """상위 logql --help 에 로그 환원 서브커맨드 넷의 이름이 전부 있다 — 상위 화면에서 서브커맨드를 안다."""
+    # given — 상위 화면
+    argv = ["--help"]
+    # when
+    with pytest.raises(SystemExit) as ei:
+        cli.logql_main(argv)
+    # then
+    assert ei.value.code == 0
+    text = capsys.readouterr().out
+    for name in cli.LOGS_SUBCOMMANDS:
+        assert name in text
 
 
 # ── 파서 — 손으로 만든 형태 ───────────────────────────────────────────────────────
@@ -114,6 +131,32 @@ def test_parse_metric_scalar_goes_to_scalar_field() -> None:
 def test_parse_metric_broken_result_is_empty() -> None:
     """형태가 깨진 result 는 예외가 아니라 빈 시계열 목록이다."""
     assert cli.parse_metric({"data": {"resultType": "vector", "result": "garbage"}}).series == []
+
+
+@pytest.mark.parametrize("argv,expected", [
+    (["histogram", '{a="b"}', "--by", "app", "--since", "2h"], {"cmd": "histogram", "selector": '{a="b"}', "by": "app", "since": "2h"}),
+    (["first-seen", '{a="b"}', "<_> x", "--since", "2h"], {"cmd": "first-seen", "selector": '{a="b"}', "template": "<_> x", "since": "2h"}),
+], ids=["histogram", "first-seen"])
+def test_logql_main_routes_subcommand_to_logs_run(argv: list[str], expected: dict[str, str], monkeypatch: pytest.MonkeyPatch,
+                                                  make_client: ClientFactory, tmp_path: Path) -> None:
+    """logql.py 의 첫 인자가 서브커맨드면 logs_run 으로 간다 — argv 의 cmd · selector · 옵션(by · since) · 위치 인자(template) 가 LogsArgs 로 들어간다."""
+    # given — logs_run 대역이 받은 Args 를 기록한다
+    seen: list[cli.LogsArgs] = []
+
+    def fake_run(client: Client, a: cli.LogsArgs, at: float | None = None) -> cli.RunResult:
+        seen.append(a)
+        return Evidence(backend="logs", query=a.selector, window=Window(AT - MINUTE, AT), value=Lines(["x"])), {}, "logql-histogram"
+
+    client, _ = make_client()
+    monkeypatch.setattr(cli, "logs_run", fake_run)
+    monkeypatch.setattr(cli, "_client", lambda: client)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    # when
+    cli.logql_main(argv)
+    # then
+    assert len(seen) == 1
+    for name, value in expected.items():
+        assert getattr(seen[0], name) == value
 
 
 def test_promql_main_top_rejects_since() -> None:

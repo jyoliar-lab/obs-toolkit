@@ -11,6 +11,12 @@ logql — 로그 조회 (logs 백엔드, GET 만).
   logql.py --label-values <name> [--since 1h]             레이블 값
   logql.py --series '<selector>' [--since 1h]             스트림 목록
 
+환원 연산 — 서브커맨드. 각각의 --help 에 설명 전부:
+  logql.py histogram '<selector>' [--by detected_level]   by 값별 · 구간별 건수 표
+  logql.py templates '<selector>' [--k 10]                로그 군집 상위 k + 예시
+  logql.py around '<selector>' --ts <시각>                시각 앞뒤의 문맥
+  logql.py first-seen '<selector>' '<패턴>'               템플릿의 첫 발생
+
 옵션:
   --since <기간>     조회 구간 길이 (5m · 1h · 2d). 기본 1h
   --end <시각>       구간 끝 (now · -10m · unix초 · RFC3339). 기본 now

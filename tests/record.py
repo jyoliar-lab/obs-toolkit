@@ -244,6 +244,8 @@ CPU_QUERY: str = 'sum by (pod) (rate(container_cpu_usage_seconds_total{namespace
 EMPTY_QUERY: str = CPU_QUERY.replace('namespace="careerhub-prod"', 'namespace="no-such-namespace"')          # 없는 namespace → 빈 응답
 LOG_SELECTOR: str = '{namespace="careerhub-prod"}'
 LOG_METRIC_QUERY: str = "sum by (detected_level) (count_over_time(%s[5m]))" % LOG_SELECTOR
+EMPTY_LOG_SELECTOR: str = '{namespace="no-such-namespace"}'   # 없는 namespace → 빈 창(logs 환원 연산의 "데이터 없음" fixture)
+FIRST_SEEN_TEMPLATE: str = "<_> level=error <_>"               # 빈 창의 first_seen — 템플릿은 아무것이나 창 안에 없다
 TRACE_SEARCH: cli.TraceqlArgs = cli.TraceqlArgs(cmd="search", since="24h", limit=3)
 UP_APISERVER: str = 'up{job="apiserver"}'   # metadata 조회(labels · series)의 selector — 시계열 셋
 
@@ -266,6 +268,12 @@ def _logql(a: cli.LogqlArgs) -> Recipe:
     return run
 
 
+def _logs(a: cli.LogsArgs) -> Recipe:
+    def run(client: Client, at: float) -> None:
+        cli.logs_run(client, a, at=at)
+    return run
+
+
 def _traceql(a: cli.TraceqlArgs) -> Recipe:
     def run(client: Client, at: float) -> None:
         cli.traceql_run(client, a, at=at)
@@ -274,6 +282,7 @@ def _traceql(a: cli.TraceqlArgs) -> Recipe:
 
 def _first_trace_id(client: Client, search: cli.TraceqlArgs, at: float) -> str:
     _, body, _ = cli.traceql_run(client, search, at=at)
+    assert not isinstance(body, list), "search 는 단일 호출 — 원본은 body 하나"
     hits = cli.parse_search(cli.check_json(body, "traces"))
     if not hits:
         raise Unreproducible("search(%s, since=%s) 에 trace 가 없다 — 창을 넓히거나 recorded: manual 로" % (search.q or "", search.since))
@@ -314,6 +323,14 @@ RECIPES: dict[str, Recipe] = {
     "logql-label-values-namespace.json": _logql(cli.LogqlArgs(label_values="namespace")),
     "logql-series-careerhub-prod.json": _logql(cli.LogqlArgs(series=LOG_SELECTOR)),
     "traceql-tag-values-service-name.json": _traceql(cli.TraceqlArgs(cmd="tag-values", arg="resource.service.name", since="24h")),   # span 태그는 1h 창에 비기 일쑤 — 24h 의 resource 태그
+    # 로그 환원 연산 — 연산마다 정상 1(careerhub-prod) + 빈 창 1(no-such-namespace). first-seen 의 정상은 templates 실행의 호출 1(DERIVED)
+    "logql-histogram-by-level.json": _logs(cli.LogsArgs(cmd="histogram", selector=LOG_SELECTOR)),
+    "logql-histogram-empty.json": _logs(cli.LogsArgs(cmd="histogram", selector=EMPTY_LOG_SELECTOR)),
+    "logql-templates-careerhub-prod.json": _logs(cli.LogsArgs(cmd="templates", selector=LOG_SELECTOR, k=5)),
+    "logql-templates-empty.json": _logs(cli.LogsArgs(cmd="templates", selector=EMPTY_LOG_SELECTOR)),
+    "logql-around-careerhub-prod.json": _logs(cli.LogsArgs(cmd="around", selector=LOG_SELECTOR, ts="-30m", span="1m", limit=20)),
+    "logql-around-empty.json": _logs(cli.LogsArgs(cmd="around", selector=EMPTY_LOG_SELECTOR, ts="-30m", span="1m", limit=20)),
+    "logql-first-seen-empty.json": _logs(cli.LogsArgs(cmd="first-seen", selector=EMPTY_LOG_SELECTOR, template=FIRST_SEEN_TEMPLATE)),
 }
 
 
@@ -321,6 +338,8 @@ DERIVED: dict[str, tuple[str, int]] = {
     # 파생 파일 → (원 실행의 파일, 호출 인덱스). 같은 실행의 호출을 그 이름으로도 쓴다 — 별도 실행이면 Tempo 가 limit 안의
     # hit 을 호출마다 다르게 고를 수 있어 search 의 첫 hit 과 trace 의 id 가 어긋난다. 같은 실행에서 나오면 정합이 구조로 선다.
     "traceql-search.json": ("traceql-trace.json", 0),
+    # templates 의 첫 군집 예시 호출 = 같은 템플릿의 first_seen 질의 — 같은 실행에서 나와야 "templates 의 템플릿을 그대로 first_seen 에" 가 구조로 선다
+    "logql-first-seen-careerhub-prod.json": ("logql-templates-careerhub-prod.json", 1),
 }
 
 

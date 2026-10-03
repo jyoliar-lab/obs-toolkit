@@ -26,9 +26,10 @@ def _fixture(name: str) -> Fixture:
 def test_every_fixture_has_a_recipe_and_vice_versa() -> None:
     """fixtures/ 의 파일 집합과 녹화기가 만드는 이름(실행 + 파생)의 집합이 같다."""
     assert NAMES == fixture_names()
-    assert len(NAMES) == 20
+    assert len(NAMES) == 28
     assert not set(RECIPES) & set(DERIVED)
-    assert DERIVED == {"traceql-search.json": ("traceql-trace.json", 0)}
+    assert DERIVED == {"traceql-search.json": ("traceql-trace.json", 0),
+                       "logql-first-seen-careerhub-prod.json": ("logql-templates-careerhub-prod.json", 1)}
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -50,7 +51,9 @@ def test_fixture_is_recorded_format_with_request_and_response(name: str) -> None
             assert rq.at is not None
             assert rq.at_rfc3339 is not None
             assert rq.at_rfc3339 == record.fmt_rfc3339(rq.at)
-    assert response_of(fx, fx.calls[-1].request.path, name) == fx.calls[-1].response.body
+    paths = [c.request.path for c in fx.calls]
+    if paths.count(paths[-1]) == 1:   # 같은 경로의 호출이 여럿인 실행(around · templates)은 경로로 하나를 고를 수 없다 — 그것은 replay 가 순서로 돌려준다
+        assert response_of(fx, paths[-1], name) == fx.calls[-1].response.body
 
 
 def test_unmarked_fixtures_come_from_recorder_and_manual_ones_say_why() -> None:

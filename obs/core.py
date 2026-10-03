@@ -462,6 +462,7 @@ class Response:
     path: str       # 백엔드 네이티브 경로(api/v1/query 등) — 호스트·uid 없음
     status: int
     body: JSON      # 파싱된 JSON — 어댑터가 즉시 dataclass 로 옮긴다. JSON 이 아니면 str
+    params: dict[str, str | int | float] = field(default_factory=dict[str, str | int | float])   # 실제로 보낸 질의 파라미터(None · "" 를 뺀 뒤). {} = 파라미터 없이 보냈다
 
 
 def _scrub(text: str, secrets: tuple[str, ...]) -> str:
@@ -580,7 +581,7 @@ class Client:
             body = json.loads(text) if text else {}
         except ValueError:
             body = text
-        return Response(backend=backend, path=path, status=status, body=body)
+        return Response(backend=backend, path=path, status=status, body=body, params=query)
 
 
 # ── 진단 — 사람용. 여기서만 물리(URL·uid)가 보인다 ──────────────────────────────
