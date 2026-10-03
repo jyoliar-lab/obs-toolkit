@@ -20,10 +20,10 @@ import argparse
 import re
 import sys
 from dataclasses import dataclass, field
-from typing import Callable, Mapping, Sequence
+from typing import Callable, Mapping, Sequence, TypeAlias
 
 from obs.core import (
-    JSON, Client, DoctorReport, Evidence, Lines, ObsError, Params, Window, doctor, fmt_ts, load_config,
+    JSON, Client, DoctorReport, Evidence, Lines, ObsError, Params, Response, Window, doctor, fmt_ts, load_config,
     SPILL_RAW, SPILL_SUMMARY, json_int, json_labels, json_list, json_obj, json_str, json_strs,
     parse_duration, parse_time, now, spill, spill_ref, to_json, token_from_env,
 )
@@ -39,7 +39,7 @@ from obs.metrics import (
 DEFAULT_MAX_LINES: int = 40
 DEFAULT_LOG_LIMIT: int = 30
 
-RunResult = tuple[Evidence[Lines], JSON, str]
+RunResult: TypeAlias = "tuple[Evidence[Lines], JSON | list[Response], str]"   # 둘째 자리(원본) — 다중 호출 연산(templates · around)은 Response 목록
 """(근거, 원본 body, spill 종류 이름)"""
 
 
@@ -220,7 +220,7 @@ def evidence_preamble(ev: Evidence[Lines]) -> list[str]:
     return lines
 
 
-def _finish(ev: Evidence[Lines], body: JSON, kind: str, max_lines: int, as_json: bool) -> None:
+def _finish(ev: Evidence[Lines], body: JSON | list[Response], kind: str, max_lines: int, as_json: bool) -> None:
     """Evidence 를 stdout 규약으로. as_json 은 stdout 에 요약을 찍지 않고 경로만(파일은 어느 쪽이든 같다).
     summary.txt 는 머리(질의·창) + 요약 전체다."""
     emit(ev.value.lines or ["(결과 없음)"], body, kind, max_lines, quiet=as_json, preamble=evidence_preamble(ev))

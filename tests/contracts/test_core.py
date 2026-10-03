@@ -194,11 +194,22 @@ def test_get_builds_proxy_url_and_bearer(make_client: ClientFactory, config: Con
     """Client.get 은 논리 이름을 proxy_url 로 풀고 None · "" 파라미터를 버리며 Bearer · Accept 헤더를 붙이고, Response 에는 URL 이 없다."""
     client, t = make_client({("metrics", "api/v1/query"): (200, {"status": "success"})})
     r = client.get("metrics", "/api/v1/query", {"query": "up", "time": 1.5, "empty": "", "none": None})
-    assert r == Response("metrics", "/api/v1/query", 200, {"status": "success"})
+    assert (r.backend, r.path, r.status, r.body) == ("metrics", "/api/v1/query", 200, {"status": "success"})
     call = t.calls[0]
     assert call.url == config.proxy_url("metrics", "api/v1/query") + "?query=up&time=1.5"
     assert call.headers["Authorization"] == "Bearer test-token-not-real"
     assert call.headers["Accept"] == "application/json"
+
+
+def test_get_response_carries_sent_params(make_client: ClientFactory) -> None:
+    """Response.params 는 실제로 보낸 파라미터다 — None · "" 는 뺀 뒤. backend · path · status · body 는 그대로다."""
+    # given — None · "" 가 섞인 파라미터
+    client, _ = make_client({("metrics", "api/v1/query"): (200, {"status": "success"})})
+    # when
+    r = client.get("metrics", "api/v1/query", {"query": "up", "time": 1.5, "empty": "", "none": None})
+    # then
+    assert r.params == {"query": "up", "time": 1.5}
+    assert (r.backend, r.path, r.status, r.body) == ("metrics", "api/v1/query", 200, {"status": "success"})
 
 
 def test_get_logical_names_only(make_client: ClientFactory) -> None:

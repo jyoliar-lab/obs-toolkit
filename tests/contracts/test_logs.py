@@ -8,7 +8,7 @@ import pytest
 
 from obs import logs
 from obs.adapters import cli
-from obs.core import JSON, Client, ObsError, Window
+from obs.core import JSON, Client, ObsError, Response, Window
 from obs.logs import LogEntry, Sample, Side
 from obs.metrics import auto_step
 from tests.conftest import AT, MINUTE, ClientFactory, LokiFactory, _vector
@@ -377,15 +377,19 @@ def test_templates_requests_patterns_then_one_example_per_cluster(make_client: C
 
 
 def test_templates_raw_carries_patterns_and_examples(make_client: ClientFactory) -> None:
-    """templates 의 원본은 온 응답 전부다 — patterns 응답 그대로와 군집 수만큼의 예시 응답 그대로."""
+    """templates 의 원본은 온 응답 전부를 출처와 함께 담은 Response 목록이다 — patterns 응답 하나 뒤에 군집마다 그 패턴의 예시 응답."""
     # given
     client, _ = make_client({("logs", PATTERNS): (200, THREE), ("logs", RANGE): (200, EXAMPLE)})
     # when
     ev, raw = logs.templates(client, SEL, W)
     # then
-    assert isinstance(raw, dict)
-    assert raw["patterns"] == THREE
-    assert raw["examples"] == [EXAMPLE] * len(ev.value.clusters)
+    assert isinstance(raw, list)
+    assert all(isinstance(r, Response) for r in raw)
+    assert len(raw) == 1 + len(ev.value.clusters)
+    assert (raw[0].path, raw[0].body) == (PATTERNS, THREE)
+    assert [r.path for r in raw[1:]] == [RANGE] * len(ev.value.clusters)
+    assert [r.body for r in raw[1:]] == [EXAMPLE] * len(ev.value.clusters)
+    assert [r.params["query"] for r in raw[1:]] == [logs.pattern_filter(SEL, c.template) for c in ev.value.clusters]
 
 
 def test_templates_default_step_is_auto(make_client: ClientFactory) -> None:
@@ -540,17 +544,19 @@ def test_around_keeps_only_lines_inside_window_in_order(make_loki: LokiFactory) 
 
 
 def test_around_raw_carries_count_and_both_sides(make_client: ClientFactory) -> None:
-    """around 의 원본은 온 응답 셋 전부다 — count · backward(before) · forward(after) 응답 그대로."""
+    """around 의 원본은 온 응답 셋을 출처와 함께 담은 Response 목록이다 — count · backward(before) · forward(after) 순."""
     # given
     count, lines = _vector(({}, "0")), _streams()
     client, _ = make_client({("logs", INSTANT): (200, count), ("logs", RANGE): (200, lines)})
     # when
     _, raw = logs.around(client, SEL, TS, 60)
     # then
-    assert isinstance(raw, dict)
-    assert raw["count"] == count
-    assert raw["before"] == lines
-    assert raw["after"] == lines
+    assert isinstance(raw, list)
+    assert all(isinstance(r, Response) for r in raw)
+    assert [r.path for r in raw] == [INSTANT, RANGE, RANGE]
+    assert raw[1].params["direction"] == "backward"
+    assert raw[2].params["direction"] == "forward"
+    assert [r.body for r in raw] == [count, lines, lines]
 
 
 def test_around_evidence_window_is_ts_plus_minus_span(make_client: ClientFactory) -> None:

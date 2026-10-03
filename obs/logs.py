@@ -14,9 +14,9 @@ Loki 응답 파서(`Stream` · `LogResult` · `parse_logs` · `LogEntry`)는 어
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Sequence
+from typing import Sequence, cast
 
-from obs.core import JSON, Client, Evidence, ObsError, Params, Window, json_int, json_labels, json_list, json_obj, json_pair, json_str
+from obs.core import JSON, Client, Evidence, ObsError, Params, Response, Window, json_int, json_labels, json_list, json_obj, json_pair, json_str
 from obs.metrics import Series, auto_step, check_status, parse_metric, series_items
 
 DEFAULT_MAX_GROUPS: int = 20
@@ -202,7 +202,7 @@ def _first_line(client: Client, query: str, window: Window) -> tuple[LogEntry | 
 
 
 def templates(client: Client, selector: str, window: Window, k: int = DEFAULT_TEMPLATES_K,
-              step: str | None = None) -> tuple[Evidence[Templates], JSON]:
+              step: str | None = None) -> tuple[Evidence[Templates], list[Response]]:
     """창 안의 로그 군집 상위 k — Patterns API 한 번 + 남긴 군집마다 예시 한 줄(pattern_filter · forward · limit 1)."""
     if not selector.strip():
         raise ObsError("LogQL selector 가 필요하다")
@@ -222,7 +222,7 @@ def templates(client: Client, selector: str, window: Window, k: int = DEFAULT_TE
     for c in t.clusters:
         first, _ = _first_line(client, pattern_filter(selector, c.template), window)
         clusters.append(replace(c, example=first.line if first else None))
-    return Evidence(backend="logs", query=selector, window=window, value=replace(t, clusters=clusters)), body
+    return Evidence(backend="logs", query=selector, window=window, value=replace(t, clusters=clusters)), cast(list[Response], body)   # red stub — 형태만, 런타임은 아직 body
 
 
 # ── around ───────────────────────────────────────────────────────────────────────
@@ -268,7 +268,7 @@ def _side(client: Client, selector: str, start: float, end: float, direction: st
     return kept, Side(shown=len(kept), truncated=len(entries) > limit), body
 
 
-def around(client: Client, selector: str, ts: float, span: float, limit: int = DEFAULT_AROUND_LIMIT) -> tuple[Evidence[Context], JSON]:
+def around(client: Client, selector: str, ts: float, span: float, limit: int = DEFAULT_AROUND_LIMIT) -> tuple[Evidence[Context], list[Response]]:
     """ts 앞뒤 span 의 문맥 — 창 전체 건수(count 질의) + 앞(backward [ts−span, ts)) · 뒤(forward [ts, ts+span)) 각 limit 줄."""
     if not selector.strip():
         raise ObsError("LogQL selector 가 필요하다")
@@ -284,7 +284,7 @@ def around(client: Client, selector: str, ts: float, span: float, limit: int = D
     entries = sorted([*before, *after], key=lambda e: e.ts_ns)
     value = Context(center=ts, span=span, limit=limit, total=total, before=before_side, after=after_side, entries=entries)
     raw: JSON = {"count": count_body, "before": before_body, "after": after_body}
-    return Evidence(backend="logs", query=selector, window=Window(ts - span, ts + span), value=value), raw
+    return Evidence(backend="logs", query=selector, window=Window(ts - span, ts + span), value=value), cast(list[Response], raw)   # red stub — 형태만, 런타임은 아직 dict
 
 
 # ── first_seen ───────────────────────────────────────────────────────────────────

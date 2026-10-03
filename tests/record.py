@@ -282,6 +282,7 @@ def _traceql(a: cli.TraceqlArgs) -> Recipe:
 
 def _first_trace_id(client: Client, search: cli.TraceqlArgs, at: float) -> str:
     _, body, _ = cli.traceql_run(client, search, at=at)
+    assert not isinstance(body, list), "search 는 단일 호출 — 원본은 body 하나"
     hits = cli.parse_search(cli.check_json(body, "traces"))
     if not hits:
         raise Unreproducible("search(%s, since=%s) 에 trace 가 없다 — 창을 넓히거나 recorded: manual 로" % (search.q or "", search.since))
