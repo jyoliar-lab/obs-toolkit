@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from obs.core import (
-    JSON, Client, Evidence, ObsError, Window, json_labels, json_list, json_obj, json_pair, json_str, json_strs,
+    JSON, Client, Evidence, ObsError, Response, Window, json_labels, json_list, json_obj, json_pair, json_str, json_strs,
 )
 
 DEFAULT_BASELINE: str = "1d"   # 기준선 창 기본값 — 1일 전 같은 시각. `prev` 는 직전 창, `1w` 는 1주 전
@@ -309,7 +309,7 @@ def _instant(client: Client, query: str, at: float) -> dict[str, JSON]:
     return check_status(client.get("metrics", "api/v1/query", {"query": query, "time": at}).body, "metrics")
 
 
-def summarize(client: Client, query: str, window: Window, step: str | None = None) -> tuple[Evidence[Summary], JSON]:
+def summarize(client: Client, query: str, window: Window, step: str | None = None) -> tuple[Evidence[Summary], list[Response]]:
     """창 안의 시계열별 n · min · p50 · p95 · max · last · 기울기 — 전부 서버가 서브쿼리 위에서 계산한다. GET 1 회.
     Evidence.query 는 조립된 질의(그대로 재실행 가능), window 는 받은 창."""
     if not query.strip():
@@ -333,7 +333,7 @@ def baseline_offset(window: Window) -> tuple[Window, str]:
     return w, duration_literal(w.end - base.end)
 
 
-def compare(client: Client, query: str, window: Window, step: str | None = None) -> tuple[Evidence[Comparison], JSON]:
+def compare(client: Client, query: str, window: Window, step: str | None = None) -> tuple[Evidence[Comparison], list[Response]]:
     """같은 질의의 p95 를 지금 창과 기준선 창(같은 식의 `offset`)에서 한 질의로 받아 시계열별 차이만. GET 1 회.
     기준선 시계열이 부재면 "기준선 없음" — 서버 응답만으로 선다."""
     if not query.strip():
@@ -352,7 +352,7 @@ def compare(client: Client, query: str, window: Window, step: str | None = None)
 
 
 def top(client: Client, query: str, window: Window, k: int = DEFAULT_TOP_K, by: Sequence[str] = ("pod",),
-        agg: str = DEFAULT_TOP_AGG) -> tuple[Evidence[Top], JSON]:
+        agg: str = DEFAULT_TOP_AGG) -> tuple[Evidence[Top], list[Response]]:
     """레이블 축 상위 k — `window.end` 시각의 즉시 조회. 질의를 `topk(k, agg by (by) (query))` 로 감싸 서버가 k 개만
     돌려주게 한다. Evidence.query 는 감싼 질의(그대로 재실행 가능), window 는 평가 시각(start = end)."""
     if not query.strip():

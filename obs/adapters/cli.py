@@ -39,7 +39,7 @@ from obs.metrics import (
 DEFAULT_MAX_LINES: int = 40
 DEFAULT_LOG_LIMIT: int = 30
 
-RunResult: TypeAlias = "tuple[Evidence[Lines], JSON | list[Response], str]"   # 둘째 자리(원본) — 다중 호출 연산(templates · around)은 Response 목록
+RunResult: TypeAlias = "tuple[Evidence[Lines], list[Response], str]"   # 둘째 자리(원본) — 호출 순서의 Response 목록
 """(근거, 원본 body, spill 종류 이름)"""
 
 
@@ -220,10 +220,10 @@ def evidence_preamble(ev: Evidence[Lines]) -> list[str]:
     return lines
 
 
-def _finish(ev: Evidence[Lines], body: JSON | list[Response], kind: str, max_lines: int, as_json: bool) -> None:
+def _finish(ev: Evidence[Lines], raw: list[Response], kind: str, max_lines: int, as_json: bool) -> None:
     """Evidence 를 stdout 규약으로. as_json 은 stdout 에 요약을 찍지 않고 경로만(파일은 어느 쪽이든 같다).
     summary.txt 는 머리(질의·창) + 요약 전체다."""
-    emit(ev.value.lines or ["(결과 없음)"], body, kind, max_lines, quiet=as_json, preamble=evidence_preamble(ev))
+    emit(ev.value.lines or ["(결과 없음)"], raw, kind, max_lines, quiet=as_json, preamble=evidence_preamble(ev))
 
 
 def _common(ap: argparse.ArgumentParser) -> None:

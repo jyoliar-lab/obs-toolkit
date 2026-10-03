@@ -95,7 +95,7 @@ def histogram_query(selector: str, by: Sequence[str], step: str) -> str:
 
 
 def histogram(client: Client, selector: str, window: Window, by: Sequence[str] = ("detected_level",),
-              step: str | None = None, max_groups: int = DEFAULT_MAX_GROUPS) -> tuple[Evidence[Histogram], JSON]:
+              step: str | None = None, max_groups: int = DEFAULT_MAX_GROUPS) -> tuple[Evidence[Histogram], list[Response]]:
     """by 값별 · 구간별 건수 표 — `count_over_time` matrix 를 query_range 한 번으로 받아 편다. 행은 total 내림차순, max_groups 까지."""
     if not selector.strip():
         raise ObsError("LogQL selector 가 필요하다")
@@ -304,7 +304,7 @@ class FirstSeen:
     line: str | None
 
 
-def first_seen(client: Client, selector: str, template: str, window: Window) -> tuple[Evidence[FirstSeen], JSON]:
+def first_seen(client: Client, selector: str, template: str, window: Window) -> tuple[Evidence[FirstSeen], list[Response]]:
     """템플릿(패턴)에 걸리는 창 안의 첫 줄 — pattern_filter 질의를 forward · limit 1 로 한 번. 없으면 ts · line 이 None."""
     if not selector.strip():
         raise ObsError("LogQL selector 가 필요하다")
