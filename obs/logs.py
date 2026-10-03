@@ -193,12 +193,17 @@ def clusters_of(patterns: Sequence[Pattern], k: int, step: str) -> Templates:
     return Templates(k=k, step=step, total=total, clusters=kept, other=sum(c.count for c in counted[k:]))
 
 
+def _query_range(client: Client, params: Params) -> tuple[list[LogEntry], Response]:
+    """query_range 한 번 — 받은 줄(응답 순서)과 그 Response."""
+    resp = client.get("logs", "loki/api/v1/query_range", params)
+    body = check_status(resp.body, "logs")
+    return [LogEntry(ts, s.labels, line) for s in parse_logs(body).streams for ts, line in s.values], resp
+
+
 def _first_line(client: Client, query: str, window: Window) -> tuple[LogEntry | None, Response]:
     """창 안에서 질의에 걸리는 가장 이른 줄 — query_range forward · limit 1. 없으면 None."""
     params: Params = {"start": int(window.start * 1e9), "end": int(window.end * 1e9), "query": query, "limit": 1, "direction": "forward"}
-    resp = client.get("logs", "loki/api/v1/query_range", params)
-    body = check_status(resp.body, "logs")
-    entries = [LogEntry(ts, s.labels, line) for s in parse_logs(body).streams for ts, line in s.values]
+    entries, resp = _query_range(client, params)
     return (min(entries, key=lambda e: e.ts_ns) if entries else None), resp
 
 
@@ -212,19 +217,19 @@ def templates(client: Client, selector: str, window: Window, k: int = DEFAULT_TE
     step = step or auto_step(window.seconds)
     params: Params = {"query": selector, "start": int(window.start * 1e9), "end": int(window.end * 1e9), "step": step}
     try:
-        resp = client.get("logs", "loki/api/v1/patterns", params)
+        patterns_resp = client.get("logs", "loki/api/v1/patterns", params)
     except ObsError as e:
         if "(404)" in str(e):
             raise ObsError("logs 백엔드에 Patterns API 가 없다(404) — Loki 의 pattern_ingester 가 꺼져 있을 수 있다. 사람에게")
         raise
-    body = check_status(resp.body, "logs")
+    body = check_status(patterns_resp.body, "logs")
     t = clusters_of(parse_patterns(body), k, step)
     clusters: list[Template] = []
-    raw: list[Response] = [resp]
+    raw: list[Response] = [patterns_resp]
     for c in t.clusters:
-        first, example = _first_line(client, pattern_filter(selector, c.template), window)
+        first, example_resp = _first_line(client, pattern_filter(selector, c.template), window)
         clusters.append(replace(c, example=first.line if first else None))
-        raw.append(example)
+        raw.append(example_resp)
     return Evidence(backend="logs", query=selector, window=window, value=replace(t, clusters=clusters)), raw
 
 
@@ -264,9 +269,7 @@ def count_query(selector: str, seconds: float) -> str:
 def _side(client: Client, selector: str, start: float, end: float, direction: str, limit: int) -> tuple[list[LogEntry], Side, Response]:
     """[start, end) 의 ts 쪽 줄 limit 개 — limit+1 개를 물어 넘치면 잘림이다. direction 이 ts 에 가까운 것부터 받게 한다."""
     params: Params = {"start": int(start * 1e9), "end": int(end * 1e9), "query": selector, "limit": limit + 1, "direction": direction}
-    resp = client.get("logs", "loki/api/v1/query_range", params)
-    body = check_status(resp.body, "logs")
-    entries = [LogEntry(ts, s.labels, line) for s in parse_logs(body).streams for ts, line in s.values]
+    entries, resp = _query_range(client, params)
     entries.sort(key=lambda e: e.ts_ns, reverse=(direction == "backward"))
     kept = entries[:limit]
     return kept, Side(shown=len(kept), truncated=len(entries) > limit), resp
