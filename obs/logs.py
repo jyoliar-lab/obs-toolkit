@@ -104,8 +104,8 @@ def histogram(client: Client, selector: str, window: Window, by: Sequence[str] =
     step = step or auto_step(window.seconds)
     q = histogram_query(selector, by, step)
     params: Params = {"start": int(window.start * 1e9), "end": int(window.end * 1e9), "query": q, "step": step}
-    body = check_status(client.get("logs", "loki/api/v1/query_range", params).body, "logs")
-    series = parse_logs(body).series
+    resp = client.get("logs", "loki/api/v1/query_range", params)
+    series = parse_logs(check_status(resp.body, "logs")).series
     times = sorted({ts for s in series for ts, _ in s.values})
     groups: list[GroupCount] = []
     for s in series:
@@ -115,7 +115,7 @@ def histogram(client: Client, selector: str, window: Window, by: Sequence[str] =
     groups.sort(key=lambda g: -g.total)
     value = Histogram(by=[a.strip() for a in by if a.strip()], step=step, times=times, groups=groups[:max_groups],
                       folded=max(0, len(groups) - max_groups))
-    return Evidence(backend="logs", query=q, window=window, value=value), body
+    return Evidence(backend="logs", query=q, window=window, value=value), [resp]
 
 
 # ── templates ────────────────────────────────────────────────────────────────────
@@ -311,4 +311,4 @@ def first_seen(client: Client, selector: str, template: str, window: Window) -> 
     q = pattern_filter(selector, template)
     first, resp = _first_line(client, q, window)
     value = FirstSeen(template=template, ts=first.ts_ns / 1e9 if first else None, line=first.line if first else None)
-    return Evidence(backend="logs", query=q, window=window, value=value), resp.body
+    return Evidence(backend="logs", query=q, window=window, value=value), [resp]

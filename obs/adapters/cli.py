@@ -331,7 +331,7 @@ class PromqlArgs:
 
 
 def promql_run(client: Client, a: PromqlArgs, at: float | None = None) -> RunResult:
-    """→ (Evidence, 원본 body, kind). stdout 을 만지지 않는다."""
+    """→ (Evidence, 원본 Response 목록, kind). stdout 을 만지지 않는다."""
     end = parse_time(a.end, now() if at is None else at)
     start = end - parse_duration(a.range_) if a.range_ else None
     window = Window(start=start if start is not None else end, end=end)
@@ -339,17 +339,20 @@ def promql_run(client: Client, a: PromqlArgs, at: float | None = None) -> RunRes
 
     if a.labels:
         params: Params = {"match[]": match, "start": start, "end": end}
-        body = check_status(client.get("metrics", "api/v1/labels", params).body, "metrics")
+        resp = client.get("metrics", "api/v1/labels", params)
+        body = check_status(resp.body, "metrics")
         lines = sorted(parse_strings(body))
         kind, query = "promql-labels", "labels(%s)" % (match or "")
     elif a.label_values:
         params = {"match[]": match, "start": start, "end": end}
-        body = check_status(client.get("metrics", "api/v1/label/%s/values" % a.label_values, params).body, "metrics")
+        resp = client.get("metrics", "api/v1/label/%s/values" % a.label_values, params)
+        body = check_status(resp.body, "metrics")
         lines = sorted(parse_strings(body))
         kind, query = "promql-label-values", "label_values(%s, %s)" % (a.label_values, match or "")
     elif a.series:
         params = {"match[]": a.series, "start": start if start is not None else end - 3600, "end": end}
-        body = check_status(client.get("metrics", "api/v1/series", params).body, "metrics")
+        resp = client.get("metrics", "api/v1/series", params)
+        body = check_status(resp.body, "metrics")
         lines = [labels_str(m) for m in parse_label_sets(body)]
         kind, query = "promql-series", "series(%s)" % a.series
     elif not match:
@@ -357,15 +360,17 @@ def promql_run(client: Client, a: PromqlArgs, at: float | None = None) -> RunRes
     elif start is not None:
         step = a.step or auto_step(end - start)
         params = {"query": match, "start": start, "end": end, "step": step}
-        body = check_status(client.get("metrics", "api/v1/query_range", params).body, "metrics")
+        resp = client.get("metrics", "api/v1/query_range", params)
+        body = check_status(resp.body, "metrics")
         lines = range_lines(parse_metric(body), a.points)
         kind, query = "promql-range", match
     else:
-        body = check_status(client.get("metrics", "api/v1/query", {"query": match, "time": end}).body, "metrics")
+        resp = client.get("metrics", "api/v1/query", {"query": match, "time": end})
+        body = check_status(resp.body, "metrics")
         lines = instant_lines(parse_metric(body))
         kind, query = "promql", match
 
-    return _evidence("metrics", query, window, lines), body, kind
+    return _evidence("metrics", query, window, lines), [resp], kind
 
 
 def promql_main(argv: Sequence[str] | None = None) -> None:
@@ -639,27 +644,31 @@ def logql_run(client: Client, a: LogqlArgs, at: float | None = None) -> RunResul
     ns: Params = {"start": int(window.start * 1e9), "end": int(window.end * 1e9)}
 
     if a.labels:
-        body = check_status(client.get("logs", "loki/api/v1/labels", ns).body, "logs")
+        resp = client.get("logs", "loki/api/v1/labels", ns)
+        body = check_status(resp.body, "logs")
         lines = sorted(parse_strings(body))
         kind, query = "logql-labels", "labels()"
     elif a.label_values:
-        body = check_status(client.get("logs", "loki/api/v1/label/%s/values" % a.label_values, ns).body, "logs")
+        resp = client.get("logs", "loki/api/v1/label/%s/values" % a.label_values, ns)
+        body = check_status(resp.body, "logs")
         lines = sorted(parse_strings(body))
         kind, query = "logql-label-values", "label_values(%s)" % a.label_values
     elif a.series:
-        body = check_status(client.get("logs", "loki/api/v1/series", {**ns, "match[]": a.series}).body, "logs")
+        resp = client.get("logs", "loki/api/v1/series", {**ns, "match[]": a.series})
+        body = check_status(resp.body, "logs")
         lines = [labels_str(m) for m in parse_label_sets(body)]
         kind, query = "logql-series", "series(%s)" % a.series
     elif not a.query:
         raise ObsError("LogQL 이 필요하다")
     else:
         params: Params = {**ns, "query": a.query, "limit": a.limit, "direction": a.direction}
-        body = check_status(client.get("logs", "loki/api/v1/query_range", params).body, "logs")
+        resp = client.get("logs", "loki/api/v1/query_range", params)
+        body = check_status(resp.body, "logs")
         res = parse_logs(body)
         lines = matrix_lines(res) if res.result_type == "matrix" else stream_lines(res, a.direction, a.width)
         kind, query = "logql", a.query
 
-    return _evidence("logs", query, window, lines), body, kind
+    return _evidence("logs", query, window, lines), [resp], kind
 
 
 def logql_main(argv: Sequence[str] | None = None) -> None:
@@ -946,29 +955,33 @@ def traceql_run(client: Client, a: TraceqlArgs, at: float | None = None) -> RunR
 
     if a.cmd == "search":
         params: Params = {**w, "limit": a.limit, "q": a.q, "minDuration": a.min_duration}
-        body = check_json(client.get("traces", "api/search", params).body, "traces")
+        resp = client.get("traces", "api/search", params)
+        body = check_json(resp.body, "traces")
         lines = search_lines(parse_search(body))
         kind, query = "traceql-search", "search(%s)" % (a.q or "")
     elif a.cmd == "trace":
         if not a.arg:
             raise ObsError("traceID 가 필요하다")
-        body = check_json(client.get("traces", "api/traces/%s" % a.arg).body, "traces")
+        resp = client.get("traces", "api/traces/%s" % a.arg)
+        body = check_json(resp.body, "traces")
         lines = trace_lines(a.arg, parse_spans(body), a.top)
         kind, query = "traceql-trace", "trace(%s)" % a.arg
     elif a.cmd == "tags":
-        body = check_json(client.get("traces", "api/v2/search/tags", {**w, "scope": a.scope}).body, "traces")
+        resp = client.get("traces", "api/v2/search/tags", {**w, "scope": a.scope})
+        body = check_json(resp.body, "traces")
         lines = tags_lines(parse_tags(body))
         kind, query = "traceql-tags", "tags(%s)" % (a.scope or "")
     elif a.cmd == "tag-values":
         if not a.arg:
             raise ObsError("태그 이름이 필요하다")
-        body = check_json(client.get("traces", "api/v2/search/tag/%s/values" % a.arg, {**w, "q": a.q}).body, "traces")
+        resp = client.get("traces", "api/v2/search/tag/%s/values" % a.arg, {**w, "q": a.q})
+        body = check_json(resp.body, "traces")
         lines = sorted(parse_tag_values(body))
         kind, query = "traceql-tag-values", "tag_values(%s, %s)" % (a.arg, a.q or "")
     else:
         raise ObsError("알 수 없는 명령 %r — search · trace · tags · tag-values" % a.cmd)
 
-    return _evidence("traces", query, window, lines), body, kind
+    return _evidence("traces", query, window, lines), [resp], kind
 
 
 def traceql_main(argv: Sequence[str] | None = None) -> None:

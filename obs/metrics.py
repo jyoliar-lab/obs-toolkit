@@ -305,8 +305,10 @@ def deltas_of(res: MetricResult) -> list[Delta]:
 
 # ── 연산 — Client 주입, Window 를 받고 Evidence 를 돌려준다. 연산당 GET 1 회 ─────────
 
-def _instant(client: Client, query: str, at: float) -> dict[str, JSON]:
-    return check_status(client.get("metrics", "api/v1/query", {"query": query, "time": at}).body, "metrics")
+def _instant(client: Client, query: str, at: float) -> tuple[dict[str, JSON], Response]:
+    """즉시 조회 한 번 — 검사한 body 와 그 Response."""
+    resp = client.get("metrics", "api/v1/query", {"query": query, "time": at})
+    return check_status(resp.body, "metrics"), resp
 
 
 def summarize(client: Client, query: str, window: Window, step: str | None = None) -> tuple[Evidence[Summary], list[Response]]:
@@ -316,9 +318,9 @@ def summarize(client: Client, query: str, window: Window, step: str | None = Non
         raise ObsError("PromQL 이 필요하다")
     step = step or auto_step(window.seconds)
     q = summarize_query(query, window, step)
-    body = _instant(client, q, window.end)
+    body, resp = _instant(client, q, window.end)
     value = Summary(step=step, series=summaries_of(parse_metric(body)))
-    return Evidence(backend="metrics", query=q, window=window, value=value), body
+    return Evidence(backend="metrics", query=q, window=window, value=value), [resp]
 
 
 def baseline_offset(window: Window) -> tuple[Window, str]:
@@ -341,14 +343,14 @@ def compare(client: Client, query: str, window: Window, step: str | None = None)
     w, offset = baseline_offset(window)
     step = step or auto_step(w.seconds)
     q = compare_query(query, w, step, offset)
-    body = _instant(client, q, w.end)
+    body, resp = _instant(client, q, w.end)
     stats = split_stats(parse_metric(body))
     value = Comparison(
         step=step, offset=offset, deltas=deltas_of(parse_metric(body)),
         now_empty=not any("now" in st for st in stats.values()),
         baseline_empty=not any("base" in st for st in stats.values()),
     )
-    return Evidence(backend="metrics", query=q, window=w, value=value), body
+    return Evidence(backend="metrics", query=q, window=w, value=value), [resp]
 
 
 def top(client: Client, query: str, window: Window, k: int = DEFAULT_TOP_K, by: Sequence[str] = ("pod",),
@@ -358,7 +360,7 @@ def top(client: Client, query: str, window: Window, k: int = DEFAULT_TOP_K, by: 
     if not query.strip():
         raise ObsError("PromQL 이 필요하다")
     wrapped = top_query(query, k, by, agg)
-    body = _instant(client, wrapped, window.end)
+    body, resp = _instant(client, wrapped, window.end)
     entries: list[TopEntry] = []
     for s in parse_metric(body).series:
         v = finite_value(s)
@@ -366,4 +368,4 @@ def top(client: Client, query: str, window: Window, k: int = DEFAULT_TOP_K, by: 
             entries.append(TopEntry(labels=dict(s.labels), value=v))
     entries.sort(key=lambda e: -e.value)
     value = Top(k=k, by=[a.strip() for a in by if a.strip()], agg=agg, entries=entries[:k])
-    return Evidence(backend="metrics", query=wrapped, window=Window(start=window.end, end=window.end), value=value), body
+    return Evidence(backend="metrics", query=wrapped, window=Window(start=window.end, end=window.end), value=value), [resp]
