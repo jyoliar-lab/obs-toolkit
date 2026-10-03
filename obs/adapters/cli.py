@@ -40,7 +40,7 @@ DEFAULT_MAX_LINES: int = 40
 DEFAULT_LOG_LIMIT: int = 30
 
 RunResult: TypeAlias = "tuple[Evidence[Lines], list[Response], str]"   # 둘째 자리(원본) — 호출 순서의 Response 목록
-"""(근거, 원본 body, spill 종류 이름)"""
+"""(근거, 원본 Response 목록, spill 종류 이름)"""
 
 
 # ── 응답 dataclass + 파서 — Loki 의 로그 파서(Stream · LogResult · parse_logs)는 obs.logs 에, Prometheus 형은 obs.metrics 에 ──
@@ -392,8 +392,8 @@ def promql_main(argv: Sequence[str] | None = None) -> None:
     a = ap.parse_args(argv)
     args = PromqlArgs(query=a.query, end=a.end, range_=a.range_, step=a.step, points=a.points,
                       labels=a.labels, label_values=a.label_values, series=a.series)
-    ev, body, kind = promql_run(_client(), args)
-    _finish(ev, body, kind, a.max_lines, a.json)
+    ev, raw, kind = promql_run(_client(), args)
+    _finish(ev, raw, kind, a.max_lines, a.json)
 
 
 # ── 환원 연산 — promql.py 의 서브커맨드 (계산은 obs.metrics, 표는 여기) ─────────────────
@@ -544,8 +544,8 @@ def metrics_main(argv: Sequence[str]) -> None:
     args = MetricsArgs(cmd=a.cmd, query=a.query, since=getattr(a, "since", "1h"), end=a.end, step=getattr(a, "step", None),
                        baseline=getattr(a, "baseline", DEFAULT_BASELINE), k=getattr(a, "k", DEFAULT_TOP_K),
                        by=getattr(a, "by", "pod"), agg=getattr(a, "agg", DEFAULT_TOP_AGG))
-    ev, body, kind = metrics_run(_client(), args)
-    _finish(ev, body, kind, a.max_lines, a.json)
+    ev, raw, kind = metrics_run(_client(), args)
+    _finish(ev, raw, kind, a.max_lines, a.json)
 
 
 # ── logql ────────────────────────────────────────────────────────────────────────
@@ -691,8 +691,8 @@ def logql_main(argv: Sequence[str] | None = None) -> None:
     a = ap.parse_args(argv)
     args = LogqlArgs(query=a.query, since=a.since, end=a.end, limit=a.limit, direction=a.direction,
                      width=a.width, labels=a.labels, label_values=a.label_values, series=a.series)
-    ev, body, kind = logql_run(_client(), args)
-    _finish(ev, body, kind, a.max_lines, a.json)
+    ev, raw, kind = logql_run(_client(), args)
+    _finish(ev, raw, kind, a.max_lines, a.json)
 
 
 # ── 환원 연산 — logql.py 의 서브커맨드 (계산은 obs.logs, 표는 여기) ────────────────────
@@ -866,8 +866,8 @@ def logs_main(argv: Sequence[str]) -> None:
                     by=getattr(a, "by", "detected_level"), step=getattr(a, "step", None), k=getattr(a, "k", DEFAULT_TEMPLATES_K),
                     ts=getattr(a, "ts", None), span=getattr(a, "span", DEFAULT_AROUND_SPAN), limit=getattr(a, "limit", DEFAULT_AROUND_LIMIT),
                     template=getattr(a, "template", None))
-    ev, body, kind = logs_run(_client(), args)
-    _finish(ev, body, kind, a.max_lines, a.json)
+    ev, raw, kind = logs_run(_client(), args)
+    _finish(ev, raw, kind, a.max_lines, a.json)
 
 
 # ── traceql ──────────────────────────────────────────────────────────────────────
@@ -1000,8 +1000,8 @@ def traceql_main(argv: Sequence[str] | None = None) -> None:
     a = ap.parse_args(argv)
     args = TraceqlArgs(cmd=a.cmd, arg=a.arg, q=a.q, since=a.since, end=a.end, limit=a.limit,
                        min_duration=a.min_duration, scope=a.scope, top=a.top)
-    ev, body, kind = traceql_run(_client(), args)
-    _finish(ev, body, kind, a.max_lines, a.json)
+    ev, raw, kind = traceql_run(_client(), args)
+    _finish(ev, raw, kind, a.max_lines, a.json)
 
 
 # ── obs-doctor.py — 사람용. 물리가 보이는 유일한 출력 ───────────────────────────────
