@@ -824,9 +824,9 @@ FIRST_SEEN_DOC = """logql.py first-seen '<selector>' '<패턴>' [--since 1h] [--
 
 
 def logs_main(argv: Sequence[str]) -> None:
-    ap = argparse.ArgumentParser(prog="logql.py", description="로그 환원 연산 — histogram · templates · around · first-seen. 각 서브커맨드의 --help 에 설명 전부.",
+    ap = argparse.ArgumentParser(prog="logql.py", description="로그 환원 연산 — %s. 각 서브커맨드의 --help 에 설명 전부." % " · ".join(LOGS_SUBCOMMANDS),
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", required=True, metavar="<histogram|templates|around|first-seen>")
+    sub = ap.add_subparsers(dest="cmd", required=True, metavar="<%s>" % "|".join(LOGS_SUBCOMMANDS))
     fmt = argparse.RawDescriptionHelpFormatter
 
     def common(sp: argparse.ArgumentParser, window: bool = True) -> None:
