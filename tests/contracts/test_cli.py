@@ -105,6 +105,20 @@ def test_help_has_no_physical_flags_or_strings(main: Callable[[list[str]], None]
     _no_physical(text)
 
 
+def test_logql_help_lists_logs_subcommands(capsys: pytest.CaptureFixture[str]) -> None:
+    """상위 logql --help 에 로그 환원 서브커맨드 넷의 이름이 전부 있다 — 상위 화면에서 서브커맨드를 안다."""
+    # given — 상위 화면
+    argv = ["--help"]
+    # when
+    with pytest.raises(SystemExit) as ei:
+        cli.logql_main(argv)
+    # then
+    assert ei.value.code == 0
+    text = capsys.readouterr().out
+    for name in cli.LOGS_SUBCOMMANDS:
+        assert name in text
+
+
 # ── 파서 — 손으로 만든 형태 ───────────────────────────────────────────────────────
 
 def test_parse_metric_scalar_goes_to_scalar_field() -> None:
@@ -119,8 +133,13 @@ def test_parse_metric_broken_result_is_empty() -> None:
     assert cli.parse_metric({"data": {"resultType": "vector", "result": "garbage"}}).series == []
 
 
-def test_logql_main_routes_subcommand_to_logs_run(monkeypatch: pytest.MonkeyPatch, make_client: ClientFactory, tmp_path: Path) -> None:
-    """logql.py 의 첫 인자가 서브커맨드면 logs_run 으로 간다 — argv 의 cmd · selector · by · since 가 LogsArgs 로 들어간다."""
+@pytest.mark.parametrize("argv,expected", [
+    (["histogram", '{a="b"}', "--by", "app", "--since", "2h"], {"cmd": "histogram", "selector": '{a="b"}', "by": "app", "since": "2h"}),
+    (["first-seen", '{a="b"}', "<_> x", "--since", "2h"], {"cmd": "first-seen", "selector": '{a="b"}', "template": "<_> x", "since": "2h"}),
+], ids=["histogram", "first-seen"])
+def test_logql_main_routes_subcommand_to_logs_run(argv: list[str], expected: dict[str, str], monkeypatch: pytest.MonkeyPatch,
+                                                  make_client: ClientFactory, tmp_path: Path) -> None:
+    """logql.py 의 첫 인자가 서브커맨드면 logs_run 으로 간다 — argv 의 cmd · selector · 옵션(by · since) · 위치 인자(template) 가 LogsArgs 로 들어간다."""
     # given — logs_run 대역이 받은 Args 를 기록한다
     seen: list[cli.LogsArgs] = []
 
@@ -133,13 +152,11 @@ def test_logql_main_routes_subcommand_to_logs_run(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(cli, "_client", lambda: client)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     # when
-    cli.logql_main(["histogram", '{a="b"}', "--by", "app", "--since", "2h"])
+    cli.logql_main(argv)
     # then
     assert len(seen) == 1
-    assert seen[0].cmd == "histogram"
-    assert seen[0].selector == '{a="b"}'
-    assert seen[0].by == "app"
-    assert seen[0].since == "2h"
+    for name, value in expected.items():
+        assert getattr(seen[0], name) == value
 
 
 def test_promql_main_top_rejects_since() -> None:

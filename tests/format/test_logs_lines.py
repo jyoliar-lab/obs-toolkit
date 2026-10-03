@@ -96,6 +96,9 @@ def test_around_lines(replay: ReplayFactory, request: pytest.FixtureRequest) -> 
     assert len(lines) == 1 + v.shown
     assert "총 %d" % v.total in lines[0]
     assert "보임 %d" % v.shown in lines[0]
+    assert "앞 %d" % v.before.shown in lines[0]
+    assert "뒤 %d" % v.after.shown in lines[0]
+    assert ("잘림" in lines[0]) == v.truncated
     assert any(e.ts_ns < int(ts * 1e9) for e in v.entries)
     assert any(e.ts_ns >= int(ts * 1e9) for e in v.entries)
     assert_snapshot(request, lines)

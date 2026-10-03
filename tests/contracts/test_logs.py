@@ -2,16 +2,19 @@
 렌더링의 모양은 format/test_logs_lines.py. around 의 손 입력은 Loki 처럼 창 · 방향 · limit 을 적용하는 FakeLoki(conftest)다."""
 from __future__ import annotations
 
+import json
 import urllib.parse
+from typing import Mapping
 
 import pytest
 
 from obs import logs
 from obs.adapters import cli
-from obs.core import JSON, Client, ObsError, Response, Window
+from obs.core import JSON, Client, Config, ObsError, Response, Window
 from obs.logs import LogEntry, Sample, Side
 from obs.metrics import auto_step
 from tests.conftest import AT, MINUTE, ClientFactory, LokiFactory, _vector
+from tests.record import strip_physical
 from tests.replay import Call
 
 SEL: str = '{namespace="n"}'
@@ -426,15 +429,22 @@ def test_templates_asks_examples_only_for_top_k(make_client: ClientFactory) -> N
     assert sorted(_params(c)["query"] for c in t.calls[1:]) == sorted(logs.pattern_filter(SEL, p) for p in ("p50 <_>", "p40 <_>"))
 
 
-def test_templates_example_missing_is_none(make_client: ClientFactory) -> None:
-    """예시 질의가 빈 스트림이면 그 군집의 example 은 None 이고 군집 수는 그대로다."""
-    # given
-    client, _ = make_client({("logs", PATTERNS): (200, THREE), ("logs", RANGE): (200, _streams())})
+def test_templates_example_missing_is_none(config: Config) -> None:
+    """한 군집의 예시 질의만 빈 스트림이면 그 군집의 example 만 None 이고 나머지는 차며 군집 수는 그대로다."""
+    # given — 'b <_>' 의 예시 질의만 빈 스트림, 나머지 예시 질의는 한 줄 (질의별 응답 — 경로 단위 라우트로는 가를 수 없다)
+    empty_query = logs.pattern_filter(SEL, "b <_>")
+
+    def transport(url: str, headers: Mapping[str, str], timeout: float) -> tuple[int, bytes]:
+        rq = strip_physical(url, config, None)
+        body: JSON = THREE if rq.path == PATTERNS else (_streams() if rq.params.get("query") == empty_query else EXAMPLE)
+        return 200, json.dumps(body).encode("utf-8")
+
+    client = Client(config=config, token="test-token-not-real", transport=transport)
     # when
     ev, _ = logs.templates(client, SEL, W)
     # then
     assert len(ev.value.clusters) == 3
-    assert all(c.example is None for c in ev.value.clusters)
+    assert {c.template: c.example is None for c in ev.value.clusters} == {"a <_>": False, "b <_>": True, "c <_>": False}
 
 
 def test_templates_backtick_pattern_still_gets_example(make_client: ClientFactory) -> None:
@@ -541,6 +551,31 @@ def test_around_keeps_only_lines_inside_window_in_order(make_loki: LokiFactory) 
     # then
     assert [e.line for e in ev.value.entries] == ["b0", "b1", "a0", "a1"]
     assert [e.ts_ns for e in ev.value.entries] == sorted(e.ts_ns for e in ev.value.entries)
+
+
+def test_around_drops_lines_outside_each_side_window(make_client: ClientFactory) -> None:
+    """창 밖 시각의 줄이 응답에 섞여 와도 entries 는 창 안 줄만 — 각 한 번 · 시각 오름차순(클라이언트 거름)."""
+    # given — 양쪽 query_range 에 같은 정적 본문: 창 안 앞 2 · 뒤 2 와 창 밖(±70s) 둘
+    body = _streams(({"pod": "p"}, [(_ns(TS - 70), "out-before"), (_ns(TS - 20), "b0"), (_ns(TS - 10), "b1"),
+                                   (_ns(TS + 5), "a0"), (_ns(TS + 15), "a1"), (_ns(TS + 70), "out-after")]))
+    client, _ = make_client({("logs", INSTANT): (200, _vector(({}, "4"))), ("logs", RANGE): (200, body)})
+    # when
+    ev, _ = logs.around(client, SEL, TS, 60)
+    # then
+    assert [e.line for e in ev.value.entries] == ["b0", "b1", "a0", "a1"]
+
+
+def test_around_line_at_center_from_both_sides_counts_once(make_client: ClientFactory) -> None:
+    """ts 와 정확히 같은 시각의 줄이 양쪽 응답에 와도 entries 에 한 번 — 뒤에 센다."""
+    # given — 양쪽 query_range 에 같은 정적 본문: ts 시각의 줄 하나
+    body = _streams(({"pod": "p"}, [(_ns(TS), "at-center")]))
+    client, _ = make_client({("logs", INSTANT): (200, _vector(({}, "1"))), ("logs", RANGE): (200, body)})
+    # when
+    ev, _ = logs.around(client, SEL, TS, 60)
+    # then
+    assert [e.line for e in ev.value.entries] == ["at-center"]
+    assert ev.value.after.shown == 1
+    assert ev.value.before.shown == 0
 
 
 def test_around_raw_carries_count_and_both_sides(make_client: ClientFactory) -> None:
