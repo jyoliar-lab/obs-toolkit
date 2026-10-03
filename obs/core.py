@@ -581,7 +581,7 @@ class Client:
             body = json.loads(text) if text else {}
         except ValueError:
             body = text
-        return Response(backend=backend, path=path, status=status, body=body)
+        return Response(backend=backend, path=path, status=status, body=body, params=query)
 
 
 # ── 진단 — 사람용. 여기서만 물리(URL·uid)가 보인다 ──────────────────────────────

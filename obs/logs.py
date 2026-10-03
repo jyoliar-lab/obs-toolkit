@@ -14,7 +14,7 @@ Loki 응답 파서(`Stream` · `LogResult` · `parse_logs` · `LogEntry`)는 어
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Sequence, cast
+from typing import Sequence
 
 from obs.core import JSON, Client, Evidence, ObsError, Params, Response, Window, json_int, json_labels, json_list, json_obj, json_pair, json_str
 from obs.metrics import Series, auto_step, check_status, parse_metric, series_items
@@ -193,12 +193,13 @@ def clusters_of(patterns: Sequence[Pattern], k: int, step: str) -> Templates:
     return Templates(k=k, step=step, total=total, clusters=kept, other=sum(c.count for c in counted[k:]))
 
 
-def _first_line(client: Client, query: str, window: Window) -> tuple[LogEntry | None, JSON]:
+def _first_line(client: Client, query: str, window: Window) -> tuple[LogEntry | None, Response]:
     """창 안에서 질의에 걸리는 가장 이른 줄 — query_range forward · limit 1. 없으면 None."""
     params: Params = {"start": int(window.start * 1e9), "end": int(window.end * 1e9), "query": query, "limit": 1, "direction": "forward"}
-    body = check_status(client.get("logs", "loki/api/v1/query_range", params).body, "logs")
+    resp = client.get("logs", "loki/api/v1/query_range", params)
+    body = check_status(resp.body, "logs")
     entries = [LogEntry(ts, s.labels, line) for s in parse_logs(body).streams for ts, line in s.values]
-    return (min(entries, key=lambda e: e.ts_ns) if entries else None), body
+    return (min(entries, key=lambda e: e.ts_ns) if entries else None), resp
 
 
 def templates(client: Client, selector: str, window: Window, k: int = DEFAULT_TEMPLATES_K,
@@ -219,10 +220,12 @@ def templates(client: Client, selector: str, window: Window, k: int = DEFAULT_TE
     body = check_status(resp.body, "logs")
     t = clusters_of(parse_patterns(body), k, step)
     clusters: list[Template] = []
+    raw: list[Response] = [resp]
     for c in t.clusters:
-        first, _ = _first_line(client, pattern_filter(selector, c.template), window)
+        first, example = _first_line(client, pattern_filter(selector, c.template), window)
         clusters.append(replace(c, example=first.line if first else None))
-    return Evidence(backend="logs", query=selector, window=window, value=replace(t, clusters=clusters)), cast(list[Response], body)   # red stub — 형태만, 런타임은 아직 body
+        raw.append(example)
+    return Evidence(backend="logs", query=selector, window=window, value=replace(t, clusters=clusters)), raw
 
 
 # ── around ───────────────────────────────────────────────────────────────────────
@@ -258,14 +261,15 @@ def count_query(selector: str, seconds: float) -> str:
     return "sum(count_over_time(%s[%ds]))" % (selector, int(round(seconds)))
 
 
-def _side(client: Client, selector: str, start: float, end: float, direction: str, limit: int) -> tuple[list[LogEntry], Side, JSON]:
+def _side(client: Client, selector: str, start: float, end: float, direction: str, limit: int) -> tuple[list[LogEntry], Side, Response]:
     """[start, end) 의 ts 쪽 줄 limit 개 — limit+1 개를 물어 넘치면 잘림이다. direction 이 ts 에 가까운 것부터 받게 한다."""
     params: Params = {"start": int(start * 1e9), "end": int(end * 1e9), "query": selector, "limit": limit + 1, "direction": direction}
-    body = check_status(client.get("logs", "loki/api/v1/query_range", params).body, "logs")
+    resp = client.get("logs", "loki/api/v1/query_range", params)
+    body = check_status(resp.body, "logs")
     entries = [LogEntry(ts, s.labels, line) for s in parse_logs(body).streams for ts, line in s.values]
     entries.sort(key=lambda e: e.ts_ns, reverse=(direction == "backward"))
     kept = entries[:limit]
-    return kept, Side(shown=len(kept), truncated=len(entries) > limit), body
+    return kept, Side(shown=len(kept), truncated=len(entries) > limit), resp
 
 
 def around(client: Client, selector: str, ts: float, span: float, limit: int = DEFAULT_AROUND_LIMIT) -> tuple[Evidence[Context], list[Response]]:
@@ -276,15 +280,14 @@ def around(client: Client, selector: str, ts: float, span: float, limit: int = D
         raise ObsError("span 은 0 보다 커야 한다: %g" % span)
     if limit < 1:
         raise ObsError("limit 은 1 이상이어야 한다: %d" % limit)
-    count_body = check_status(client.get("logs", "loki/api/v1/query", {"query": count_query(selector, 2 * span),
-                                                                       "time": int((ts + span) * 1e9)}).body, "logs")
+    count_resp = client.get("logs", "loki/api/v1/query", {"query": count_query(selector, 2 * span), "time": int((ts + span) * 1e9)})
+    count_body = check_status(count_resp.body, "logs")
     total = sum(json_int(v) for s in parse_metric(count_body).series for _, v in s.values)
-    before, before_side, before_body = _side(client, selector, ts - span, ts, "backward", limit)
-    after, after_side, after_body = _side(client, selector, ts, ts + span, "forward", limit)
+    before, before_side, before_resp = _side(client, selector, ts - span, ts, "backward", limit)
+    after, after_side, after_resp = _side(client, selector, ts, ts + span, "forward", limit)
     entries = sorted([*before, *after], key=lambda e: e.ts_ns)
     value = Context(center=ts, span=span, limit=limit, total=total, before=before_side, after=after_side, entries=entries)
-    raw: JSON = {"count": count_body, "before": before_body, "after": after_body}
-    return Evidence(backend="logs", query=selector, window=Window(ts - span, ts + span), value=value), cast(list[Response], raw)   # red stub — 형태만, 런타임은 아직 dict
+    return Evidence(backend="logs", query=selector, window=Window(ts - span, ts + span), value=value), [count_resp, before_resp, after_resp]
 
 
 # ── first_seen ───────────────────────────────────────────────────────────────────
@@ -301,6 +304,6 @@ def first_seen(client: Client, selector: str, template: str, window: Window) -> 
     if not selector.strip():
         raise ObsError("LogQL selector 가 필요하다")
     q = pattern_filter(selector, template)
-    first, body = _first_line(client, q, window)
+    first, resp = _first_line(client, q, window)
     value = FirstSeen(template=template, ts=first.ts_ns / 1e9 if first else None, line=first.line if first else None)
-    return Evidence(backend="logs", query=q, window=window, value=value), body
+    return Evidence(backend="logs", query=q, window=window, value=value), resp.body
