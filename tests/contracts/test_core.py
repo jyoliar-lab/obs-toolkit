@@ -511,3 +511,14 @@ def test_doctor_without_token_skips_probes(config: Config, base_env: dict[str, s
     assert not rep.ok
     assert not t.calls
     assert all(not p.ok and "토큰 없음" in p.detail for p in rep.probes)
+
+
+def test_evidence_queries_default_to_empty() -> None:
+    """기존 꼴로 만든 Evidence 의 queries 는 빈 목록이고 직렬화에 "queries": [] 로 실린다."""
+    # given · when
+    ev = Evidence(backend="metrics", query="up", window=Window(1.0, 2.0), value=Lines(["1 {}"]))
+    # then
+    assert ev.queries == []
+    d = to_dict(ev)
+    assert isinstance(d, dict)
+    assert d["queries"] == []

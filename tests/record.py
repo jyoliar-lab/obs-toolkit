@@ -36,9 +36,10 @@ from typing import Callable, Mapping, Sequence
 
 from obs.adapters import cli
 from obs.core import (
-    JSON, LOGICAL_BACKENDS, Client, Config, ObsError, Transport, fmt_rfc3339, json_int, json_list, json_obj, json_str, load_config,
-    now, to_dict, token_from_env,
+    JSON, LOGICAL_BACKENDS, Budget, Client, Config, ObsError, Transport, Window, fmt_rfc3339, json_int, json_list, json_obj, json_str,
+    load_config, now, to_dict, token_from_env,
 )
+from obs.traces import Span, check_json, parse_search, parse_spans
 from obs.core import _urllib_transport  # pyright: ignore[reportPrivateUsage] — 녹화기는 진짜 GET 을 감싼다(코어를 고치지 않는다 — ops-workflow#103)
 
 ROOT: Path = Path(__file__).resolve().parents[1]
@@ -248,6 +249,7 @@ EMPTY_LOG_SELECTOR: str = '{namespace="no-such-namespace"}'   # 없는 namespace
 FIRST_SEEN_TEMPLATE: str = "<_> level=error <_>"               # 빈 창의 first_seen — 템플릿은 아무것이나 창 안에 없다
 TRACE_SEARCH: cli.TraceqlArgs = cli.TraceqlArgs(cmd="search", since="24h", limit=3)
 UP_APISERVER: str = 'up{job="apiserver"}'   # metadata 조회(labels · series)의 selector — 시계열 셋
+NO_SUCH_SERVICE: str = 'resource.service.name = "no-such-service"'   # exemplars 의 빈 표본 — 없는 서비스의 조건식
 
 
 def _promql(a: cli.PromqlArgs) -> Recipe:
@@ -278,6 +280,92 @@ def _traceql(a: cli.TraceqlArgs) -> Recipe:
     def run(client: Client, at: float) -> None:
         cli.traceql_run(client, a, at=at)
     return run
+
+
+def _traces_op(a: cli.TracesArgs) -> Recipe:
+    """traces 환원 연산(traceql 서브커맨드)의 레시피 — 녹화되는 호출은 연산이 보내는 것뿐."""
+    def run(client: Client, at: float) -> None:
+        cli.traces_run(client, a, at=at)
+    return run
+
+
+def _scratch_client() -> Client:
+    """녹화되지 않는 별도 Client — fixture 에 담을 트레이스를 고르는 데만 쓴다(검색 · 후보 열기). 예산은 넉넉히."""
+    token = token_from_env()
+    if not token:
+        raise ObsError("OBS_GRAFANA_TOKEN 이 비어 있다 — 녹화는 실환경 토큰이 필요하다(.claude/settings.local.json 의 env)")
+    return Client(config=load_config(), token=token, budget=Budget(max_queries=80))
+
+
+def _open(client: Client, trace_id: str) -> list[Span]:
+    return parse_spans(check_json(client.get("traces", "api/traces/%s" % trace_id).body, "traces"))
+
+
+def _depth_of(spans: Sequence[Span]) -> dict[str, int]:
+    by_id = {s.span_id: s for s in spans}
+    out: dict[str, int] = {}
+    for s in spans:
+        d, p = 0, s.parent_id
+        while p and p in by_id and d < 64:
+            d, p = d + 1, by_id[p].parent_id
+        out[s.span_id] = d
+    return out
+
+
+def _deep_trace(at: float) -> str:
+    """critical_path fixture 의 트레이스 — 가장 긴 span 이 루트이고 · 깊이 ≥ 2 인 span 이 있고 · 그중 하나가 루트 길이의 절반 이상인 것.
+    24h 의 서버 span 트레이스(20ms 이상)를 열어 첫 후보를 고른다. 없으면 Unreproducible."""
+    client = _scratch_client()
+    w = Window.last("24h", at=at)
+    body = check_json(client.get("traces", "api/search", {"q": "{ kind = server }", "start": int(w.start), "end": int(w.end), "limit": 100, "minDuration": "20ms"}).body, "traces")
+    seen: set[str] = set()
+    for h in parse_search(body):
+        if h.trace_id in seen or len(seen) >= 40:
+            continue
+        seen.add(h.trace_id)
+        spans = _open(client, h.trace_id)
+        if not spans:
+            continue
+        by_id = {s.span_id: s for s in spans}
+        depth = _depth_of(spans)
+        longest = max(spans, key=lambda s: s.end_ns - s.start_ns)
+        root_len = longest.end_ns - longest.start_ns
+        is_root = not longest.parent_id or longest.parent_id not in by_id
+        deep = [s for s in spans if depth[s.span_id] >= 2]
+        if is_root and deep and any((s.end_ns - s.start_ns) * 2 >= root_len for s in deep):
+            return h.trace_id
+    raise Unreproducible("24h 안에 '루트 최장 · 깊이 ≥ 2 · 그 span 이 루트의 절반 이상' 인 트레이스가 없다 — 창을 넓히거나 recorded: manual 로")
+
+
+def _same_root_pair(at: float) -> tuple[str, str]:
+    """diff fixture 의 두 트레이스 — 같은 (루트 서비스, 루트 이름) 그룹 중 span 이 둘 이상인 트레이스가 가장 많은 그룹에서 가장 느린 것과 가장 빠른 것."""
+    client = _scratch_client()
+    w = Window.last("24h", at=at)
+    body = check_json(client.get("traces", "api/search", {"q": "{ kind = server }", "start": int(w.start), "end": int(w.end), "limit": 100, "minDuration": "5ms"}).body, "traces")
+    groups: dict[tuple[str, str], dict[str, float]] = {}
+    for h in parse_search(body):
+        try:
+            ms = float(h.duration_ms)
+        except ValueError:
+            continue
+        groups.setdefault((h.root_service, h.root_name), {})[h.trace_id] = ms
+    for _, members in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+        if len(members) < 2:
+            continue
+        ordered = sorted(members.items(), key=lambda kv: -kv[1])
+        slow, normal = ordered[0][0], ordered[-1][0]
+        if len(_open(client, slow)) >= 2 and len(_open(client, normal)) >= 2:
+            return slow, normal
+    raise Unreproducible("24h 안에 같은 루트 이름의 트레이스 쌍(각각 span 둘 이상)이 없다 — 창을 넓히거나 recorded: manual 로")
+
+
+def _critical_path_fixture(client: Client, at: float) -> None:
+    cli.traces_run(client, cli.TracesArgs(cmd="critical-path", trace_id=_deep_trace(at)), at=at)
+
+
+def _diff_fixture(client: Client, at: float) -> None:
+    slow, normal = _same_root_pair(at)
+    cli.traces_run(client, cli.TracesArgs(cmd="diff", slow_id=slow, normal_id=normal), at=at)
 
 
 def _first_trace_id(client: Client, search: cli.TraceqlArgs, at: float) -> str:
@@ -330,6 +418,13 @@ RECIPES: dict[str, Recipe] = {
     "logql-around-careerhub-prod.json": _logs(cli.LogsArgs(cmd="around", selector=LOG_SELECTOR, ts="-30m", span="1m", limit=20)),
     "logql-around-empty.json": _logs(cli.LogsArgs(cmd="around", selector=EMPTY_LOG_SELECTOR, ts="-30m", span="1m", limit=20)),
     "logql-first-seen-empty.json": _logs(cli.LogsArgs(cmd="first-seen", selector=EMPTY_LOG_SELECTOR, template=FIRST_SEEN_TEMPLATE)),
+    # 트레이스 환원 연산 — exemplars 는 24h 창(1h 는 비기 일쑤) · 빈 창은 없는 서비스 / 보존 밖 창 · critical-path 와 diff 의 트레이스는 보조가 고른다(녹화 안 됨)
+    "traceql-exemplars.json": _traces_op(cli.TracesArgs(cmd="exemplars", since="24h", k=3)),
+    "traceql-exemplars-empty.json": _traces_op(cli.TracesArgs(cmd="exemplars", since="24h", k=3, q=NO_SUCH_SERVICE)),
+    "traceql-critical-path.json": _critical_path_fixture,
+    "traceql-service-graph.json": _traces_op(cli.TracesArgs(cmd="service-graph", since="24h")),
+    "traceql-service-graph-empty.json": _traces_op(cli.TracesArgs(cmd="service-graph", since="1h", end="-60d")),   # 보존 밖 — 클라이언트 행 없음
+    "traceql-diff.json": _diff_fixture,
 }
 
 

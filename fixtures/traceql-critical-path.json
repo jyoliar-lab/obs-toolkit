@@ -1,0 +1,570 @@
+{
+ "format": "obs-fixture/1",
+ "recorded": "tests/record.py",
+ "calls": [
+  {
+   "request": {
+    "at": 1791636503.619849,
+    "at_rfc3339": "2026-10-10T12:48:23Z",
+    "backend": "traces",
+    "path": "api/traces/f00c2c77c9377c873469d87c789bf8bf",
+    "query_string": "",
+    "params": {}
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "batches": [
+      {
+       "resource": {
+        "attributes": [
+         {
+          "key": "k8s.deployment.name",
+          "value": {
+           "stringValue": "careerhub-nginx-gateway-nginx"
+          }
+         },
+         {
+          "key": "service.name",
+          "value": {
+           "stringValue": "ngf:careerhub-prod:careerhub-nginx-gateway"
+          }
+         },
+         {
+          "key": "k8s.namespace.name",
+          "value": {
+           "stringValue": "careerhub-prod"
+          }
+         },
+         {
+          "key": "k8s.pod.name",
+          "value": {
+           "stringValue": "careerhub-nginx-gateway-nginx-6b74ff84d5-7hngr"
+          }
+         }
+        ]
+       },
+       "scopeSpans": [
+        {
+         "scope": {
+          "name": "nginx",
+          "version": "1.29.2"
+         },
+         "spans": [
+          {
+           "traceId": "8Awsd8k3fIc0adh8eJv4vw==",
+           "spanId": "C3qVaAqYPlU=",
+           "name": "/api/",
+           "kind": "SPAN_KIND_SERVER",
+           "startTimeUnixNano": "1791635671804000000",
+           "endTimeUnixNano": "1791635671842000000",
+           "attributes": [
+            {
+             "key": "http.target",
+             "value": {
+              "stringValue": "/api/job_postings/count?encoded_query=eyJjYXRlZ29yaWVzIjpbXSwic2tpbGxOYW1lcyI6W10sInRhZ0lkcyI6W10sIm1pbkNhcmVlciI6bnVsbCwibWF4Q2FyZWVyIjpudWxsLCJjb21wYW5pZXMiOltdfQ%3D%3D"
+             }
+            },
+            {
+             "key": "http.scheme",
+             "value": {
+              "stringValue": "https"
+             }
+            },
+            {
+             "key": "http.flavor",
+             "value": {
+              "stringValue": "2.0"
+             }
+            },
+            {
+             "key": "http.user_agent",
+             "value": {
+              "stringValue": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+             }
+            },
+            {
+             "key": "http.request_content_length",
+             "value": {
+              "intValue": "0"
+             }
+            },
+            {
+             "key": "http.response_content_length",
+             "value": {
+              "intValue": "15"
+             }
+            },
+            {
+             "key": "net.host.name",
+             "value": {
+              "stringValue": "careerhub.jyo-liar.com"
+             }
+            },
+            {
+             "key": "net.sock.peer.addr",
+             "value": {
+              "stringValue": "10.244.1.0"
+             }
+            },
+            {
+             "key": "net.sock.peer.port",
+             "value": {
+              "intValue": "55169"
+             }
+            },
+            {
+             "key": "http.route",
+             "value": {
+              "stringValue": "/api/"
+             }
+            },
+            {
+             "key": "http.method",
+             "value": {
+              "stringValue": "GET"
+             }
+            },
+            {
+             "key": "http.status_code",
+             "value": {
+              "intValue": "200"
+             }
+            }
+           ],
+           "status": {}
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "resource": {
+        "attributes": [
+         {
+          "key": "deployment.environment",
+          "value": {
+           "stringValue": "careerhub-prod"
+          }
+         },
+         {
+          "key": "k8s.deployment.name",
+          "value": {
+           "stringValue": "api-composer"
+          }
+         },
+         {
+          "key": "process.command_args",
+          "value": {
+           "arrayValue": {
+            "values": [
+             {
+              "stringValue": "/myapp"
+             }
+            ]
+           }
+          }
+         },
+         {
+          "key": "process.executable.name",
+          "value": {
+           "stringValue": "myapp"
+          }
+         },
+         {
+          "key": "process.executable.path",
+          "value": {
+           "stringValue": "/myapp"
+          }
+         },
+         {
+          "key": "process.owner",
+          "value": {
+           "stringValue": "nonroot"
+          }
+         },
+         {
+          "key": "process.pid",
+          "value": {
+           "intValue": "1"
+          }
+         },
+         {
+          "key": "process.runtime.description",
+          "value": {
+           "stringValue": "go version go1.25.13 linux/arm64"
+          }
+         },
+         {
+          "key": "process.runtime.name",
+          "value": {
+           "stringValue": "go"
+          }
+         },
+         {
+          "key": "process.runtime.version",
+          "value": {
+           "stringValue": "go1.25.13"
+          }
+         },
+         {
+          "key": "telemetry.sdk.language",
+          "value": {
+           "stringValue": "go"
+          }
+         },
+         {
+          "key": "telemetry.sdk.name",
+          "value": {
+           "stringValue": "opentelemetry"
+          }
+         },
+         {
+          "key": "telemetry.sdk.version",
+          "value": {
+           "stringValue": "1.43.0"
+          }
+         },
+         {
+          "key": "service.name",
+          "value": {
+           "stringValue": "api-composer"
+          }
+         },
+         {
+          "key": "k8s.namespace.name",
+          "value": {
+           "stringValue": "careerhub-prod"
+          }
+         },
+         {
+          "key": "k8s.pod.name",
+          "value": {
+           "stringValue": "api-composer-5cd4748b88-4w5hc"
+          }
+         },
+         {
+          "key": "k8s.container.name",
+          "value": {
+           "stringValue": "api-composer"
+          }
+         }
+        ]
+       },
+       "scopeSpans": [
+        {
+         "scope": {
+          "name": "go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux",
+          "version": "0.68.0"
+         },
+         "spans": [
+          {
+           "traceId": "8Awsd8k3fIc0adh8eJv4vw==",
+           "spanId": "9fU36zWCdLE=",
+           "parentSpanId": "C3qVaAqYPlU=",
+           "name": "GET /api/job_postings/count",
+           "kind": "SPAN_KIND_SERVER",
+           "startTimeUnixNano": "1791635671804680071",
+           "endTimeUnixNano": "1791635671842620602",
+           "attributes": [
+            {
+             "key": "url.scheme",
+             "value": {
+              "stringValue": "http"
+             }
+            },
+            {
+             "key": "network.peer.address",
+             "value": {
+              "stringValue": "10.244.8.147"
+             }
+            },
+            {
+             "key": "network.peer.port",
+             "value": {
+              "intValue": "38710"
+             }
+            },
+            {
+             "key": "user_agent.original",
+             "value": {
+              "stringValue": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+             }
+            },
+            {
+             "key": "client.address",
+             "value": {
+              "stringValue": "10.244.1.0"
+             }
+            },
+            {
+             "key": "network.protocol.version",
+             "value": {
+              "stringValue": "1.1"
+             }
+            },
+            {
+             "key": "http.response.body.size",
+             "value": {
+              "intValue": "15"
+             }
+            },
+            {
+             "key": "http.response.status_code",
+             "value": {
+              "intValue": "200"
+             }
+            },
+            {
+             "key": "http.request.method",
+             "value": {
+              "stringValue": "GET"
+             }
+            },
+            {
+             "key": "url.path",
+             "value": {
+              "stringValue": "/api/job_postings/count"
+             }
+            },
+            {
+             "key": "server.address",
+             "value": {
+              "stringValue": "api-composer"
+             }
+            },
+            {
+             "key": "http.route",
+             "value": {
+              "stringValue": "/api/job_postings/count"
+             }
+            }
+           ],
+           "status": {}
+          }
+         ]
+        },
+        {
+         "scope": {
+          "name": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
+          "version": "0.68.0"
+         },
+         "spans": [
+          {
+           "traceId": "8Awsd8k3fIc0adh8eJv4vw==",
+           "spanId": "6D69/KVlDZ0=",
+           "parentSpanId": "9fU36zWCdLE=",
+           "name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/CountJobPostings",
+           "kind": "SPAN_KIND_CLIENT",
+           "startTimeUnixNano": "1791635671815151414",
+           "endTimeUnixNano": "1791635671842563602",
+           "attributes": [
+            {
+             "key": "rpc.method",
+             "value": {
+              "stringValue": "careerhub.posting_service.restapi_grpc.RestApiGrpc/CountJobPostings"
+             }
+            },
+            {
+             "key": "rpc.system.name",
+             "value": {
+              "stringValue": "grpc"
+             }
+            },
+            {
+             "key": "server.port",
+             "value": {
+              "intValue": "80"
+             }
+            },
+            {
+             "key": "rpc.response.status_code",
+             "value": {
+              "stringValue": "OK"
+             }
+            },
+            {
+             "key": "server.address",
+             "value": {
+              "stringValue": "10.100.22.120"
+             }
+            }
+           ],
+           "status": {}
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "resource": {
+        "attributes": [
+         {
+          "key": "deployment.environment",
+          "value": {
+           "stringValue": "careerhub-prod"
+          }
+         },
+         {
+          "key": "k8s.deployment.name",
+          "value": {
+           "stringValue": "posting-service"
+          }
+         },
+         {
+          "key": "process.command_args",
+          "value": {
+           "arrayValue": {
+            "values": [
+             {
+              "stringValue": "/myapp"
+             }
+            ]
+           }
+          }
+         },
+         {
+          "key": "process.executable.name",
+          "value": {
+           "stringValue": "myapp"
+          }
+         },
+         {
+          "key": "process.executable.path",
+          "value": {
+           "stringValue": "/myapp"
+          }
+         },
+         {
+          "key": "process.owner",
+          "value": {
+           "stringValue": "nonroot"
+          }
+         },
+         {
+          "key": "process.pid",
+          "value": {
+           "intValue": "1"
+          }
+         },
+         {
+          "key": "process.runtime.description",
+          "value": {
+           "stringValue": "go version go1.25.13 linux/arm64"
+          }
+         },
+         {
+          "key": "process.runtime.name",
+          "value": {
+           "stringValue": "go"
+          }
+         },
+         {
+          "key": "process.runtime.version",
+          "value": {
+           "stringValue": "go1.25.13"
+          }
+         },
+         {
+          "key": "telemetry.sdk.language",
+          "value": {
+           "stringValue": "go"
+          }
+         },
+         {
+          "key": "telemetry.sdk.name",
+          "value": {
+           "stringValue": "opentelemetry"
+          }
+         },
+         {
+          "key": "telemetry.sdk.version",
+          "value": {
+           "stringValue": "1.43.0"
+          }
+         },
+         {
+          "key": "service.name",
+          "value": {
+           "stringValue": "posting-service"
+          }
+         },
+         {
+          "key": "k8s.namespace.name",
+          "value": {
+           "stringValue": "careerhub-prod"
+          }
+         },
+         {
+          "key": "k8s.pod.name",
+          "value": {
+           "stringValue": "posting-service-697c7c9468-2b45b"
+          }
+         },
+         {
+          "key": "k8s.container.name",
+          "value": {
+           "stringValue": "posting-service"
+          }
+         }
+        ]
+       },
+       "scopeSpans": [
+        {
+         "scope": {
+          "name": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
+          "version": "0.68.0"
+         },
+         "spans": [
+          {
+           "traceId": "8Awsd8k3fIc0adh8eJv4vw==",
+           "spanId": "Z+9R2i2ktB0=",
+           "parentSpanId": "6D69/KVlDZ0=",
+           "name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/CountJobPostings",
+           "kind": "SPAN_KIND_SERVER",
+           "startTimeUnixNano": "1791635671816244291",
+           "endTimeUnixNano": "1791635671842307862",
+           "attributes": [
+            {
+             "key": "rpc.method",
+             "value": {
+              "stringValue": "careerhub.posting_service.restapi_grpc.RestApiGrpc/CountJobPostings"
+             }
+            },
+            {
+             "key": "rpc.system.name",
+             "value": {
+              "stringValue": "grpc"
+             }
+            },
+            {
+             "key": "server.port",
+             "value": {
+              "intValue": "50053"
+             }
+            },
+            {
+             "key": "rpc.response.status_code",
+             "value": {
+              "stringValue": "OK"
+             }
+            },
+            {
+             "key": "server.address",
+             "value": {
+              "stringValue": "10.244.7.188"
+             }
+            }
+           ],
+           "status": {}
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

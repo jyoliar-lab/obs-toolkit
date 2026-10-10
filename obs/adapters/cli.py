@@ -19,12 +19,12 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Mapping, Sequence, TypeAlias
 
 from obs.core import (
     JSON, Client, DoctorReport, Evidence, Lines, ObsError, Params, Response, Window, doctor, fmt_ts, load_config,
-    SPILL_RAW, SPILL_SUMMARY, json_int, json_labels, json_list, json_obj, json_str, json_strs,
+    SPILL_RAW, SPILL_SUMMARY, json_labels, json_list, json_strs,
     parse_duration, parse_time, now, spill, spill_ref, to_json, token_from_env,
 )
 from obs.logs import (
@@ -34,6 +34,10 @@ from obs.logs import (
 from obs.metrics import (
     DEFAULT_BASELINE, DEFAULT_TOP_AGG, DEFAULT_TOP_K, TOP_AGGS, Comparison, MetricResult, Summary, Top,
     auto_step, check_status, compare, parse_metric, summarize, top,
+)
+from obs.traces import (
+    DEFAULT_BASELINE_RANGE, DEFAULT_EXEMPLARS_K, DEFAULT_QUANTILE, DEFAULT_SEARCH_LIMIT, CriticalPath, Exemplars, ServiceGraph, Span, TagScope,
+    TraceDiff, TraceHit, check_json, parse_search, parse_spans, parse_tag_values, parse_tags,
 )
 
 DEFAULT_MAX_LINES: int = 40
@@ -55,104 +59,7 @@ def parse_label_sets(body: dict[str, JSON]) -> list[dict[str, str]]:
     return [json_labels(m) for m in json_list(body.get("data"))]
 
 
-# ── 응답 dataclass + 파서 — Tempo ───────────────────────────────────────────────
-
-@dataclass(frozen=True)
-class TraceHit:
-    trace_id: str
-    duration_ms: str
-    start_ns: int
-    root_service: str
-    root_name: str
-
-
-@dataclass
-class Span:
-    service: str
-    name: str
-    span_id: str
-    parent_id: str
-    start_ns: int
-    end_ns: int
-    status_code: str      # STATUS_CODE_ERROR / 2 / ""
-    status_message: str = ""   # OTLP status.message — 오류 span 의 원인(계측 라이브러리가 스택을 붙이기도 한다)
-    attrs: dict[str, str] = field(default_factory=dict[str, str])
-
-    @property
-    def duration_ms(self) -> float:
-        return (self.end_ns - self.start_ns) / 1e6
-
-    @property
-    def is_error(self) -> bool:
-        return self.status_code in ("STATUS_CODE_ERROR", "2")
-
-
-@dataclass(frozen=True)
-class TagScope:
-    name: str
-    tags: list[str]
-
-
-def check_json(body: JSON, backend: str) -> dict[str, JSON]:
-    if not isinstance(body, dict):
-        raise ObsError("%s 백엔드가 JSON 이 아닌 응답을 냈다: %s" % (backend, clip(json_str(body), 300)))
-    return body
-
-
-def parse_search(body: dict[str, JSON]) -> list[TraceHit]:
-    hits: list[TraceHit] = []
-    for t in json_list(body.get("traces")):
-        o = json_obj(t)
-        hits.append(TraceHit(
-            trace_id=json_str(o.get("traceID"), "?"), duration_ms=json_str(o.get("durationMs"), "?"),
-            start_ns=json_int(o.get("startTimeUnixNano")),
-            root_service=json_str(o.get("rootServiceName"), "?"), root_name=json_str(o.get("rootTraceName"), "?")))
-    return hits
-
-
-def _attr_value(v: JSON) -> str:
-    o = json_obj(v)
-    for k in ("stringValue", "intValue", "doubleValue", "boolValue"):
-        if k in o:
-            return json_str(o[k])
-    return json_str(v)
-
-
-def _attrs(items: JSON) -> dict[str, str]:
-    out: dict[str, str] = {}
-    for a in json_list(items):
-        o = json_obj(a)
-        out[json_str(o.get("key"), "?")] = _attr_value(o.get("value"))
-    return out
-
-
-def parse_spans(body: dict[str, JSON]) -> list[Span]:
-    """OTLP JSON — Tempo 는 `batches`(v1) 또는 `resourceSpans`(v2) 로 준다."""
-    batches = body.get("batches") or body.get("resourceSpans") or json_obj(body.get("trace")).get("resourceSpans")
-    spans: list[Span] = []
-    for b in json_list(batches):
-        bo = json_obj(b)
-        service = _attrs(json_obj(bo.get("resource")).get("attributes")).get("service.name", "?")
-        for ss in json_list(bo.get("scopeSpans") or bo.get("instrumentationLibrarySpans")):
-            for s in json_list(json_obj(ss).get("spans")):
-                so = json_obj(s)
-                st = json_obj(so.get("status"))
-                spans.append(Span(
-                    service=service, name=json_str(so.get("name"), "?"), span_id=json_str(so.get("spanId")),
-                    parent_id=json_str(so.get("parentSpanId")),
-                    start_ns=json_int(so.get("startTimeUnixNano")), end_ns=json_int(so.get("endTimeUnixNano")),
-                    status_code=json_str(st.get("code")), status_message=json_str(st.get("message")),
-                    attrs=_attrs(so.get("attributes")),
-                ))
-    return spans
-
-
-def parse_tags(body: dict[str, JSON]) -> list[TagScope]:
-    return [TagScope(name=json_str(json_obj(sc).get("name")), tags=json_strs(json_obj(sc).get("tags"))) for sc in json_list(body.get("scopes"))]
-
-
-def parse_tag_values(body: dict[str, JSON]) -> list[str]:
-    return [json_str(json_obj(v).get("value")) for v in json_list(body.get("tagValues"))]
+# ── 응답 dataclass + 파서 — Tempo 는 obs.traces 로 이동(Span · parse_spans · TraceHit · parse_search · TagScope · parse_tags · parse_tag_values · check_json) ──
 
 
 # ── 출력 절제 ────────────────────────────────────────────────────────────────────
@@ -1002,6 +909,60 @@ def traceql_main(argv: Sequence[str] | None = None) -> None:
                        min_duration=a.min_duration, scope=a.scope, top=a.top)
     ev, raw, kind = traceql_run(_client(), args)
     _finish(ev, raw, kind, a.max_lines, a.json)
+
+
+# ── 환원 연산 — traceql.py 의 서브커맨드 (계산은 obs.traces, 표는 여기) ─────────────────
+
+TRACES_SUBCOMMANDS: tuple[str, ...] = ("exemplars", "critical-path", "service-graph", "diff")
+
+
+def exemplars_lines(value: Exemplars, window: Window) -> list[str]:
+    """헤더 + 요약 한 줄(표본 N · 임계 초과 M · 평소 기대) + 묶음마다 머리줄(건수 / 없음) + 건 줄."""
+    raise NotImplementedError("exemplars_lines")
+
+
+def critical_path_lines(value: CriticalPath, window: Window) -> list[str]:
+    """헤더 + 경로 span 마다 한 줄(잘림 표시) + 병목(self 내림차순) 줄."""
+    raise NotImplementedError("critical_path_lines")
+
+
+def service_graph_lines(value: ServiceGraph, window: Window) -> list[str]:
+    """헤더 + (caller → callee) 머리줄 아래 엔드포인트 줄. 데이터 없음 · 호출 0 · 미확인을 가른다."""
+    raise NotImplementedError("service_graph_lines")
+
+
+def diff_lines(value: TraceDiff, window: Window) -> list[str]:
+    """헤더 + 행마다 `Δ  slow  normal  서비스 / 이름`, 한쪽에만 있으면 그 표시."""
+    raise NotImplementedError("diff_lines")
+
+
+@dataclass
+class TracesArgs:
+    cmd: str                                 # exemplars · critical-path · service-graph · diff
+    q: str = ""                              # exemplars 의 조건식(중괄호 없이)
+    since: str = "1h"
+    end: str | None = None
+    k: int = DEFAULT_EXEMPLARS_K             # exemplars
+    quantile: float = DEFAULT_QUANTILE       # exemplars · service-graph
+    baseline_range: str = DEFAULT_BASELINE_RANGE   # exemplars · service-graph — 평소 분포 구간
+    limit: int = DEFAULT_SEARCH_LIMIT        # exemplars 검색 limit
+    trace_id: str | None = None              # critical-path — None = 거부
+    slow_id: str | None = None               # diff — None = 거부
+    normal_id: str | None = None             # diff — None = 거부
+
+    def validate(self) -> None:
+        """요청 전 검사 — 모르는 cmd · 필수 id 없음은 ObsError."""
+        raise NotImplementedError("TracesArgs.validate")
+
+
+def traces_run(client: Client, a: TracesArgs, at: float | None = None) -> RunResult:
+    """→ (Evidence[Lines], 원본, kind). validate 가 요청 앞. 계산은 obs.traces 가, 표는 *_lines 가. stdout 을 만지지 않는다."""
+    raise NotImplementedError("traces_run")
+
+
+def traces_main(argv: Sequence[str]) -> None:
+    """argparse 서브파서 → TracesArgs → traces_run → _finish."""
+    raise NotImplementedError("traces_main")
 
 
 # ── obs-doctor.py — 사람용. 물리가 보이는 유일한 출력 ───────────────────────────────

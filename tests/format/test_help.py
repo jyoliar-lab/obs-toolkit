@@ -14,6 +14,8 @@ HELP_SCREENS: dict[str, tuple[Callable[[list[str]], None], list[str]]] = {
     "logql": (cli.logql_main, ["--help"]), "traceql": (cli.traceql_main, ["--help"]),
     "logql-histogram": (cli.logql_main, ["histogram", "--help"]), "logql-templates": (cli.logql_main, ["templates", "--help"]),
     "logql-around": (cli.logql_main, ["around", "--help"]), "logql-first-seen": (cli.logql_main, ["first-seen", "--help"]),
+    "traceql-exemplars": (cli.traceql_main, ["exemplars", "--help"]), "traceql-critical-path": (cli.traceql_main, ["critical-path", "--help"]),
+    "traceql-service-graph": (cli.traceql_main, ["service-graph", "--help"]), "traceql-diff": (cli.traceql_main, ["diff", "--help"]),
 }
 
 
