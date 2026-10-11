@@ -20,7 +20,7 @@ import argparse
 import re
 import sys
 from dataclasses import dataclass
-from typing import Callable, Mapping, Sequence, TypeAlias
+from typing import Callable, Mapping, Sequence, TypeAlias, TypeVar
 
 from obs.core import (
     JSON, Client, DoctorReport, Evidence, Lines, ObsError, Params, Response, Window, doctor, fmt_ts, load_config,
@@ -36,12 +36,14 @@ from obs.metrics import (
     auto_step, check_status, compare, parse_metric, summarize, top,
 )
 from obs.traces import (
-    DEFAULT_BASELINE_RANGE, DEFAULT_EXEMPLARS_K, DEFAULT_QUANTILE, DEFAULT_SEARCH_LIMIT, CriticalPath, Exemplars, ServiceGraph, Span, TagScope,
-    TraceDiff, TraceHit, check_json, parse_search, parse_spans, parse_tag_values, parse_tags,
+    DEFAULT_BASELINE_RANGE, DEFAULT_EXEMPLARS_K, DEFAULT_QUANTILE, DEFAULT_SEARCH_LIMIT, CriticalPath, Edge, Exemplars, ServiceGraph, Span, SpanTime, TagScope,
+    TraceDiff, TraceHit, check_json, critical_path, diff, exemplars, parse_search, parse_spans, parse_tag_values, parse_tags, service_graph,
 )
 
 DEFAULT_MAX_LINES: int = 40
 DEFAULT_LOG_LIMIT: int = 30
+
+V = TypeVar("V")
 
 RunResult: TypeAlias = "tuple[Evidence[Lines], list[Response], str]"   # 둘째 자리(원본) — 호출 순서의 Response 목록
 """(근거, 원본 Response 목록, spill 종류 이름)"""
@@ -116,7 +118,7 @@ def fmt_val(v: str | int | float) -> str:
 def evidence_preamble(ev: Evidence[Lines]) -> list[str]:
     """summary.txt 머리 — 재실행에 필요한 것: 백엔드에 실제로 보낸 질의(환원 연산은 조립된 식 그대로) · 창(RFC3339 + unix 초) ·
     기준선. stdout 에는 찍지 않는다 — 조립된 질의는 길다."""
-    lines = ["# 질의  %s" % ev.query]
+    lines = ["# 질의  %s  %s" % (q.backend, q.query) for q in ev.queries] or ["# 질의  %s" % ev.query]
     w = ev.window
     if w is not None:
         lines.append("# 창  %s  (start=%.3f end=%.3f)" % (w.label(), w.start, w.end))
@@ -787,6 +789,12 @@ TRACEQL_DOC = """traceql — 트레이스 검색·조회 (traces 백엔드, GET 
   traceql.py tags [--scope span|resource|intrinsic]                 검색 가능한 태그
   traceql.py tag-values <tag> [--q '<TraceQL>']                     태그 값
 
+환원 연산 — 서브커맨드. 각각의 --help 에 설명 전부:
+  traceql.py exemplars [--q '<조건식>'] [--k 3]                     느림 · 오류 · 정상 묶음별 대표 트레이스
+  traceql.py critical-path <traceID>                                임계경로와 병목
+  traceql.py service-graph [--since 1h]                             엔드포인트별 호출 엣지 · p95 배율
+  traceql.py diff <느린 traceID> <정상 traceID>                     두 트레이스의 span 별 시간 차이
+
 옵션:
   --q <TraceQL>      검색식. 예: '{ resource.service.name = "posting-service" && status = error }'
                      비우면 구간 안의 모든 트레이스(최근순)
@@ -892,6 +900,10 @@ def traceql_run(client: Client, a: TraceqlArgs, at: float | None = None) -> RunR
 
 
 def traceql_main(argv: Sequence[str] | None = None) -> None:
+    args_list = list(sys.argv[1:] if argv is None else argv)
+    if args_list and args_list[0] in TRACES_SUBCOMMANDS:
+        traces_main(args_list)
+        return
     ap = argparse.ArgumentParser(prog="traceql.py", description=TRACEQL_DOC,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", choices=("search", "trace", "tags", "tag-values"))
@@ -918,22 +930,109 @@ TRACES_SUBCOMMANDS: tuple[str, ...] = ("exemplars", "critical-path", "service-gr
 
 def exemplars_lines(value: Exemplars, window: Window) -> list[str]:
     """헤더 + 요약 한 줄(표본 N · 임계 초과 M · 평소 기대) + 묶음마다 머리줄(건수 / 없음) + 건 줄."""
-    raise NotImplementedError("exemplars_lines")
+    if value.sample == 0:
+        return ["(데이터 없음 — %s 에 걸리는 서버 span 이 없다. 창을 넓혀 다시: --since 24h · 7d)" % window_str(window)]
+    lines = ["창 %s  묶음별 상위 %d  (오류 → 임계 초과(느림) → 정상 · 임계 출처: baseline=평소 p%s · window=조사 창 · sample=표본)" % (
+        window_str(window), value.k, fmt_val(value.quantile * 100))]
+    lines.append("표본 %d%s  임계 초과 %d  (평소 기대 %s%%)" % (
+        value.sample, " (절단 — 검색 상한을 넘어 앞 트레이스만)" if value.truncated else "", value.slow.total, "%.3g" % ((1 - value.quantile) * 100)))
+    for b in (value.slow, value.error, value.normal):
+        lines.append("%s  %s" % (b.kind, "%d건" % b.total if b.total else "없음"))
+        for e in b.items:
+            lines.append("  %s  %.1fms  ×%.2f  임계 %sms(%s)  %s / %s  %s  %s" % (
+                e.trace_id, e.duration_ms, e.ratio, fmt_val(e.threshold_ms), e.threshold_source, e.service, e.endpoint, e.pod, fmt_ts(e.start_ts)))
+    return lines
 
 
 def critical_path_lines(value: CriticalPath, window: Window) -> list[str]:
     """헤더 + 경로 span 마다 한 줄(잘림 표시) + 병목(self 내림차순) 줄."""
-    raise NotImplementedError("critical_path_lines")
+    incomplete = "  불완전한 트레이스 — 루트 %d개, 먼저 시작한 것을 따랐다" % value.roots if value.roots > 1 else ""
+    lines = ["트레이스 %s  총 %.1fms  span %d개  임계경로 %d개  부모 밖 서브트리 %d개 버림%s  (+시작 오프셋  길이  self  서비스 / 이름)" % (
+        value.trace_id, value.total_ms, value.spans, len(value.path), value.dropped, incomplete)]
+    for p in value.path:
+        lines.append("%s+%.1fms  %.1fms  self %.1fms  %s / %s%s" % (
+            "  " * p.depth, p.offset_ms, p.duration_ms, p.self_ms, p.service, p.name, "  (잘림 — 부모 끝에서)" if p.clipped else ""))
+    top = value.bottlenecks[:3]
+    lines.append("병목 — self 내림차순 상위 %d:" % len(top))
+    lines += ["  self %.1fms  깊이 %d  %s / %s" % (p.self_ms, p.depth, p.service, p.name) for p in top]
+    return lines
 
 
 def service_graph_lines(value: ServiceGraph, window: Window) -> list[str]:
     """헤더 + (caller → callee) 머리줄 아래 엔드포인트 줄. 데이터 없음 · 호출 0 · 미확인을 가른다."""
-    raise NotImplementedError("service_graph_lines")
+    if not value.edges and not value.idle:
+        return ["(데이터 없음 — %s 에 클라이언트 span 행이 없다. 창을 넓혀 다시: --since 24h)" % window_str(window)]
+    if not value.edges:
+        return ["호출 0 — %s 에 알려진 클라이언트 호출 %d개가 창 안에서 0건이다" % (window_str(window), value.idle)]
+    lines = ["창 %s  p%s  평소 %s  유휴 %d  (×배율=클라이언트 p95/평소 p95  건수  오류율  클라이언트 p95(평소)  서버 p95  엔드포인트)" % (
+        window_str(window), fmt_val(value.quantile * 100), value.baseline_range, value.idle)]
+    groups: dict[tuple[str, str | None], list[Edge]] = {}
+    for e in value.edges:
+        groups.setdefault((e.caller, e.callee), []).append(e)
+    for (caller, callee), edges in groups.items():
+        lines.append("%s → %s" % (caller, callee if callee is not None else "미확인(서버 행 없음 · 모호)"))
+        for e in edges:
+            lines.append("  ×%s  %d건  오류 %.1f%%  %s(평소 %s)  서버 %s  %s" % (
+                fmt_ratio(e.ratio) if e.ratio is not None else "—", e.count, e.error_rate * 100, _ms_str(e.client_p95_ms),
+                _ms_str(e.client_base_p95_ms), _ms_str(e.server_p95_ms), e.endpoint))
+    return lines
+
+
+def _ms_str(ms: float | None) -> str:
+    return "%.1fms" % ms if ms is not None else "—"
 
 
 def diff_lines(value: TraceDiff, window: Window) -> list[str]:
     """헤더 + 행마다 `Δ  slow  normal  서비스 / 이름`, 한쪽에만 있으면 그 표시."""
-    raise NotImplementedError("diff_lines")
+    lines = ["느린 %s  vs  정상 %s  루트 %s  (Δ = 느린 − 정상 합 · 합ms×건수 · 서비스 / 이름)" % (value.slow_id, value.normal_id, value.root_name)]
+    for d in value.deltas:
+        if d.delta_ms is not None:
+            head = "Δ%+.1fms" % d.delta_ms
+        else:
+            head = "한쪽에만 있음(%s)" % ("느린 쪽" if d.slow is not None else "정상 쪽")
+        lines.append("%s  느린 %s  정상 %s  %s / %s" % (head, _span_time(d.slow), _span_time(d.normal), d.service, d.name))
+    return lines
+
+
+def _span_time(t: SpanTime | None) -> str:
+    return "%.1fms×%d" % (t.total_ms, t.n) if t is not None else "—"
+
+
+TRACES_COMMON_DOC = """원본(span 트리 · 검색 응답)은 호출 디렉터리의 raw.json 에 남고 stdout 은 환원물이다. 보낸 질의 전부(연산이 둘 이상 부르면
+그 전부)와 창은 summary.txt 머리에 남는다. stdout 은 --max-lines 에서 잘린다. --json 은 경로만."""
+
+EXEMPLARS_DOC = """traceql.py exemplars [--q '<조건식>'] [--since 1h] [--k 3] [--quantile 0.95] [--baseline-range 7d] [--limit 100]
+
+서버 span 을 오류 · 느림 · 정상 셋으로 나눠 묶음마다 대표 트레이스 k 개 — 트레이스를 열지 않는다.
+느림의 임계는 엔드포인트(서비스, 서버 span 이름)마다: 평소 p95(조사 창 직전 --baseline-range 의 spanmetrics) → 조사 창 p95 →
+표본 p95 순으로 있는 것. 건마다 적용한 임계와 그 출처(baseline · window · sample)가 붙는다. metrics 1 회 + traces 검색 1 회.
+요약 줄은 표본 수 · 임계 초과 수 · 평소 기대 비율((1 − 분위수) × 100%). 검색이 --limit 을 넘으면 절단 표시.
+
+""" + TRACES_COMMON_DOC
+
+CRITICAL_PATH_DOC = """traceql.py critical-path <traceID>
+
+트레이스 하나의 임계경로(CRISP — 마지막에 끝난 자식을 거슬러 따라간다)와 병목(self 시간 내림차순 상위 3).
+경로 줄은 `+시작 오프셋  길이  self  서비스 / 이름` — 깊이만큼 들여 쓴다. 부모보다 늦게 끝난 자식은 부모 끝에서 잘린다(잘림 표시),
+부모 밖에서 통째로 돈 서브트리는 버리고 그 수를 헤더에. 루트가 둘 이상이면 불완전한 트레이스 표시. traces 1 회.
+
+""" + TRACES_COMMON_DOC
+
+SERVICE_GRAPH_DOC = """traceql.py service-graph [--since 1h] [--quantile 0.95] [--baseline-range 7d]
+
+호출 그래프 — spanmetrics 의 클라이언트 span 행을 (호출한 서비스 → 불린 서비스) 아래 엔드포인트마다 한 줄:
+`×배율  건수  오류율  클라이언트 p95(평소)  서버 p95  엔드포인트`. 배율 = 조사 창 p95 / 평소 p95, 내림차순.
+불린 서비스는 같은 이름의 서버 span 행으로 찾는다 — 없거나 둘 이상이면 미확인. metrics 2 회(traces 를 부르지 않는다).
+창 안 호출이 0 이면 "호출 0", 행 자체가 없으면 "데이터 없음".
+
+""" + TRACES_COMMON_DOC
+
+DIFF_DOC = """traceql.py diff <느린 traceID> <정상 traceID>
+
+같은 루트 이름의 두 트레이스를 (서비스, 이름) 으로 짝지어 시간 차이만: `Δ  느린 합ms×건수  정상 합ms×건수  서비스 / 이름`.
+한쪽에만 있는 span 은 그 표시. 루트 이름이 다르면 거부한다. traces 2 회.
+
+""" + TRACES_COMMON_DOC
 
 
 @dataclass
@@ -952,17 +1051,78 @@ class TracesArgs:
 
     def validate(self) -> None:
         """요청 전 검사 — 모르는 cmd · 필수 id 없음은 ObsError."""
-        raise NotImplementedError("TracesArgs.validate")
+        if self.cmd not in TRACES_SUBCOMMANDS:
+            raise ObsError("알 수 없는 명령 %r — %s" % (self.cmd, " · ".join(TRACES_SUBCOMMANDS)))
+        if self.cmd == "critical-path" and self.trace_id is None:
+            raise ObsError("critical-path 는 traceID 가 필요하다")
+        if self.cmd == "diff" and (self.slow_id is None or self.normal_id is None):
+            raise ObsError("diff 는 traceID 두 개(느린 것 · 정상인 것)가 필요하다")
 
 
 def traces_run(client: Client, a: TracesArgs, at: float | None = None) -> RunResult:
     """→ (Evidence[Lines], 원본, kind). validate 가 요청 앞. 계산은 obs.traces 가, 표는 *_lines 가. stdout 을 만지지 않는다."""
-    raise NotImplementedError("traces_run")
+    a.validate()
+    window = Window.last(a.since, a.end, at)
+    kind = "traceql-" + a.cmd
+    if a.cmd == "exemplars":
+        ev_e, raw = exemplars(client, a.q, window, k=a.k, quantile=a.quantile, baseline_range=a.baseline_range, limit=a.limit)
+        return _traces_evidence(ev_e, exemplars_lines(ev_e.value, window)), raw, kind
+    if a.cmd == "critical-path":
+        ev_c, raw = critical_path(client, a.trace_id or "", window)
+        return _traces_evidence(ev_c, critical_path_lines(ev_c.value, window)), raw, kind
+    if a.cmd == "service-graph":
+        ev_g, raw = service_graph(client, window, quantile=a.quantile, baseline_range=a.baseline_range)
+        return _traces_evidence(ev_g, service_graph_lines(ev_g.value, window)), raw, kind
+    ev_d, raw = diff(client, a.slow_id or "", a.normal_id or "", window)
+    return _traces_evidence(ev_d, diff_lines(ev_d.value, window)), raw, kind
+
+
+def _traces_evidence(ev: Evidence[V], lines: list[str]) -> Evidence[Lines]:
+    """연산의 Evidence 를 줄로 — 백엔드 · 주 질의 · 창 · queries 는 그대로."""
+    return Evidence(backend=ev.backend, query=ev.query, window=ev.window, value=Lines(lines), queries=ev.queries)
 
 
 def traces_main(argv: Sequence[str]) -> None:
     """argparse 서브파서 → TracesArgs → traces_run → _finish."""
-    raise NotImplementedError("traces_main")
+    ap = argparse.ArgumentParser(prog="traceql.py", description="트레이스 환원 연산 — %s. 각 서브커맨드의 --help 에 설명 전부." % " · ".join(TRACES_SUBCOMMANDS),
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True, metavar="<%s>" % "|".join(TRACES_SUBCOMMANDS))
+    fmt = argparse.RawDescriptionHelpFormatter
+
+    def window(sp: argparse.ArgumentParser) -> None:
+        sp.add_argument("--since", default="1h", help="창 길이. 기본 1h")
+        sp.add_argument("--end", default=None, help="창 끝 (now · -10m · unix초 · RFC3339). 기본 now")
+
+    def distribution(sp: argparse.ArgumentParser) -> None:
+        sp.add_argument("--quantile", type=float, default=DEFAULT_QUANTILE, help="분위수 (0, 1). 기본 %s" % DEFAULT_QUANTILE)
+        sp.add_argument("--baseline-range", default=DEFAULT_BASELINE_RANGE,
+                        help="평소 분포의 구간 — 조사 창 바로 앞. 기본 %s" % DEFAULT_BASELINE_RANGE)
+
+    sp_e = sub.add_parser("exemplars", help="느림 · 오류 · 정상 묶음별 대표 트레이스", description=EXEMPLARS_DOC, formatter_class=fmt)
+    sp_e.add_argument("--q", default="", help="TraceQL 조건식(중괄호 없이). 비우면 서버 span 전부")
+    window(sp_e)
+    sp_e.add_argument("--k", type=int, default=DEFAULT_EXEMPLARS_K, help="묶음별 상위 k. 기본 %d" % DEFAULT_EXEMPLARS_K)
+    distribution(sp_e)
+    sp_e.add_argument("--limit", type=int, default=DEFAULT_SEARCH_LIMIT, help="검색 트레이스 상한. 기본 %d" % DEFAULT_SEARCH_LIMIT)
+    _common(sp_e)
+    sp_c = sub.add_parser("critical-path", help="트레이스 하나의 임계경로와 병목", description=CRITICAL_PATH_DOC, formatter_class=fmt)
+    sp_c.add_argument("trace_id", help="traceID")
+    _common(sp_c)
+    sp_g = sub.add_parser("service-graph", help="엔드포인트별 호출 엣지 — 건수 · 오류율 · p95 배율", description=SERVICE_GRAPH_DOC, formatter_class=fmt)
+    window(sp_g)
+    distribution(sp_g)
+    _common(sp_g)
+    sp_d = sub.add_parser("diff", help="같은 루트의 두 트레이스 — span 별 시간 차이", description=DIFF_DOC, formatter_class=fmt)
+    sp_d.add_argument("slow_id", help="느린 트레이스의 traceID")
+    sp_d.add_argument("normal_id", help="정상 트레이스의 traceID")
+    _common(sp_d)
+    a = ap.parse_args(argv)
+    args = TracesArgs(cmd=a.cmd, q=getattr(a, "q", ""), since=getattr(a, "since", "1h"), end=getattr(a, "end", None),
+                      k=getattr(a, "k", DEFAULT_EXEMPLARS_K), quantile=getattr(a, "quantile", DEFAULT_QUANTILE),
+                      baseline_range=getattr(a, "baseline_range", DEFAULT_BASELINE_RANGE), limit=getattr(a, "limit", DEFAULT_SEARCH_LIMIT),
+                      trace_id=getattr(a, "trace_id", None), slow_id=getattr(a, "slow_id", None), normal_id=getattr(a, "normal_id", None))
+    ev, raw, kind = traces_run(_client(), args)
+    _finish(ev, raw, kind, a.max_lines, a.json)
 
 
 # ── obs-doctor.py — 사람용. 물리가 보이는 유일한 출력 ───────────────────────────────

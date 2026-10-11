@@ -4,10 +4,10 @@
  "calls": [
   {
    "request": {
-    "at": 1791636503.619849,
-    "at_rfc3339": "2026-10-10T12:48:23Z",
+    "at": 1791697975.917651,
+    "at_rfc3339": "2026-10-11T05:52:55Z",
     "backend": "traces",
-    "path": "api/traces/f00c2c77c9377c873469d87c789bf8bf",
+    "path": "api/traces/2f577a0120eb891d59cf4958a9e6a3a0",
     "query_string": "",
     "params": {}
    },
@@ -52,17 +52,17 @@
          },
          "spans": [
           {
-           "traceId": "8Awsd8k3fIc0adh8eJv4vw==",
-           "spanId": "C3qVaAqYPlU=",
+           "traceId": "L1d6ASDriR1Zz0lYqeajoA==",
+           "spanId": "1RAjs+BsGTM=",
            "name": "/api/",
            "kind": "SPAN_KIND_SERVER",
-           "startTimeUnixNano": "1791635671804000000",
-           "endTimeUnixNano": "1791635671842000000",
+           "startTimeUnixNano": "1791690995546000000",
+           "endTimeUnixNano": "1791690995549000000",
            "attributes": [
             {
              "key": "http.target",
              "value": {
-              "stringValue": "/api/job_postings/count?encoded_query=eyJjYXRlZ29yaWVzIjpbXSwic2tpbGxOYW1lcyI6W10sInRhZ0lkcyI6W10sIm1pbkNhcmVlciI6bnVsbCwibWF4Q2FyZWVyIjpudWxsLCJjb21wYW5pZXMiOltdfQ%3D%3D"
+              "stringValue": "/api/my/scrap-job"
              }
             },
             {
@@ -86,13 +86,13 @@
             {
              "key": "http.request_content_length",
              "value": {
-              "intValue": "0"
+              "intValue": "38"
              }
             },
             {
              "key": "http.response_content_length",
              "value": {
-              "intValue": "15"
+              "intValue": "0"
              }
             },
             {
@@ -110,7 +110,7 @@
             {
              "key": "net.sock.peer.port",
              "value": {
-              "intValue": "55169"
+              "intValue": "59006"
              }
             },
             {
@@ -122,13 +122,13 @@
             {
              "key": "http.method",
              "value": {
-              "stringValue": "GET"
+              "stringValue": "POST"
              }
             },
             {
              "key": "http.status_code",
              "value": {
-              "intValue": "200"
+              "intValue": "201"
              }
             }
            ],
@@ -254,115 +254,23 @@
        "scopeSpans": [
         {
          "scope": {
-          "name": "go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux",
-          "version": "0.68.0"
-         },
-         "spans": [
-          {
-           "traceId": "8Awsd8k3fIc0adh8eJv4vw==",
-           "spanId": "9fU36zWCdLE=",
-           "parentSpanId": "C3qVaAqYPlU=",
-           "name": "GET /api/job_postings/count",
-           "kind": "SPAN_KIND_SERVER",
-           "startTimeUnixNano": "1791635671804680071",
-           "endTimeUnixNano": "1791635671842620602",
-           "attributes": [
-            {
-             "key": "url.scheme",
-             "value": {
-              "stringValue": "http"
-             }
-            },
-            {
-             "key": "network.peer.address",
-             "value": {
-              "stringValue": "10.244.8.147"
-             }
-            },
-            {
-             "key": "network.peer.port",
-             "value": {
-              "intValue": "38710"
-             }
-            },
-            {
-             "key": "user_agent.original",
-             "value": {
-              "stringValue": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
-             }
-            },
-            {
-             "key": "client.address",
-             "value": {
-              "stringValue": "10.244.1.0"
-             }
-            },
-            {
-             "key": "network.protocol.version",
-             "value": {
-              "stringValue": "1.1"
-             }
-            },
-            {
-             "key": "http.response.body.size",
-             "value": {
-              "intValue": "15"
-             }
-            },
-            {
-             "key": "http.response.status_code",
-             "value": {
-              "intValue": "200"
-             }
-            },
-            {
-             "key": "http.request.method",
-             "value": {
-              "stringValue": "GET"
-             }
-            },
-            {
-             "key": "url.path",
-             "value": {
-              "stringValue": "/api/job_postings/count"
-             }
-            },
-            {
-             "key": "server.address",
-             "value": {
-              "stringValue": "api-composer"
-             }
-            },
-            {
-             "key": "http.route",
-             "value": {
-              "stringValue": "/api/job_postings/count"
-             }
-            }
-           ],
-           "status": {}
-          }
-         ]
-        },
-        {
-         "scope": {
           "name": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
           "version": "0.68.0"
          },
          "spans": [
           {
-           "traceId": "8Awsd8k3fIc0adh8eJv4vw==",
-           "spanId": "6D69/KVlDZ0=",
-           "parentSpanId": "9fU36zWCdLE=",
-           "name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/CountJobPostings",
+           "traceId": "L1d6ASDriR1Zz0lYqeajoA==",
+           "spanId": "zbmz90GLlsE=",
+           "parentSpanId": "Ox3Wa3JdAK8=",
+           "name": "careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/AddScrapJob",
            "kind": "SPAN_KIND_CLIENT",
-           "startTimeUnixNano": "1791635671815151414",
-           "endTimeUnixNano": "1791635671842563602",
+           "startTimeUnixNano": "1791690995547053436",
+           "endTimeUnixNano": "1791690995548853336",
            "attributes": [
             {
              "key": "rpc.method",
              "value": {
-              "stringValue": "careerhub.posting_service.restapi_grpc.RestApiGrpc/CountJobPostings"
+              "stringValue": "careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/AddScrapJob"
              }
             },
             {
@@ -386,7 +294,99 @@
             {
              "key": "server.address",
              "value": {
-              "stringValue": "10.100.22.120"
+              "stringValue": "10.107.48.86"
+             }
+            }
+           ],
+           "status": {}
+          }
+         ]
+        },
+        {
+         "scope": {
+          "name": "go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux",
+          "version": "0.68.0"
+         },
+         "spans": [
+          {
+           "traceId": "L1d6ASDriR1Zz0lYqeajoA==",
+           "spanId": "Ox3Wa3JdAK8=",
+           "parentSpanId": "1RAjs+BsGTM=",
+           "name": "POST /api/my/scrap-job",
+           "kind": "SPAN_KIND_SERVER",
+           "startTimeUnixNano": "1791690995546895992",
+           "endTimeUnixNano": "1791690995548885502",
+           "attributes": [
+            {
+             "key": "url.scheme",
+             "value": {
+              "stringValue": "http"
+             }
+            },
+            {
+             "key": "network.peer.address",
+             "value": {
+              "stringValue": "10.244.8.147"
+             }
+            },
+            {
+             "key": "network.peer.port",
+             "value": {
+              "intValue": "58290"
+             }
+            },
+            {
+             "key": "user_agent.original",
+             "value": {
+              "stringValue": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+             }
+            },
+            {
+             "key": "client.address",
+             "value": {
+              "stringValue": "10.244.1.0"
+             }
+            },
+            {
+             "key": "network.protocol.version",
+             "value": {
+              "stringValue": "1.1"
+             }
+            },
+            {
+             "key": "http.request.body.size",
+             "value": {
+              "intValue": "38"
+             }
+            },
+            {
+             "key": "http.response.status_code",
+             "value": {
+              "intValue": "201"
+             }
+            },
+            {
+             "key": "http.request.method",
+             "value": {
+              "stringValue": "POST"
+             }
+            },
+            {
+             "key": "url.path",
+             "value": {
+              "stringValue": "/api/my/scrap-job"
+             }
+            },
+            {
+             "key": "server.address",
+             "value": {
+              "stringValue": "api-composer"
+             }
+            },
+            {
+             "key": "http.route",
+             "value": {
+              "stringValue": "/api/my/scrap-job"
              }
             }
            ],
@@ -408,7 +408,7 @@
          {
           "key": "k8s.deployment.name",
           "value": {
-           "stringValue": "posting-service"
+           "stringValue": "userinfo-service"
           }
          },
          {
@@ -486,7 +486,7 @@
          {
           "key": "service.name",
           "value": {
-           "stringValue": "posting-service"
+           "stringValue": "userinfo-service"
           }
          },
          {
@@ -498,13 +498,13 @@
          {
           "key": "k8s.pod.name",
           "value": {
-           "stringValue": "posting-service-697c7c9468-2b45b"
+           "stringValue": "userinfo-service-5856d5d7bc-nh74j"
           }
          },
          {
           "key": "k8s.container.name",
           "value": {
-           "stringValue": "posting-service"
+           "stringValue": "userinfo-service"
           }
          }
         ]
@@ -517,18 +517,18 @@
          },
          "spans": [
           {
-           "traceId": "8Awsd8k3fIc0adh8eJv4vw==",
-           "spanId": "Z+9R2i2ktB0=",
-           "parentSpanId": "6D69/KVlDZ0=",
-           "name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/CountJobPostings",
+           "traceId": "L1d6ASDriR1Zz0lYqeajoA==",
+           "spanId": "3uAaX4MRvTA=",
+           "parentSpanId": "zbmz90GLlsE=",
+           "name": "careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/AddScrapJob",
            "kind": "SPAN_KIND_SERVER",
-           "startTimeUnixNano": "1791635671816244291",
-           "endTimeUnixNano": "1791635671842307862",
+           "startTimeUnixNano": "1791690995547361934",
+           "endTimeUnixNano": "1791690995548738058",
            "attributes": [
             {
              "key": "rpc.method",
              "value": {
-              "stringValue": "careerhub.posting_service.restapi_grpc.RestApiGrpc/CountJobPostings"
+              "stringValue": "careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/AddScrapJob"
              }
             },
             {
@@ -540,7 +540,7 @@
             {
              "key": "server.port",
              "value": {
-              "intValue": "50053"
+              "intValue": "50051"
              }
             },
             {
@@ -552,7 +552,7 @@
             {
              "key": "server.address",
              "value": {
-              "stringValue": "10.244.7.188"
+              "stringValue": "10.244.8.46"
              }
             }
            ],

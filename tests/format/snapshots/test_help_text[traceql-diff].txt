@@ -1,0 +1,19 @@
+usage: traceql.py diff [-h] [--max-lines MAX_LINES] [--json] slow_id normal_id
+
+traceql.py diff <느린 traceID> <정상 traceID>
+
+같은 루트 이름의 두 트레이스를 (서비스, 이름) 으로 짝지어 시간 차이만: `Δ  느린 합ms×건수  정상 합ms×건수  서비스 / 이름`.
+한쪽에만 있는 span 은 그 표시. 루트 이름이 다르면 거부한다. traces 2 회.
+
+원본(span 트리 · 검색 응답)은 호출 디렉터리의 raw.json 에 남고 stdout 은 환원물이다. 보낸 질의 전부(연산이 둘 이상 부르면
+그 전부)와 창은 summary.txt 머리에 남는다. stdout 은 --max-lines 에서 잘린다. --json 은 경로만.
+
+positional arguments:
+  slow_id               느린 트레이스의 traceID
+  normal_id             정상 트레이스의 traceID
+
+options:
+  -h, --help            show this help message and exit
+  --max-lines MAX_LINES
+                        stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
+  --json                stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 항상 남는다)

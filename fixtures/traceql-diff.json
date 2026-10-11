@@ -4,8 +4,8 @@
  "calls": [
   {
    "request": {
-    "at": 1791636503.619849,
-    "at_rfc3339": "2026-10-10T12:48:23Z",
+    "at": 1791697975.917651,
+    "at_rfc3339": "2026-10-11T05:52:55Z",
     "backend": "traces",
     "path": "api/traces/b7e5dedd1224d1ece8c61089d4b1b9a3",
     "query_string": "",
@@ -984,10 +984,10 @@
   },
   {
    "request": {
-    "at": 1791636503.619849,
-    "at_rfc3339": "2026-10-10T12:48:23Z",
+    "at": 1791697975.917651,
+    "at_rfc3339": "2026-10-11T05:52:55Z",
     "backend": "traces",
-    "path": "api/traces/a06f62618374e39cc1767798d10ff5d4",
+    "path": "api/traces/a3c6b8b5d1de2e3c5ccae5ceadbe2944",
     "query_string": "",
     "params": {}
    },
@@ -1032,8 +1032,8 @@
          },
          "spans": [
           {
-           "traceId": "oG9iYYN045zBdneY0Q/11A==",
-           "spanId": "0Cc3fpYUYXo=",
+           "traceId": "o8a4tdHeLjxcyuXOrb4pRA==",
+           "spanId": "JkawK6kFzB8=",
            "name": "/api/",
            "kind": "SPAN_KIND_SERVER",
            "startTimeUnixNano": "1791619470622000000",
@@ -1042,7 +1042,7 @@
             {
              "key": "http.target",
              "value": {
-              "stringValue": "/api/job_postings/count?encoded_query=eyJjYXRlZ29yaWVzIjpbXSwic2tpbGxOYW1lcyI6W10sInRhZ0lkcyI6W10sIm1pbkNhcmVlciI6bnVsbCwibWF4Q2FyZWVyIjpudWxsLCJjb21wYW5pZXMiOltdfQ%3D%3D"
+              "stringValue": "/api/categories"
              }
             },
             {
@@ -1220,7 +1220,7 @@
          {
           "key": "k8s.pod.name",
           "value": {
-           "stringValue": "api-composer-5cd4748b88-4w5hc"
+           "stringValue": "api-composer-5cd4748b88-5scd5"
           }
          },
          {
@@ -1239,13 +1239,13 @@
          },
          "spans": [
           {
-           "traceId": "oG9iYYN045zBdneY0Q/11A==",
-           "spanId": "EOVS+WGtY3M=",
-           "parentSpanId": "0Cc3fpYUYXo=",
-           "name": "GET /api/job_postings/count",
+           "traceId": "o8a4tdHeLjxcyuXOrb4pRA==",
+           "spanId": "gHX/KSKYRrA=",
+           "parentSpanId": "JkawK6kFzB8=",
+           "name": "GET /api/categories",
            "kind": "SPAN_KIND_SERVER",
-           "startTimeUnixNano": "1791619470623478467",
-           "endTimeUnixNano": "1791619470623596540",
+           "startTimeUnixNano": "1791619470623346666",
+           "endTimeUnixNano": "1791619470623486406",
            "attributes": [
             {
              "key": "url.scheme",
@@ -1262,7 +1262,7 @@
             {
              "key": "network.peer.port",
              "value": {
-              "intValue": "60578"
+              "intValue": "38986"
              }
             },
             {
@@ -1304,7 +1304,7 @@
             {
              "key": "url.path",
              "value": {
-              "stringValue": "/api/job_postings/count"
+              "stringValue": "/api/categories"
              }
             },
             {
@@ -1316,7 +1316,7 @@
             {
              "key": "http.route",
              "value": {
-              "stringValue": "/api/job_postings/count"
+              "stringValue": "/api/categories"
              }
             }
            ],

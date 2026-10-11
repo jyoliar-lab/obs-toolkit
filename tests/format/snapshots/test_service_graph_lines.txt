@@ -1,0 +1,13 @@
+창 10-10 05:52:55Z ~ 10-11 05:52:55Z  p95  평소 7d  유휴 4  (×배율=클라이언트 p95/평소 p95  건수  오류율  클라이언트 p95(평소)  서버 p95  엔드포인트)
+api-composer → posting-service
+  ×0.492  1건  오류 0.0%  3.9ms(평소 7.9ms)  서버 —  careerhub.posting_service.restapi_grpc.RestApiGrpc/Categories
+  ×—  22건  오류 0.0%  7.2ms(평소 —)  서버 6.1ms  careerhub.posting_service.restapi_grpc.RestApiGrpc/JobPostingDetail
+  ×—  22건  오류 0.0%  68.9ms(평소 —)  서버 67.4ms  careerhub.posting_service.restapi_grpc.RestApiGrpc/JobPostings
+  ×—  9건  오류 0.0%  58.4ms(평소 —)  서버 57.8ms  careerhub.posting_service.restapi_grpc.RestApiGrpc/CountJobPostings
+  ×—  1건  오류 0.0%  17.5ms(평소 —)  서버 —  careerhub.posting_service.restapi_grpc.RestApiGrpc/Skills
+api-composer → review-service
+  ×—  44건  오류 0.0%  4.5ms(평소 —)  서버 2.5ms  careerhub.review_service.restapi_grpc.ReviewReaderGrpc/GetCompanyScores
+  ×—  22건  오류 0.0%  9.8ms(평소 —)  서버 10.9ms  careerhub.review_service.restapi_grpc.ReviewReaderGrpc/GetCompanyReviews
+api-composer → userinfo-service
+  ×—  44건  오류 0.0%  4.0ms(평소 —)  서버 2.2ms  careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/GetScrapJobsById
+  ×—  9건  오류 0.0%  2.6ms(평소 —)  서버 2.9ms  careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/AddScrapJob

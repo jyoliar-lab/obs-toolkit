@@ -1,0 +1,10 @@
+느린 b7e5dedd1224d1ece8c61089d4b1b9a3  vs  정상 a3c6b8b5d1de2e3c5ccae5ceadbe2944  루트 /api/  (Δ = 느린 − 정상 합 · 합ms×건수 · 서비스 / 이름)
+Δ+208.0ms  느린 209.0ms×1  정상 1.0ms×1  ngf:careerhub-prod:careerhub-nginx-gateway / /api/
+한쪽에만 있음(정상 쪽)  느린 —  정상 0.1ms×1  api-composer / GET /api/categories
+한쪽에만 있음(느린 쪽)  느린 207.0ms×1  정상 —  api-composer / GET /api/job_postings
+한쪽에만 있음(느린 쪽)  느린 29.3ms×1  정상 —  api-composer / careerhub.posting_service.restapi_grpc.RestApiGrpc/JobPostings
+한쪽에만 있음(느린 쪽)  느린 27.3ms×1  정상 —  posting-service / careerhub.posting_service.restapi_grpc.RestApiGrpc/JobPostings
+한쪽에만 있음(느린 쪽)  느린 2.8ms×1  정상 —  api-composer / careerhub.review_service.restapi_grpc.ReviewReaderGrpc/GetCompanyScores
+한쪽에만 있음(느린 쪽)  느린 1.9ms×1  정상 —  review-service / careerhub.review_service.restapi_grpc.ReviewReaderGrpc/GetCompanyScores
+한쪽에만 있음(느린 쪽)  느린 3.7ms×1  정상 —  api-composer / careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/GetScrapJobsById
+한쪽에만 있음(느린 쪽)  느린 2.1ms×1  정상 —  userinfo-service / careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/GetScrapJobsById
