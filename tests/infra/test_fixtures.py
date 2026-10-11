@@ -8,6 +8,7 @@ from typing import Mapping
 import pytest
 
 from obs.core import Client, Config
+from obs.traces import parse_spans
 from tests import record
 from tests.conftest import FIXTURES, FakeTransport, _no_physical
 from tests.record import DERIVED, RECIPES, RECORDED_BY, RECORDED_MANUAL, Fixture, Recorder, fixture_names, read_fixture, response_of, write_fixture
@@ -26,7 +27,7 @@ def _fixture(name: str) -> Fixture:
 def test_every_fixture_has_a_recipe_and_vice_versa() -> None:
     """fixtures/ 의 파일 집합과 녹화기가 만드는 이름(실행 + 파생)의 집합이 같다."""
     assert NAMES == fixture_names()
-    assert len(NAMES) == 28
+    assert len(NAMES) == 34
     assert not set(RECIPES) & set(DERIVED)
     assert DERIVED == {"traceql-search.json": ("traceql-trace.json", 0),
                        "logql-first-seen-careerhub-prod.json": ("logql-templates-careerhub-prod.json", 1)}
@@ -91,6 +92,45 @@ def test_trace_fixture_records_search_then_trace_in_order() -> None:
     search = _fixture("traceql-search.json")
     assert len(search.calls) == 1
     assert search.calls[0] == fx.calls[0]
+
+
+def test_critical_path_fixture_has_root_longest_but_bottleneck_deeper() -> None:
+    """traceql-critical-path.json 은 트레이스 호출 하나이고, 가장 긴 span 이 루트이며, 깊이 ≥ 2 인 span 이 있고 그중 하나가 루트 길이의 절반 이상이다."""
+    fx = _fixture("traceql-critical-path.json")
+    assert len(fx.calls) == 1
+    assert fx.calls[0].request.path.startswith("api/traces/")
+    body = fx.calls[0].response.body
+    assert isinstance(body, dict)
+    spans = parse_spans(body)
+    by_id = {s.span_id: s for s in spans}
+    depth: dict[str, int] = {}
+    for s in spans:
+        d, parent = 0, s.parent_id
+        while parent and parent in by_id and d < 64:
+            d, parent = d + 1, by_id[parent].parent_id
+        depth[s.span_id] = d
+    longest = max(spans, key=lambda s: s.end_ns - s.start_ns)
+    assert not longest.parent_id or longest.parent_id not in by_id
+    deep = [s for s in spans if depth[s.span_id] >= 2]
+    assert deep
+    assert any((s.end_ns - s.start_ns) * 2 >= longest.end_ns - longest.start_ns for s in deep)
+
+
+def test_exemplars_fixture_records_threshold_then_candidates() -> None:
+    """traceql-exemplars.json 은 metrics 임계 질의(histogram_quantile · [7d] offset · spanmetrics) 뒤 traces 검색(kind = server · select · limit 101) 둘이고 at 이 같다."""
+    fx = _fixture("traceql-exemplars.json")
+    assert [(c.request.backend, c.request.path) for c in fx.calls] == [("metrics", "api/v1/query"), ("traces", "api/search")]
+    q = fx.calls[0].request.params["query"]
+    assert isinstance(q, str)
+    assert "histogram_quantile(" in q
+    assert "[7d] offset 86400s" in q
+    assert "traces_span_metrics_duration_seconds" in q
+    tq = fx.calls[1].request.params["q"]
+    assert isinstance(tq, str)
+    assert "kind = server" in tq
+    assert "select(" in tq
+    assert fx.calls[1].request.params["limit"] == "101"
+    assert fx.calls[0].request.at == fx.calls[1].request.at
 
 
 def test_metrics_fixtures_record_assembled_queries() -> None:

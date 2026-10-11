@@ -10,6 +10,12 @@ traceql — 트레이스 검색·조회 (traces 백엔드, GET 만).
   traceql.py tags [--scope span|resource|intrinsic]                 검색 가능한 태그
   traceql.py tag-values <tag> [--q '<TraceQL>']                     태그 값
 
+환원 연산 — 서브커맨드. 각각의 --help 에 설명 전부:
+  traceql.py exemplars [--q '<조건식>'] [--k 3]                     느림 · 오류 · 정상 묶음별 대표 트레이스
+  traceql.py critical-path <traceID>                                임계경로와 병목
+  traceql.py service-graph [--since 1h]                             엔드포인트별 호출 엣지 · p95 배율
+  traceql.py diff <느린 traceID> <정상 traceID>                     두 트레이스의 span 별 시간 차이
+
 옵션:
   --q <TraceQL>      검색식. 예: '{ resource.service.name = "posting-service" && status = error }'
                      비우면 구간 안의 모든 트레이스(최근순)

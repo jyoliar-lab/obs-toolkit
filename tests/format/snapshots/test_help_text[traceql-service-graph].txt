@@ -1,0 +1,23 @@
+usage: traceql.py service-graph [-h] [--since SINCE] [--end END] [--quantile QUANTILE]
+                                [--baseline-range BASELINE_RANGE] [--max-lines MAX_LINES] [--json]
+
+traceql.py service-graph [--since 1h] [--quantile 0.95] [--baseline-range 7d]
+
+호출 그래프 — spanmetrics 의 클라이언트 span 행을 (호출한 서비스 → 불린 서비스) 아래 엔드포인트마다 한 줄:
+`×배율  건수  오류율  클라이언트 p95(평소)  서버 p95  엔드포인트`. 배율 = 조사 창 p95 / 평소 p95, 내림차순.
+불린 서비스는 같은 이름의 서버 span 행으로 찾는다 — 없거나 둘 이상이면 미확인. metrics 2 회(traces 를 부르지 않는다).
+창 안 호출이 0 이면 "호출 0", 행 자체가 없으면 "데이터 없음".
+
+원본(span 트리 · 검색 응답)은 호출 디렉터리의 raw.json 에 남고 stdout 은 환원물이다. 보낸 질의 전부(연산이 둘 이상 부르면
+그 전부)와 창은 summary.txt 머리에 남는다. stdout 은 --max-lines 에서 잘린다. --json 은 경로만.
+
+options:
+  -h, --help            show this help message and exit
+  --since SINCE         창 길이. 기본 1h
+  --end END             창 끝 (now · -10m · unix초 · RFC3339). 기본 now
+  --quantile QUANTILE   분위수 (0, 1). 기본 0.95
+  --baseline-range BASELINE_RANGE
+                        평소 분포의 구간 — 조사 창 바로 앞. 기본 7d
+  --max-lines MAX_LINES
+                        stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
+  --json                stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 항상 남는다)

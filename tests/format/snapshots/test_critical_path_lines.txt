@@ -1,0 +1,9 @@
+트레이스 2f577a0120eb891d59cf4958a9e6a3a0  총 3.0ms  span 4개  임계경로 4개  부모 밖 서브트리 0개 버림  (+시작 오프셋  길이  self  서비스 / 이름)
++0.0ms  3.0ms  self 1.0ms  ngf:careerhub-prod:careerhub-nginx-gateway / /api/
+  +0.9ms  2.0ms  self 0.2ms  api-composer / POST /api/my/scrap-job
+    +1.1ms  1.8ms  self 0.4ms  api-composer / careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/AddScrapJob
+      +1.4ms  1.4ms  self 1.4ms  userinfo-service / careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/AddScrapJob
+병목 — self 내림차순 상위 3:
+  self 1.4ms  깊이 3  userinfo-service / careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/AddScrapJob
+  self 1.0ms  깊이 0  ngf:careerhub-prod:careerhub-nginx-gateway / /api/
+  self 0.4ms  깊이 2  api-composer / careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/AddScrapJob

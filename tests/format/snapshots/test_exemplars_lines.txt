@@ -1,0 +1,11 @@
+창 10-10 05:52:55Z ~ 10-11 05:52:55Z  묶음별 상위 3  (오류 → 임계 초과(느림) → 정상 · 임계 출처: baseline=평소 p95 · window=조사 창 · sample=표본)
+표본 248 (절단 — 검색 상한을 넘어 앞 트레이스만)  임계 초과 67  (평소 기대 5%)
+slow  67건
+  b7e5dedd1224d1ece8c61089d4b1b9a3  207.0ms  ×1428.89  임계 0.144853ms(baseline)  api-composer / GET /api/job_postings  api-composer-5cd4748b88-5scd5  10-10 09:07:17Z
+  7fe195cc0246875102380074269174f9  68.1ms  ×469.89  임계 0.144853ms(baseline)  api-composer / GET /api/job_postings  api-composer-5cd4748b88-5scd5  10-10 12:34:31Z
+  e134a8735230d5d74744d22e7e6b11d2  50.6ms  ×349.27  임계 0.144853ms(baseline)  api-composer / GET /api/job_postings  api-composer-5cd4748b88-5scd5  10-10 09:13:46Z
+error  없음
+normal  181건
+  4cf116cf50d3394a1f9624ba78eab7f  1616.9ms  ×0.12  임계 13838.6ms(baseline)  posting-service / careerhub.posting_service.scanner_grpc.ScannerGrpc/SetRequiredSkills  posting-service-697c7c9468-nb6c8  10-10 19:39:00Z
+  2951c80c416005a36ce5e6ed9a18c88c  440.0ms  ×0.97  임계 452.581ms(window)  ngf:careerhub-prod:careerhub-nginx-gateway / /auth/  careerhub-nginx-gateway-nginx-6b74ff84d5-7hngr  10-10 08:04:36Z
+  2951c80c416005a36ce5e6ed9a18c88c  438.9ms  ×1.00  임계 438.855ms(sample)  auth-service / GET /auth/callback/google  auth-service-869c7d45b9-bsrqg  10-10 08:04:36Z

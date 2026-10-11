@@ -8,7 +8,7 @@ from typing import Callable
 import pytest
 
 from obs.adapters import cli
-from obs.core import JSON, Client, Evidence, Lines, Response, Window
+from obs.core import JSON, Client, Evidence, Query, Lines, Response, Window
 from tests.conftest import AT, MINUTE, ClientFactory, _no_physical, _vector
 
 
@@ -104,11 +104,14 @@ HELP_SCREENS: tuple[tuple[Callable[[list[str]], None], list[str]], ...] = (
     (cli.promql_main, ["top", "--help"]), (cli.logql_main, ["--help"]), (cli.traceql_main, ["--help"]),
     (cli.logql_main, ["histogram", "--help"]), (cli.logql_main, ["templates", "--help"]), (cli.logql_main, ["around", "--help"]),
     (cli.logql_main, ["first-seen", "--help"]),
+    (cli.traceql_main, ["exemplars", "--help"]), (cli.traceql_main, ["critical-path", "--help"]), (cli.traceql_main, ["service-graph", "--help"]),
+    (cli.traceql_main, ["diff", "--help"]),
 )
 
 
 @pytest.mark.parametrize("main,argv", HELP_SCREENS, ids=["promql", "promql-summarize", "promql-compare", "promql-top", "logql", "traceql",
-                                                         "logql-histogram", "logql-templates", "logql-around", "logql-first-seen"])
+                                                         "logql-histogram", "logql-templates", "logql-around", "logql-first-seen",
+                                                         "traceql-exemplars", "traceql-critical-path", "traceql-service-graph", "traceql-diff"])
 def test_help_has_no_physical_flags_or_strings(main: Callable[[list[str]], None], argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
     """모든 --help 화면에 --uid · --url · --token · --host 가 없고 물리 문자열도 없다."""
     with pytest.raises(SystemExit) as ei:
@@ -118,6 +121,20 @@ def test_help_has_no_physical_flags_or_strings(main: Callable[[list[str]], None]
     for flag in ("--uid", "--url", "--token", "--host"):
         assert flag not in text
     _no_physical(text)
+
+
+def test_traceql_help_lists_traces_subcommands(capsys: pytest.CaptureFixture[str]) -> None:
+    """상위 traceql --help 에 트레이스 환원 서브커맨드 넷의 이름이 전부 있다."""
+    # given — 상위 화면
+    argv = ["--help"]
+    # when
+    with pytest.raises(SystemExit) as ei:
+        cli.traceql_main(argv)
+    # then
+    assert ei.value.code == 0
+    text = capsys.readouterr().out
+    for name in cli.TRACES_SUBCOMMANDS:
+        assert name in text
 
 
 def test_logql_help_lists_logs_subcommands(capsys: pytest.CaptureFixture[str]) -> None:
@@ -172,6 +189,76 @@ def test_logql_main_routes_subcommand_to_logs_run(argv: list[str], expected: dic
     assert len(seen) == 1
     for name, value in expected.items():
         assert getattr(seen[0], name) == value
+
+
+@pytest.mark.parametrize("argv,expected", [
+    (["exemplars", "--q", 'resource.service.name = "a"', "--k", "2", "--quantile", "0.9", "--baseline-range", "3d", "--limit", "50", "--since", "6h", "--end=-10m"],
+     cli.TracesArgs(cmd="exemplars", q='resource.service.name = "a"', since="6h", end="-10m", k=2, quantile=0.9, baseline_range="3d", limit=50)),
+    (["critical-path", "abc"], cli.TracesArgs(cmd="critical-path", trace_id="abc")),
+    (["service-graph", "--quantile", "0.9", "--baseline-range", "3d"], cli.TracesArgs(cmd="service-graph", quantile=0.9, baseline_range="3d")),
+    (["diff", "s1", "n1"], cli.TracesArgs(cmd="diff", slow_id="s1", normal_id="n1")),
+], ids=["exemplars", "critical-path", "service-graph", "diff"])
+def test_traceql_main_routes_subcommand_to_traces_run(argv: list[str], expected: cli.TracesArgs, monkeypatch: pytest.MonkeyPatch,
+                                                      make_client: ClientFactory, tmp_path: Path) -> None:
+    """traceql.py 의 첫 인자가 서브커맨드면 traces_run 으로 간다 — cmd · 위치 인자(traceID) · 옵션(k · quantile · baseline-range · limit · since · end) 이 TracesArgs 로 들어가고 나머지 필드는 전부 기본값이다."""
+    # given — traces_run 대역이 받은 Args 를 기록한다
+    seen: list[cli.TracesArgs] = []
+
+    def fake_run(client: Client, a: cli.TracesArgs, at: float | None = None) -> cli.RunResult:
+        seen.append(a)
+        return Evidence(backend="traces", query=a.cmd, window=Window(AT - MINUTE, AT), value=Lines(["x"])), [], "traceql-" + a.cmd
+
+    client, _ = make_client()
+    monkeypatch.setattr(cli, "traces_run", fake_run)
+    monkeypatch.setattr(cli, "_client", lambda: client)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    # when
+    cli.traceql_main(argv)
+    # then
+    assert len(seen) == 1
+    assert seen[0] == expected
+
+
+def test_traceql_main_still_routes_legacy_commands_to_traceql_run(monkeypatch: pytest.MonkeyPatch, make_client: ClientFactory, tmp_path: Path) -> None:
+    """서브커맨드가 아닌 기존 명령(tags)은 그대로 traceql_run 이 받는다."""
+    # given — traceql_run 대역
+    seen: list[cli.TraceqlArgs] = []
+
+    def fake_run(client: Client, a: cli.TraceqlArgs, at: float | None = None) -> cli.RunResult:
+        seen.append(a)
+        return Evidence(backend="traces", query="tags()", window=Window(AT - MINUTE, AT), value=Lines(["x"])), [], "traceql-tags"
+
+    client, _ = make_client()
+    monkeypatch.setattr(cli, "traceql_run", fake_run)
+    monkeypatch.setattr(cli, "_client", lambda: client)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    # when
+    cli.traceql_main(["tags"])
+    # then
+    assert [a.cmd for a in seen] == ["tags"]
+
+
+def test_evidence_preamble_lists_every_query_with_its_backend() -> None:
+    """queries 가 둘인 Evidence 의 summary.txt 머리에는 질의 줄이 둘이고 각각 `# 질의  <backend>  <query>` 꼴이다."""
+    # given
+    w = Window(AT - MINUTE, AT)
+    ev = Evidence(backend="traces", query="Q-traces", window=w, value=Lines(["x"]), queries=[Query("metrics", "Q-metrics", w), Query("traces", "Q-traces", w)])
+    # when
+    lines = cli.evidence_preamble(ev)
+    query_lines = [line for line in lines if line.startswith("# 질의")]
+    # then
+    assert query_lines == ["# 질의  metrics  Q-metrics", "# 질의  traces  Q-traces"]
+
+
+def test_evidence_preamble_without_extra_queries_is_unchanged() -> None:
+    """queries 가 비면 머리는 전과 같다 — `# 질의  <query>` 한 줄뿐이다."""
+    # given
+    ev = Evidence(backend="metrics", query="up", window=Window(AT - MINUTE, AT), value=Lines(["x"]))
+    # when
+    lines = cli.evidence_preamble(ev)
+    # then
+    assert lines[0] == "# 질의  up"
+    assert sum(1 for line in lines if line.startswith("# 질의")) == 1
 
 
 def test_promql_main_top_rejects_since() -> None:

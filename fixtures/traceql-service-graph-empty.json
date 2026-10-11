@@ -1,0 +1,52 @@
+{
+ "format": "obs-fixture/1",
+ "recorded": "tests/record.py",
+ "calls": [
+  {
+   "request": {
+    "at": 1791697975.917651,
+    "at_rfc3339": "2026-10-11T05:52:55Z",
+    "backend": "metrics",
+    "path": "api/v1/query",
+    "query_string": "query=label_replace%28sum+by+%28service_name%2C+span_name%29+%28increase%28traces_span_metrics_calls_total%7Bspan_kind%3D%22SPAN_KIND_CLIENT%22%7D%5B3600s%5D%29%29%2C+%22stat%22%2C+%22calls%22%2C+%22%22%2C+%22%22%29+or+label_replace%28sum+by+%28service_name%2C+span_name%29+%28increase%28traces_span_metrics_calls_total%7Bspan_kind%3D%22SPAN_KIND_CLIENT%22%2C+status_code%3D%22STATUS_CODE_ERROR%22%7D%5B3600s%5D%29%29%2C+%22stat%22%2C+%22errors%22%2C+%22%22%2C+%22%22%29+or+label_replace%28histogram_quantile%280.95%2C+sum+by+%28service_name%2C+span_name%29+%28rate%28traces_span_metrics_duration_seconds%7Bspan_kind%3D%22SPAN_KIND_CLIENT%22%7D%5B3600s%5D%29%29%29%2C+%22stat%22%2C+%22now%22%2C+%22%22%2C+%22%22%29+or+label_replace%28histogram_quantile%280.95%2C+sum+by+%28service_name%2C+span_name%29+%28rate%28traces_span_metrics_duration_seconds%7Bspan_kind%3D%22SPAN_KIND_CLIENT%22%7D%5B7d%5D+offset+3600s%29%29%29%2C+%22stat%22%2C+%22base%22%2C+%22%22%2C+%22%22%29&time=1786513975.917651",
+    "params": {
+     "query": "label_replace(sum by (service_name, span_name) (increase(traces_span_metrics_calls_total{span_kind=\"SPAN_KIND_CLIENT\"}[3600s])), \"stat\", \"calls\", \"\", \"\") or label_replace(sum by (service_name, span_name) (increase(traces_span_metrics_calls_total{span_kind=\"SPAN_KIND_CLIENT\", status_code=\"STATUS_CODE_ERROR\"}[3600s])), \"stat\", \"errors\", \"\", \"\") or label_replace(histogram_quantile(0.95, sum by (service_name, span_name) (rate(traces_span_metrics_duration_seconds{span_kind=\"SPAN_KIND_CLIENT\"}[3600s]))), \"stat\", \"now\", \"\", \"\") or label_replace(histogram_quantile(0.95, sum by (service_name, span_name) (rate(traces_span_metrics_duration_seconds{span_kind=\"SPAN_KIND_CLIENT\"}[7d] offset 3600s))), \"stat\", \"base\", \"\", \"\")",
+     "time": "1786513975.917651"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "status": "success",
+     "data": {
+      "resultType": "vector",
+      "result": []
+     }
+    }
+   }
+  },
+  {
+   "request": {
+    "at": 1791697975.917651,
+    "at_rfc3339": "2026-10-11T05:52:55Z",
+    "backend": "metrics",
+    "path": "api/v1/query",
+    "query_string": "query=label_replace%28histogram_quantile%280.95%2C+sum+by+%28service_name%2C+span_name%29+%28rate%28traces_span_metrics_duration_seconds%7Bspan_kind%3D%22SPAN_KIND_SERVER%22%7D%5B7d%5D+offset+3600s%29%29%29%2C+%22stat%22%2C+%22base%22%2C+%22%22%2C+%22%22%29+or+label_replace%28histogram_quantile%280.95%2C+sum+by+%28service_name%2C+span_name%29+%28rate%28traces_span_metrics_duration_seconds%7Bspan_kind%3D%22SPAN_KIND_SERVER%22%7D%5B3600s%5D%29%29%29%2C+%22stat%22%2C+%22now%22%2C+%22%22%2C+%22%22%29&time=1786513975.917651",
+    "params": {
+     "query": "label_replace(histogram_quantile(0.95, sum by (service_name, span_name) (rate(traces_span_metrics_duration_seconds{span_kind=\"SPAN_KIND_SERVER\"}[7d] offset 3600s))), \"stat\", \"base\", \"\", \"\") or label_replace(histogram_quantile(0.95, sum by (service_name, span_name) (rate(traces_span_metrics_duration_seconds{span_kind=\"SPAN_KIND_SERVER\"}[3600s]))), \"stat\", \"now\", \"\", \"\")",
+     "time": "1786513975.917651"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "status": "success",
+     "data": {
+      "resultType": "vector",
+      "result": []
+     }
+    }
+   }
+  }
+ ]
+}

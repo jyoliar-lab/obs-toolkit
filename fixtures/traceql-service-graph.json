@@ -1,0 +1,1473 @@
+{
+ "format": "obs-fixture/1",
+ "recorded": "tests/record.py",
+ "calls": [
+  {
+   "request": {
+    "at": 1791697975.917651,
+    "at_rfc3339": "2026-10-11T05:52:55Z",
+    "backend": "metrics",
+    "path": "api/v1/query",
+    "query_string": "query=label_replace%28sum+by+%28service_name%2C+span_name%29+%28increase%28traces_span_metrics_calls_total%7Bspan_kind%3D%22SPAN_KIND_CLIENT%22%7D%5B86400s%5D%29%29%2C+%22stat%22%2C+%22calls%22%2C+%22%22%2C+%22%22%29+or+label_replace%28sum+by+%28service_name%2C+span_name%29+%28increase%28traces_span_metrics_calls_total%7Bspan_kind%3D%22SPAN_KIND_CLIENT%22%2C+status_code%3D%22STATUS_CODE_ERROR%22%7D%5B86400s%5D%29%29%2C+%22stat%22%2C+%22errors%22%2C+%22%22%2C+%22%22%29+or+label_replace%28histogram_quantile%280.95%2C+sum+by+%28service_name%2C+span_name%29+%28rate%28traces_span_metrics_duration_seconds%7Bspan_kind%3D%22SPAN_KIND_CLIENT%22%7D%5B86400s%5D%29%29%29%2C+%22stat%22%2C+%22now%22%2C+%22%22%2C+%22%22%29+or+label_replace%28histogram_quantile%280.95%2C+sum+by+%28service_name%2C+span_name%29+%28rate%28traces_span_metrics_duration_seconds%7Bspan_kind%3D%22SPAN_KIND_CLIENT%22%7D%5B7d%5D+offset+86400s%29%29%29%2C+%22stat%22%2C+%22base%22%2C+%22%22%2C+%22%22%29&time=1791697975.917651",
+    "params": {
+     "query": "label_replace(sum by (service_name, span_name) (increase(traces_span_metrics_calls_total{span_kind=\"SPAN_KIND_CLIENT\"}[86400s])), \"stat\", \"calls\", \"\", \"\") or label_replace(sum by (service_name, span_name) (increase(traces_span_metrics_calls_total{span_kind=\"SPAN_KIND_CLIENT\", status_code=\"STATUS_CODE_ERROR\"}[86400s])), \"stat\", \"errors\", \"\", \"\") or label_replace(histogram_quantile(0.95, sum by (service_name, span_name) (rate(traces_span_metrics_duration_seconds{span_kind=\"SPAN_KIND_CLIENT\"}[86400s]))), \"stat\", \"now\", \"\", \"\") or label_replace(histogram_quantile(0.95, sum by (service_name, span_name) (rate(traces_span_metrics_duration_seconds{span_kind=\"SPAN_KIND_CLIENT\"}[7d] offset 86400s))), \"stat\", \"base\", \"\", \"\")",
+     "time": "1791697975.917651"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "status": "success",
+     "data": {
+      "resultType": "vector",
+      "result": [
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/Categories",
+         "stat": "calls"
+        },
+        "value": [
+         1791697975.918,
+         "1.0006949270326615"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/CountJobPostings",
+         "stat": "calls"
+        },
+        "value": [
+         1791697975.918,
+         "9.018003906348357"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/JobPostingDetail",
+         "stat": "calls"
+        },
+        "value": [
+         1791697975.918,
+         "22.039229200565817"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/JobPostings",
+         "stat": "calls"
+        },
+        "value": [
+         1791697975.918,
+         "22.041988876069603"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.review_service.restapi_grpc.ReviewReaderGrpc/GetCompanyReviews",
+         "stat": "calls"
+        },
+        "value": [
+         1791697975.918,
+         "22.03922918897565"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.review_service.restapi_grpc.ReviewReaderGrpc/GetCompanyScores",
+         "stat": "calls"
+        },
+        "value": [
+         1791697975.918,
+         "44.08353120864396"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/AddScrapJob",
+         "stat": "calls"
+        },
+        "value": [
+         1791697975.918,
+         "9.02043622727716"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/GetScrapJobsById",
+         "stat": "calls"
+        },
+        "value": [
+         1791697975.918,
+         "44.08353120864396"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/GetScrapTags",
+         "stat": "calls"
+        },
+        "value": [
+         1791697975.918,
+         "0"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/Companies",
+         "stat": "calls"
+        },
+        "value": [
+         1791697975.918,
+         "0"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/JobPostingsById",
+         "stat": "calls"
+        },
+        "value": [
+         1791697975.918,
+         "0"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/Skills",
+         "stat": "calls"
+        },
+        "value": [
+         1791697975.918,
+         "1.0006949386228277"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/GetScrapJobs",
+         "stat": "calls"
+        },
+        "value": [
+         1791697975.918,
+         "0"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/Categories",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.0039051924845114917"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/CountJobPostings",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.058442109863564434"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/JobPostingDetail",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.00718923643429772"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/JobPostings",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.06893469847219745"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.review_service.restapi_grpc.ReviewReaderGrpc/GetCompanyReviews",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.009775685863695677"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.review_service.restapi_grpc.ReviewReaderGrpc/GetCompanyScores",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.004533362802053886"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/AddScrapJob",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.00257995441789882"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/GetScrapJobsById",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.003987336530286082"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/GetScrapTags",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/Companies",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/JobPostingsById",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/Skills",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.017504469960436482"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/GetScrapJobs",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/Categories",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "0.007939380676675817"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/CountJobPostings",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/JobPostingDetail",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/JobPostings",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.review_service.restapi_grpc.ReviewReaderGrpc/GetCompanyReviews",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.review_service.restapi_grpc.ReviewReaderGrpc/GetCompanyScores",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/GetScrapJobsById",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/GetScrapTags",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/Companies",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/JobPostingsById",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/Skills",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/GetScrapJobs",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "request": {
+    "at": 1791697975.917651,
+    "at_rfc3339": "2026-10-11T05:52:55Z",
+    "backend": "metrics",
+    "path": "api/v1/query",
+    "query_string": "query=label_replace%28histogram_quantile%280.95%2C+sum+by+%28service_name%2C+span_name%29+%28rate%28traces_span_metrics_duration_seconds%7Bspan_kind%3D%22SPAN_KIND_SERVER%22%7D%5B7d%5D+offset+86400s%29%29%29%2C+%22stat%22%2C+%22base%22%2C+%22%22%2C+%22%22%29+or+label_replace%28histogram_quantile%280.95%2C+sum+by+%28service_name%2C+span_name%29+%28rate%28traces_span_metrics_duration_seconds%7Bspan_kind%3D%22SPAN_KIND_SERVER%22%7D%5B86400s%5D%29%29%29%2C+%22stat%22%2C+%22now%22%2C+%22%22%2C+%22%22%29&time=1791697975.917651",
+    "params": {
+     "query": "label_replace(histogram_quantile(0.95, sum by (service_name, span_name) (rate(traces_span_metrics_duration_seconds{span_kind=\"SPAN_KIND_SERVER\"}[7d] offset 86400s))), \"stat\", \"base\", \"\", \"\") or label_replace(histogram_quantile(0.95, sum by (service_name, span_name) (rate(traces_span_metrics_duration_seconds{span_kind=\"SPAN_KIND_SERVER\"}[86400s]))), \"stat\", \"now\", \"\", \"\")",
+     "time": "1791697975.917651"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "status": "success",
+     "data": {
+      "resultType": "vector",
+      "result": [
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "GET /api/categories",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "0.01777431165545285"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "GET /api/job_postings",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "0.00014485278066439156"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "GET /api/job_postings/count",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "GET /api/job_postings/{site}/{postingId}",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "GET /api/my/scrap-job/tags",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "GET /api/skills",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "0.0005794111226575662"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "auth-service",
+         "span_name": "GET /auth/auth-code-urls",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "0.00019653983564708267"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "auth-service",
+         "span_name": "GET /auth/authority",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "auth-service",
+         "span_name": "POST /auth/refresh",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.provider_grpc.ProviderGrpc/CloseJobPostings",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "0.05812539800474193"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.provider_grpc.ProviderGrpc/GetAllHiring",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "0.3585664721362324"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.provider_grpc.ProviderGrpc/IsCompanyRegistered",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "0.002873735221620737"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.provider_grpc.ProviderGrpc/RegisterCompany",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "0.0074934393169763455"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.provider_grpc.ProviderGrpc/RegisterJobPostingInfo",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "0.00866069139160382"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/Categories",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/Companies",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/CountJobPostings",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/JobPostingDetail",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/JobPostings",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/JobPostingsById",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/Skills",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.scanner_grpc.ScannerGrpc/GetJobPostings",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "10.624882635953464"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.scanner_grpc.ScannerGrpc/GetSkills",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "0.01765918411826916"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.scanner_grpc.ScannerGrpc/SetRequiredSkills",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "13.838589514586747"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.scanner_grpc.ScannerGrpc/SetScanComplete",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "0.0009580980571484458"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "review-service",
+         "span_name": "careerhub.review_service.crawler_grpc.ReviewGrpc/finishCrawlingTask",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "0.011247757844673328"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "review-service",
+         "span_name": "careerhub.review_service.crawler_grpc.ReviewGrpc/getCrawlingTargets",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "0.005225289055280973"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "review-service",
+         "span_name": "careerhub.review_service.crawler_grpc.ReviewGrpc/getCrawlingTasks",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "0.005936820668048265"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "review-service",
+         "span_name": "careerhub.review_service.crawler_grpc.ReviewGrpc/saveCompanyReviews",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "0.007766101348282357"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "review-service",
+         "span_name": "careerhub.review_service.crawler_grpc.ReviewGrpc/setNotExist",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "0.00276363202429847"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "review-service",
+         "span_name": "careerhub.review_service.crawler_grpc.ReviewGrpc/setReviewScore",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "0.0027990260418553382"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "review-service",
+         "span_name": "careerhub.review_service.provider_grpc.CrawlingTaskGrpc/addCrawlingTask",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "0.011370237897284233"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "review-service",
+         "span_name": "careerhub.review_service.restapi_grpc.ReviewReaderGrpc/GetCompanyReviews",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "review-service",
+         "span_name": "careerhub.review_service.restapi_grpc.ReviewReaderGrpc/GetCompanyScores",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "userinfo-service",
+         "span_name": "careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/GetScrapJobsById",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "GET /api/companies",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "GET /api/my/scrap-job",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "auth-service",
+         "span_name": "GET /auth/callback/google",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "ngf:careerhub-prod:careerhub-nginx-gateway",
+         "span_name": "/",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "0.010087762321766128"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "ngf:careerhub-prod:careerhub-nginx-gateway",
+         "span_name": "/api/",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "0.0020366540629692845"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "ngf:careerhub-prod:careerhub-nginx-gateway",
+         "span_name": "/auth/",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "auth-service",
+         "span_name": "POST /auth/sign-in",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "userinfo-service",
+         "span_name": "careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/GetScrapJobs",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "userinfo-service",
+         "span_name": "careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/GetScrapTags",
+         "stat": "base"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "GET /api/categories",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.010788402030221349"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "GET /api/company-review/reviews",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "GET /api/job_postings",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.11917264316475289"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "GET /api/job_postings/count",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.05818838437580942"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "GET /api/job_postings/{site}/{postingId}",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.019382383210228442"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "GET /api/my/scrap-job/tags",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "GET /api/skills",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.02853250057887592"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "POST /api/my/scrap-job",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.00276793684210794"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "auth-service",
+         "span_name": "GET /auth/auth-code-urls",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.00019760702751937286"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "auth-service",
+         "span_name": "GET /auth/authority",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "auth-service",
+         "span_name": "POST /auth/refresh",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.04195539071188323"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "auth-service",
+         "span_name": "POST /auth/sign-in",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.provider_grpc.ProviderGrpc/CloseJobPostings",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.046602866283702415"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.provider_grpc.ProviderGrpc/GetAllHiring",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.3345543481620683"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.provider_grpc.ProviderGrpc/IsCompanyRegistered",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.002786171925525444"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.provider_grpc.ProviderGrpc/RegisterCompany",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.006565946681724713"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.provider_grpc.ProviderGrpc/RegisterJobPostingInfo",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.011296590742239251"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/Categories",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/Companies",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/CountJobPostings",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.057827152034435975"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/JobPostingDetail",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.006117950712180401"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/JobPostings",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.06738609326335757"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/JobPostingsById",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.restapi_grpc.RestApiGrpc/Skills",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.scanner_grpc.ScannerGrpc/GetJobPostings",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.021114457642689672"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.scanner_grpc.ScannerGrpc/GetSkills",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.00771997825942951"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.scanner_grpc.ScannerGrpc/SetRequiredSkills",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "1.643974019948088"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "span_name": "careerhub.posting_service.scanner_grpc.ScannerGrpc/SetScanComplete",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "review-service",
+         "span_name": "careerhub.review_service.crawler_grpc.ReviewGrpc/finishCrawlingTask",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "review-service",
+         "span_name": "careerhub.review_service.crawler_grpc.ReviewGrpc/getCrawlingTargets",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.0028762373277231206"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "review-service",
+         "span_name": "careerhub.review_service.crawler_grpc.ReviewGrpc/getCrawlingTasks",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.003989624685369239"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "review-service",
+         "span_name": "careerhub.review_service.crawler_grpc.ReviewGrpc/saveCompanyReviews",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "review-service",
+         "span_name": "careerhub.review_service.crawler_grpc.ReviewGrpc/setNotExist",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.001606312995973312"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "review-service",
+         "span_name": "careerhub.review_service.crawler_grpc.ReviewGrpc/setReviewScore",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "review-service",
+         "span_name": "careerhub.review_service.provider_grpc.CrawlingTaskGrpc/addCrawlingTask",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.010460486422121527"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "review-service",
+         "span_name": "careerhub.review_service.restapi_grpc.ReviewReaderGrpc/GetCompanyReviews",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.010941384540672706"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "review-service",
+         "span_name": "careerhub.review_service.restapi_grpc.ReviewReaderGrpc/GetCompanyScores",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.002502901212424813"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "userinfo-service",
+         "span_name": "careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/AddScrapJob",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.0029032308347856656"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "userinfo-service",
+         "span_name": "careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/GetScrapJobsById",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.0022205856401293616"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "GET /api/companies",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "api-composer",
+         "span_name": "GET /api/my/scrap-job",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "auth-service",
+         "span_name": "GET /auth/callback/google",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "ngf:careerhub-prod:careerhub-nginx-gateway",
+         "span_name": "/",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.0030056130490683187"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "ngf:careerhub-prod:careerhub-nginx-gateway",
+         "span_name": "/api/",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.07661316710695075"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "ngf:careerhub-prod:careerhub-nginx-gateway",
+         "span_name": "/auth/",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "0.4525811085377788"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "userinfo-service",
+         "span_name": "careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/GetScrapJobs",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "userinfo-service",
+         "span_name": "careerhub.userinfo_service.restapi_grpc.ScrapJobGrpc/GetScrapTags",
+         "stat": "now"
+        },
+        "value": [
+         1791697975.918,
+         "NaN"
+        ]
+       }
+      ]
+     }
+    }
+   }
+  }
+ ]
+}
