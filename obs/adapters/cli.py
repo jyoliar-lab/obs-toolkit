@@ -125,14 +125,21 @@ def window_preamble(window: Window) -> list[str]:
     return [*lines, ""]
 
 
-def _finish(ev: Evidence[Lines], raw: list[Response], kind: str, window: Window, max_lines: int, as_json: bool) -> None:
+def _finish(ev: Evidence[Lines], raw: list[Response], kind: str, window: Window, max_lines: int, as_json: bool,
+            env: Mapping[str, str] | None = None, out: Callable[[str], None] = print) -> None:
     """Evidence 를 stdout 규약으로. as_json 은 stdout 에 요약을 찍지 않고 경로만(파일은 어느 쪽이든 같다).
     summary.txt 는 머리(창) + 요약 전체다."""
-    emit(ev.value.lines, raw, kind, max_lines, quiet=as_json, preamble=window_preamble(window))
+    emit(ev.value.lines, raw, kind, max_lines, quiet=as_json, env=env, out=out, preamble=window_preamble(window))
 
 
 def _stderr(line: str) -> None:
     print(line, file=sys.stderr)
+
+
+def _spill_failed(client: Client, failed_kind: str, error: BaseException, env: Mapping[str, str] | None) -> str:
+    """실패한 run 의 client.log 를 <failed_kind> 호출 디렉터리로 — summary.txt 는 오류 문구. 안내할 경로 문구를 돌려준다."""
+    ref = spill_ref(spill(failed_kind, client.log, [str(error)], env), env)
+    return "%s/ (%s · %s)" % (ref, SPILL_RAW, SPILL_SUMMARY)
 
 
 def finish(client: Client, run: Callable[[], RunResult], failed_kind: str, max_lines: int, as_json: bool,
@@ -140,7 +147,17 @@ def finish(client: Client, run: Callable[[], RunResult], failed_kind: str, max_l
     """run 을 돌리고 끝낸다 — 성공이면 client.log 를 원본으로 emit(지금의 _finish). 실패(어떤 예외든)면 client.log 가 비지 않을 때
     <failed_kind> 호출 디렉터리를 남기고(summary.txt 는 오류 문구) — ObsError 는 같은 종류로 문구 끝에 경로를 붙여 다시 올리고,
     그 외 예외는 err 로 경로 한 줄을 찍은 뒤 그대로 올린다. 보낸 호출이 없으면 디렉터리 없이 예외 그대로."""
-    raise NotImplementedError("finish")
+    try:
+        ev, kind, window = run()
+    except ObsError as e:
+        if not client.log:
+            raise
+        raise type(e)("%s — 원본: %s" % (e, _spill_failed(client, failed_kind, e, env))) from e
+    except Exception as e:
+        if client.log:
+            err("원본: %s" % _spill_failed(client, failed_kind, e, env))
+        raise
+    _finish(ev, client.log, kind, window, max_lines, as_json, env=env, out=out)
 
 
 def _common(ap: argparse.ArgumentParser) -> None:
@@ -309,8 +326,8 @@ def promql_main(argv: Sequence[str] | None = None) -> None:
     a = ap.parse_args(argv)
     args = PromqlArgs(query=a.query, end=a.end, range_=a.range_, step=a.step, points=a.points,
                       labels=a.labels, label_values=a.label_values, series=a.series)
-    ev, kind, window = promql_run(_client(), args)
-    _finish(ev, [], kind, window, a.max_lines, a.json)
+    client = _client()
+    finish(client, lambda: promql_run(client, args), "promql-failed", a.max_lines, a.json)
 
 
 # ── 환원 연산 — promql.py 의 서브커맨드 (계산은 obs.metrics, 표는 여기) ─────────────────
@@ -460,8 +477,8 @@ def metrics_main(argv: Sequence[str]) -> None:
     args = MetricsArgs(cmd=a.cmd, query=a.query, since=getattr(a, "since", "1h"), end=a.end, step=getattr(a, "step", None),
                        baseline=getattr(a, "baseline", DEFAULT_BASELINE), k=getattr(a, "k", DEFAULT_TOP_K),
                        by=getattr(a, "by", "pod"), agg=getattr(a, "agg", DEFAULT_TOP_AGG))
-    ev, kind, window = metrics_run(_client(), args)
-    _finish(ev, [], kind, window, a.max_lines, a.json)
+    client = _client()
+    finish(client, lambda: metrics_run(client, args), "promql-%s-failed" % a.cmd, a.max_lines, a.json)
 
 
 # ── logql ────────────────────────────────────────────────────────────────────────
@@ -607,8 +624,8 @@ def logql_main(argv: Sequence[str] | None = None) -> None:
     a = ap.parse_args(argv)
     args = LogqlArgs(query=a.query, since=a.since, end=a.end, limit=a.limit, direction=a.direction,
                      width=a.width, labels=a.labels, label_values=a.label_values, series=a.series)
-    ev, kind, window = logql_run(_client(), args)
-    _finish(ev, [], kind, window, a.max_lines, a.json)
+    client = _client()
+    finish(client, lambda: logql_run(client, args), "logql-failed", a.max_lines, a.json)
 
 
 # ── 환원 연산 — logql.py 의 서브커맨드 (계산은 obs.logs, 표는 여기) ────────────────────
@@ -780,8 +797,8 @@ def logs_main(argv: Sequence[str]) -> None:
                     by=getattr(a, "by", "detected_level"), step=getattr(a, "step", None), k=getattr(a, "k", DEFAULT_TEMPLATES_K),
                     ts=getattr(a, "ts", None), span=getattr(a, "span", DEFAULT_AROUND_SPAN), limit=getattr(a, "limit", DEFAULT_AROUND_LIMIT),
                     template=getattr(a, "template", None))
-    ev, kind, window = logs_run(_client(), args)
-    _finish(ev, [], kind, window, a.max_lines, a.json)
+    client = _client()
+    finish(client, lambda: logs_run(client, args), "logql-%s-failed" % a.cmd, a.max_lines, a.json)
 
 
 # ── traceql ──────────────────────────────────────────────────────────────────────
@@ -924,8 +941,8 @@ def traceql_main(argv: Sequence[str] | None = None) -> None:
     a = ap.parse_args(argv)
     args = TraceqlArgs(cmd=a.cmd, arg=a.arg, q=a.q, since=a.since, end=a.end, limit=a.limit,
                        min_duration=a.min_duration, scope=a.scope, top=a.top)
-    ev, kind, window = traceql_run(_client(), args)
-    _finish(ev, [], kind, window, a.max_lines, a.json)
+    client = _client()
+    finish(client, lambda: traceql_run(client, args), "traceql-failed", a.max_lines, a.json)
 
 
 # ── 환원 연산 — traceql.py 의 서브커맨드 (계산은 obs.traces, 표는 여기) ─────────────────
@@ -1124,8 +1141,8 @@ def traces_main(argv: Sequence[str]) -> None:
                       k=getattr(a, "k", DEFAULT_EXEMPLARS_K), quantile=getattr(a, "quantile", DEFAULT_QUANTILE),
                       baseline_range=getattr(a, "baseline_range", DEFAULT_BASELINE_RANGE), limit=getattr(a, "limit", DEFAULT_SEARCH_LIMIT),
                       trace_id=getattr(a, "trace_id", None), slow_id=getattr(a, "slow_id", None), normal_id=getattr(a, "normal_id", None))
-    ev, kind, w = traces_run(_client(), args)
-    _finish(ev, [], kind, w, a.max_lines, a.json)
+    client = _client()
+    finish(client, lambda: traces_run(client, args), "traceql-%s-failed" % a.cmd, a.max_lines, a.json)
 
 
 # ── obs-doctor.py — 사람용. 물리가 보이는 유일한 출력 ───────────────────────────────

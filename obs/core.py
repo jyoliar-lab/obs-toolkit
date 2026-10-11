@@ -557,6 +557,11 @@ class Client:
                 "agent 는 값을 다루지 않는다." % ENV_TOKEN)
         return cls(config=load_config(env), token=token, budget=budget or Budget(), transport=transport)
 
+    def _unsent(self, backend: str, path: str, query: dict[str, str | int | float], err: ObsError) -> ObsError:
+        """응답을 받지 못한 호출을 log 에 남기고 그 오류를 돌려준다 — 부른 쪽이 올린다."""
+        self.log.append(Response(backend=backend, path=path, status=None, body=None, params=query, error=str(err)))
+        return err
+
     def get(self, backend: str, path: str, params: Params | None = None) -> Response:
         """GET <proxy>/<uid>/<path>?params. 오류는 ObsError 로 — 논리 이름만 말한다."""
         if backend not in LOGICAL_BACKENDS:
@@ -571,20 +576,29 @@ class Client:
         try:
             status, raw = transport(url, headers, self.timeout)
         except TransportTimeout:
-            raise ObsError("%s 백엔드가 %.0f초 안에 답하지 않았다 — 무거운 질의가 흔한 원인이다: 창(--since)·구간([1d])·선택자를 좁혀 다시. "
-                           "가벼운 질의(--since 5m)도 그러면 사람에게(obs-doctor.py)." % (backend, self.timeout))
+            raise self._unsent(backend, path, query, ObsError(
+                "%s 백엔드가 %.0f초 안에 답하지 않았다 — 무거운 질의가 흔한 원인이다: 창(--since)·구간([1d])·선택자를 좁혀 다시. "
+                "가벼운 질의(--since 5m)도 그러면 사람에게(obs-doctor.py)." % (backend, self.timeout)))
         except TransportError as e:
-            raise ObsError("%s 백엔드에 닿지 못했다(%s). 사람에게: 게이트웨이·VPN 확인(obs-doctor.py)." % (backend, e))
-        self.budget.charge_bytes(len(raw))
-        if status >= 400:
-            raise ObsError(http_error_message(backend, status, raw.decode("utf-8", "replace")))
+            raise self._unsent(backend, path, query, ObsError(
+                "%s 백엔드에 닿지 못했다(%s). 사람에게: 게이트웨이·VPN 확인(obs-doctor.py)." % (backend, e)))
         text = raw.decode("utf-8", "replace")
+        try:
+            self.budget.charge_bytes(len(raw))
+        except BudgetExceeded:
+            self.log.append(Response(backend=backend, path=path, status=status, body=text[:SPILL_HEAD_CHARS], params=query,
+                                     size=len(raw), truncated=True))
+            raise
         body: JSON
         try:
             body = json.loads(text) if text else {}
         except ValueError:
             body = text
-        return Response(backend=backend, path=path, status=status, body=body, params=query)
+        resp = Response(backend=backend, path=path, status=status, body=body, params=query, size=len(raw))
+        self.log.append(resp)
+        if status >= 400:
+            raise ObsError(http_error_message(backend, status, text))
+        return resp
 
 
 # ── 진단 — 사람용. 여기서만 물리(URL·uid)가 보인다 ──────────────────────────────
