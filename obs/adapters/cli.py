@@ -20,7 +20,7 @@ import argparse
 import re
 import sys
 from dataclasses import dataclass
-from typing import Callable, Mapping, Sequence, TypeAlias, TypeVar
+from typing import Callable, Mapping, Sequence, TypeAlias
 
 from obs.core import (
     JSON, Client, DoctorReport, Evidence, Lines, ObsError, Params, Response, Window, doctor, fmt_ts, load_config,
@@ -42,8 +42,6 @@ from obs.traces import (
 
 DEFAULT_MAX_LINES: int = 40
 DEFAULT_LOG_LIMIT: int = 30
-
-V = TypeVar("V")
 
 RunResult: TypeAlias = "tuple[Evidence[Lines], list[Response], str, Window]"   # 둘째 자리(원본) — 호출 순서의 Response 목록
 """(근거, 원본 Response 목록, spill 종류 이름, CLI 가 인자로 계산한 창)"""
@@ -115,15 +113,21 @@ def fmt_val(v: str | int | float) -> str:
     return "%.6g" % f
 
 
+def _window_line(tag: str, w: Window) -> str:
+    return "# %s  %s  (start=%.3f end=%.3f)" % (tag, w.label(), w.start, w.end)
+
+
 def window_preamble(window: Window) -> list[str]:
-    lines = ["# 창  %s  (start=%.3f end=%.3f)" % (window.label(), window.start, window.end)]
-    b = window.baseline
-    if b is not None:
-        lines.append("# 기준선  %s  (start=%.3f end=%.3f)" % (b.label(), b.start, b.end))
+    """summary.txt 머리 — CLI 가 인자로 계산한 창(RFC3339 + unix 초)과 기준선. 보낸 질의는 원본(raw.json)에 있다."""
+    lines = [_window_line("창", window)]
+    if window.baseline is not None:
+        lines.append(_window_line("기준선", window.baseline))
     return [*lines, ""]
 
 
 def _finish(ev: Evidence[Lines], raw: list[Response], kind: str, window: Window, max_lines: int, as_json: bool) -> None:
+    """Evidence 를 stdout 규약으로. as_json 은 stdout 에 요약을 찍지 않고 경로만(파일은 어느 쪽이든 같다).
+    summary.txt 는 머리(창) + 요약 전체다."""
     emit(ev.value.lines, raw, kind, max_lines, quiet=as_json, preamble=window_preamble(window))
 
 
@@ -232,7 +236,7 @@ class PromqlArgs:
 
 
 def promql_run(client: Client, a: PromqlArgs, at: float | None = None) -> RunResult:
-    """→ (Evidence, 원본 Response 목록, kind). stdout 을 만지지 않는다."""
+    """→ (Evidence, 원본 Response 목록, kind, 창). stdout 을 만지지 않는다."""
     end = parse_time(a.end, now() if at is None else at)
     start = end - parse_duration(a.range_) if a.range_ else None
     window = Window(start=start if start is not None else end, end=end)
@@ -397,7 +401,7 @@ class MetricsArgs:
 
 
 def metrics_run(client: Client, a: MetricsArgs, at: float | None = None) -> RunResult:
-    """→ (Evidence[Lines], 원본, kind). 계산은 obs.metrics 가, 표는 *_lines 가. stdout 을 만지지 않는다.
+    """→ (Evidence[Lines], 원본, kind, 창). 계산은 obs.metrics 가, 표는 *_lines 가. stdout 을 만지지 않는다.
     top 은 창이 없다 — --end 시각 하나(since 는 쓰이지 않는다)."""
     base_ts = now() if at is None else at
     window = Window.last(a.since, a.end, at) if a.cmd != "top" else Window(parse_time(a.end, base_ts), parse_time(a.end, base_ts))
@@ -677,7 +681,7 @@ class LogsArgs:
 
 
 def logs_run(client: Client, a: LogsArgs, at: float | None = None) -> RunResult:
-    """→ (Evidence[Lines], 원본, kind). 검사(validate)가 요청 앞이다. 계산은 obs.logs 가, 표는 *_lines 가. stdout 을 만지지 않는다."""
+    """→ (Evidence[Lines], 원본, kind, 창). 검사(validate)가 요청 앞이다. 계산은 obs.logs 가, 표는 *_lines 가. stdout 을 만지지 않는다."""
     a.validate()
     window = Window.last(a.since, a.end, at)
     if a.cmd == "histogram":
@@ -1052,7 +1056,7 @@ class TracesArgs:
 
 
 def traces_run(client: Client, a: TracesArgs, at: float | None = None) -> RunResult:
-    """→ (Evidence[Lines], 원본, kind). validate 가 요청 앞. 계산은 obs.traces 가, 표는 *_lines 가. stdout 을 만지지 않는다."""
+    """→ (Evidence[Lines], 원본, kind, 창). validate 가 요청 앞. 계산은 obs.traces 가, 표는 *_lines 가. stdout 을 만지지 않는다."""
     a.validate()
     window = Window.last(a.since, a.end, at)
     kind = "traceql-" + a.cmd

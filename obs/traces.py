@@ -3,7 +3,7 @@
 span 트리를 agent 가 읽지 않고 "어느 홉이 늘었나" 를 안다. 구조로 거는 것(obs.metrics · obs.logs 와 같다):
   - 순수 함수다 — HTTP 는 `Client` 주입(`Client.get` 만 부른다). 파서(`parse_*`)와 계산(`*_of`)은 HTTP 를 모른다.
   - 연산은 `Window` 를 받고 `(Evidence[V], list[Response])` 를 돌려준다. 원본은 어댑터가 spill 한다.
-  - 호출이 둘 이상인 연산(exemplars · service_graph · diff)은 보낸 질의 전부를 `Evidence.queries` 에 담는다 — 재실행 가능.
+  - 보낸 질의는 원본 `list[Response]`(호출 순서)의 params 에 있다 — 호출이 둘 이상인 연산도 같다.
   - "데이터 없음" 과 "0" 을 구분한다.
 
 Tempo 응답 파서(`Span` · `parse_spans` · `TraceHit` · `parse_search` · `TagScope` · `parse_tags` · `parse_tag_values` · `check_json`)는
@@ -368,7 +368,7 @@ def exemplars_of(sample: Sequence[SpanMatch], thresholds: Mapping[Endpoint, Thre
 
 def exemplars(client: Client, q: str, window: Window, k: int = DEFAULT_EXEMPLARS_K, quantile: float = DEFAULT_QUANTILE,
               baseline_range: str = DEFAULT_BASELINE_RANGE, limit: int = DEFAULT_SEARCH_LIMIT) -> tuple[Evidence[Exemplars], list[Response]]:
-    """metrics 임계 → traces 후보 GET 2 회 · 두 질의를 Evidence.queries 에."""
+    """metrics 임계 → traces 후보 GET 2 회 — 원본은 [metrics, traces] 순."""
     if k < 1:
         raise ObsError("k 는 1 이상이어야 한다: %d" % k)
     if limit < 1:
