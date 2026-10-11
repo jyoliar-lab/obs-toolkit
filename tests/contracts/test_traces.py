@@ -112,21 +112,19 @@ def _ids(items: list[Exemplar]) -> list[str]:
 # ── parse_span_matches ───────────────────────────────────────────────────────────
 
 def test_parse_span_matches_reads_every_span_of_every_span_set() -> None:
-    """트레이스 둘 × spanSets 하나 × span 둘이면 매치 넷이고, 각 건의 trace_id · name · duration_ns · status · service · pod 가 응답의 것이다."""
+    """트레이스 둘 × spanSets 하나 × span 둘이면 매치 넷이고, 건마다 trace_id · span_id · name · start_ns · duration_ns · status · service · pod 가 응답의 것이다 — 응답 순서 그대로."""
     # given — 트레이스 둘, 각각 매치 span 둘
-    body = _search(("t1", [_hit_span("a", 10, span_id="x1"), _hit_span("b", 20, status="error", service="svc2", pod="p2", span_id="x2")]),
-                   ("t2", [_hit_span("c", 30, span_id="y1"), _hit_span("d", 40, span_id="y2")]))
+    body = _search(("t1", [_hit_span("a", 10, span_id="x1", start_ns=1_000_000_000), _hit_span("b", 20, status="error", service="svc2", pod="p2", span_id="x2", start_ns=1_005_000_000)]),
+                   ("t2", [_hit_span("c", 30, span_id="y1", start_ns=2_000_000_000), _hit_span("d", 40, span_id="y2", start_ns=2_010_000_000)]))
     # when
     matches = traces.parse_span_matches(body)
     # then
-    assert len(matches) == 4
-    assert [m.trace_id for m in matches] == ["t1", "t1", "t2", "t2"]
-    assert [m.name for m in matches] == ["a", "b", "c", "d"]
-    assert matches[1].duration_ns == 20 * MS
-    assert matches[1].status == "error"
-    assert matches[1].service == "svc2"
-    assert matches[1].pod == "p2"
-    assert matches[1].span_id == "x2"
+    assert matches == [
+        SpanMatch(trace_id="t1", span_id="x1", name="a", start_ns=1_000_000_000, duration_ns=10 * MS, status="unset", service="svc", pod="p"),
+        SpanMatch(trace_id="t1", span_id="x2", name="b", start_ns=1_005_000_000, duration_ns=20 * MS, status="error", service="svc2", pod="p2"),
+        SpanMatch(trace_id="t2", span_id="y1", name="c", start_ns=2_000_000_000, duration_ns=30 * MS, status="unset", service="svc", pod="p"),
+        SpanMatch(trace_id="t2", span_id="y2", name="d", start_ns=2_010_000_000, duration_ns=40 * MS, status="unset", service="svc", pod="p"),
+    ]
 
 
 def test_parse_span_matches_missing_attributes_are_empty_strings() -> None:
