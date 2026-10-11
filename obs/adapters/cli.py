@@ -951,7 +951,7 @@ def critical_path_lines(value: CriticalPath, window: Window) -> list[str]:
         value.trace_id, value.total_ms, value.spans, len(value.path), value.dropped, incomplete)]
     for p in value.path:
         lines.append("%s+%.1fms  %.1fms  self %.1fms  %s / %s%s" % (
-            "  " * p.depth, p.offset_ms, p.duration_ms, p.self_ms, p.service, p.name, "  (잘림 — 부모 끝에서)" if p.clipped_ms else ""))
+            "  " * p.depth, p.offset_ms, p.duration_ms, p.self_ms, p.service, p.name, "  (잘림 — 부모 끝에서 +%.1fms)" % p.clipped_ms if p.clipped_ms > 0 else ""))
     top = value.bottlenecks[:3]
     lines.append("병목 — self 내림차순 상위 %d:" % len(top))
     lines += ["  self %.1fms  깊이 %d  %s / %s" % (p.self_ms, p.depth, p.service, p.name) for p in top]

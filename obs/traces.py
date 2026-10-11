@@ -451,7 +451,7 @@ class _CrispWalk:
         self_ns += cursor - lo
         self.path.append(PathSpan(service=span.service, name=span.name, span_id=span.span_id, depth=depth,
                                   offset_ms=(lo - self.origin) / 1e6, duration_ms=(hi - lo) / 1e6, self_ms=self_ns / 1e6,
-                                  clipped_ms=float((lo, hi) != (span.start_ns, span.end_ns))))
+                                  clipped_ms=((span.end_ns - span.start_ns) - (hi - lo)) / 1e6))
         for c_lo, c_hi, c in reversed(picked):
             self.visit(c, c_lo, c_hi, depth + 1)
 
