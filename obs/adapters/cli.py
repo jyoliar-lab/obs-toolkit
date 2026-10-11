@@ -116,11 +116,15 @@ def fmt_val(v: str | int | float) -> str:
 
 
 def window_preamble(window: Window) -> list[str]:
-    raise NotImplementedError("window_preamble")
+    lines = ["# 창  %s  (start=%.3f end=%.3f)" % (window.label(), window.start, window.end)]
+    b = window.baseline
+    if b is not None:
+        lines.append("# 기준선  %s  (start=%.3f end=%.3f)" % (b.label(), b.start, b.end))
+    return [*lines, ""]
 
 
 def _finish(ev: Evidence[Lines], raw: list[Response], kind: str, window: Window, max_lines: int, as_json: bool) -> None:
-    raise NotImplementedError("_finish")
+    emit(ev.value.lines, raw, kind, max_lines, quiet=as_json, preamble=window_preamble(window))
 
 
 def _common(ap: argparse.ArgumentParser) -> None:
@@ -239,19 +243,19 @@ def promql_run(client: Client, a: PromqlArgs, at: float | None = None) -> RunRes
         resp = client.get("metrics", "api/v1/labels", params)
         body = check_status(resp.body, "metrics")
         lines = sorted(parse_strings(body))
-        kind, query = "promql-labels", "labels(%s)" % (match or "")
+        kind = "promql-labels"
     elif a.label_values:
         params = {"match[]": match, "start": start, "end": end}
         resp = client.get("metrics", "api/v1/label/%s/values" % a.label_values, params)
         body = check_status(resp.body, "metrics")
         lines = sorted(parse_strings(body))
-        kind, query = "promql-label-values", "label_values(%s, %s)" % (a.label_values, match or "")
+        kind = "promql-label-values"
     elif a.series:
         params = {"match[]": a.series, "start": start if start is not None else end - 3600, "end": end}
         resp = client.get("metrics", "api/v1/series", params)
         body = check_status(resp.body, "metrics")
         lines = [labels_str(m) for m in parse_label_sets(body)]
-        kind, query = "promql-series", "series(%s)" % a.series
+        kind = "promql-series"
     elif not match:
         raise ObsError("PromQL 이 필요하다")
     elif start is not None:
@@ -260,14 +264,14 @@ def promql_run(client: Client, a: PromqlArgs, at: float | None = None) -> RunRes
         resp = client.get("metrics", "api/v1/query_range", params)
         body = check_status(resp.body, "metrics")
         lines = range_lines(parse_metric(body), a.points)
-        kind, query = "promql-range", match
+        kind = "promql-range"
     else:
         resp = client.get("metrics", "api/v1/query", {"query": match, "time": end})
         body = check_status(resp.body, "metrics")
         lines = instant_lines(parse_metric(body))
-        kind, query = "promql", match
+        kind = "promql"
 
-    return _evidence(lines), [resp], kind
+    return _evidence(lines), [resp], kind, window
 
 
 def promql_main(argv: Sequence[str] | None = None) -> None:
@@ -399,14 +403,14 @@ def metrics_run(client: Client, a: MetricsArgs, at: float | None = None) -> RunR
     window = Window.last(a.since, a.end, at) if a.cmd != "top" else Window(parse_time(a.end, base_ts), parse_time(a.end, base_ts))
     if a.cmd == "summarize":
         ev, raw = summarize(client, a.query, window, a.step)
-        return _evidence(summary_lines(ev.value, window)), raw, "promql-summarize"
+        return _evidence(summary_lines(ev.value, window)), raw, "promql-summarize", window
     if a.cmd == "compare":
         w = window.with_baseline(a.baseline)
         ev_c, raw = compare(client, a.query, w, a.step)
-        return _evidence(compare_lines(ev_c.value, w)), raw, "promql-compare"
+        return _evidence(compare_lines(ev_c.value, w)), raw, "promql-compare", w
     if a.cmd == "top":
         ev_t, raw = top(client, a.query, window, k=a.k, by=a.by.split(","), agg=a.agg)
-        return _evidence(top_lines(ev_t.value, window)), raw, "promql-top"
+        return _evidence(top_lines(ev_t.value, window)), raw, "promql-top", window
     raise ObsError("알 수 없는 명령 %r — %s" % (a.cmd, " · ".join(METRICS_SUBCOMMANDS)))
 
 
@@ -543,17 +547,17 @@ def logql_run(client: Client, a: LogqlArgs, at: float | None = None) -> RunResul
         resp = client.get("logs", "loki/api/v1/labels", ns)
         body = check_status(resp.body, "logs")
         lines = sorted(parse_strings(body))
-        kind, query = "logql-labels", "labels()"
+        kind = "logql-labels"
     elif a.label_values:
         resp = client.get("logs", "loki/api/v1/label/%s/values" % a.label_values, ns)
         body = check_status(resp.body, "logs")
         lines = sorted(parse_strings(body))
-        kind, query = "logql-label-values", "label_values(%s)" % a.label_values
+        kind = "logql-label-values"
     elif a.series:
         resp = client.get("logs", "loki/api/v1/series", {**ns, "match[]": a.series})
         body = check_status(resp.body, "logs")
         lines = [labels_str(m) for m in parse_label_sets(body)]
-        kind, query = "logql-series", "series(%s)" % a.series
+        kind = "logql-series"
     elif not a.query:
         raise ObsError("LogQL 이 필요하다")
     else:
@@ -562,9 +566,9 @@ def logql_run(client: Client, a: LogqlArgs, at: float | None = None) -> RunResul
         body = check_status(resp.body, "logs")
         res = parse_logs(body)
         lines = matrix_lines(res) if res.result_type == "matrix" else stream_lines(res, a.direction, a.width)
-        kind, query = "logql", a.query
+        kind = "logql"
 
-    return _evidence(lines), [resp], kind
+    return _evidence(lines), [resp], kind, window
 
 
 def logql_main(argv: Sequence[str] | None = None) -> None:
@@ -678,16 +682,18 @@ def logs_run(client: Client, a: LogsArgs, at: float | None = None) -> RunResult:
     window = Window.last(a.since, a.end, at)
     if a.cmd == "histogram":
         ev_h, raw = histogram(client, a.selector, window, by=a.by.split(","), step=a.step)
-        return _evidence(histogram_lines(ev_h.value, window)), raw, "logql-histogram"
+        return _evidence(histogram_lines(ev_h.value, window)), raw, "logql-histogram", window
     if a.cmd == "templates":
         ev_t, raw = templates(client, a.selector, window, k=a.k, step=a.step)
-        return _evidence(templates_lines(ev_t.value, window)), raw, "logql-templates"
+        return _evidence(templates_lines(ev_t.value, window)), raw, "logql-templates", window
     if a.cmd == "around":
         ts = parse_time(a.ts, now() if at is None else at)
-        ev_a, raw = around(client, a.selector, ts, parse_duration(a.span), limit=a.limit)
-        return _evidence(around_lines(ev_a.value, window)), raw, "logql-around"
+        span = parse_duration(a.span)
+        ev_a, raw = around(client, a.selector, ts, span, limit=a.limit)
+        w = Window(ts - span, ts + span)
+        return _evidence(around_lines(ev_a.value, w)), raw, "logql-around", w
     ev_f, raw = first_seen(client, a.selector, a.template or "", window)
-    return _evidence(first_seen_lines(ev_f.value, window)), raw, "logql-first-seen"
+    return _evidence(first_seen_lines(ev_f.value, window)), raw, "logql-first-seen", window
 
 
 LOGS_COMMON_DOC = """계산은 백엔드(Loki)가 한다 — count_over_time · Patterns API 의 환원 결과만 받고, 원본 로그 줄은 예시 · 첫 발생 · 문맥에만 온다.
@@ -856,30 +862,30 @@ def traceql_run(client: Client, a: TraceqlArgs, at: float | None = None) -> RunR
         resp = client.get("traces", "api/search", params)
         body = check_json(resp.body, "traces")
         lines = search_lines(parse_search(body))
-        kind, query = "traceql-search", "search(%s)" % (a.q or "")
+        kind = "traceql-search"
     elif a.cmd == "trace":
         if not a.arg:
             raise ObsError("traceID 가 필요하다")
         resp = client.get("traces", "api/traces/%s" % a.arg)
         body = check_json(resp.body, "traces")
         lines = trace_lines(a.arg, parse_spans(body), a.top)
-        kind, query = "traceql-trace", "trace(%s)" % a.arg
+        kind = "traceql-trace"
     elif a.cmd == "tags":
         resp = client.get("traces", "api/v2/search/tags", {**w, "scope": a.scope})
         body = check_json(resp.body, "traces")
         lines = tags_lines(parse_tags(body))
-        kind, query = "traceql-tags", "tags(%s)" % (a.scope or "")
+        kind = "traceql-tags"
     elif a.cmd == "tag-values":
         if not a.arg:
             raise ObsError("태그 이름이 필요하다")
         resp = client.get("traces", "api/v2/search/tag/%s/values" % a.arg, {**w, "q": a.q})
         body = check_json(resp.body, "traces")
         lines = sorted(parse_tag_values(body))
-        kind, query = "traceql-tag-values", "tag_values(%s, %s)" % (a.arg, a.q or "")
+        kind = "traceql-tag-values"
     else:
         raise ObsError("알 수 없는 명령 %r — search · trace · tags · tag-values" % a.cmd)
 
-    return _evidence(lines), [resp], kind
+    return _evidence(lines), [resp], kind, window
 
 
 def traceql_main(argv: Sequence[str] | None = None) -> None:
@@ -1052,15 +1058,15 @@ def traces_run(client: Client, a: TracesArgs, at: float | None = None) -> RunRes
     kind = "traceql-" + a.cmd
     if a.cmd == "exemplars":
         ev_e, raw = exemplars(client, a.q, window, k=a.k, quantile=a.quantile, baseline_range=a.baseline_range, limit=a.limit)
-        return _evidence(exemplars_lines(ev_e.value, window)), raw, kind
+        return _evidence(exemplars_lines(ev_e.value, window)), raw, kind, window
     if a.cmd == "critical-path":
         ev_c, raw = critical_path(client, a.trace_id or "", window)
-        return _evidence(critical_path_lines(ev_c.value, window)), raw, kind
+        return _evidence(critical_path_lines(ev_c.value, window)), raw, kind, window
     if a.cmd == "service-graph":
         ev_g, raw = service_graph(client, window, quantile=a.quantile, baseline_range=a.baseline_range)
-        return _evidence(service_graph_lines(ev_g.value, window)), raw, kind
+        return _evidence(service_graph_lines(ev_g.value, window)), raw, kind, window
     ev_d, raw = diff(client, a.slow_id or "", a.normal_id or "", window)
-    return _evidence(diff_lines(ev_d.value, window)), raw, kind
+    return _evidence(diff_lines(ev_d.value, window)), raw, kind, window
 
 
 def traces_main(argv: Sequence[str]) -> None:
