@@ -495,6 +495,7 @@ def test_exemplars_marks_truncated_only_when_more_than_limit_came_back(make_clie
     # then
     assert ev.value.truncated is truncated
     assert ev.value.sample == sample
+    assert _ids(ev.value.normal.items) == ["t%d" % i for i in range(sample)]
 
 
 def test_exemplars_defaults_baseline_range_to_seven_days(make_client: ClientFactory) -> None:
@@ -763,12 +764,14 @@ def test_service_graph_splits_edges_per_endpoint_not_per_service_pair() -> None:
 
 
 def test_service_graph_orders_by_ratio_then_count_then_name() -> None:
-    """엣지는 배율 내림차순, 동률은 건수 내림차순, base 없는 것(ratio None)은 마지막이다."""
-    # given — 배율 3 · 1.5(건수 20) · 1.5(건수 5) · base 없음
-    g = _sg([_row("a", "slow3", calls=1, now=0.03, base=0.01), _row("a", "half-few", calls=5, now=0.015, base=0.01),
-             _row("a", "half-many", calls=20, now=0.015, base=0.01), _row("a", "no-base", calls=99, now=0.5, base=None)], [])
+    """엣지는 배율 내림차순, 동률은 건수 내림차순, 그래도 동률이면 (caller, callee, endpoint) 사전순, base 없는 것(ratio None)은 마지막이다."""
+    # given — 배율 3 · 1.5(건수 20) · 1.5(건수 5) 셋(caller b · endpoint half-few2 · half-few) · base 없음 — 입력 순서는 기대와 다르다
+    g = _sg([_row("a", "slow3", calls=1, now=0.03, base=0.01), _row("b", "half-few", calls=5, now=0.015, base=0.01),
+             _row("a", "half-few2", calls=5, now=0.015, base=0.01), _row("a", "half-many", calls=20, now=0.015, base=0.01),
+             _row("a", "half-few", calls=5, now=0.015, base=0.01), _row("a", "no-base", calls=99, now=0.5, base=None)], [])
     # when · then
-    assert [e.endpoint for e in g.edges] == ["slow3", "half-many", "half-few", "no-base"]
+    assert [(e.caller, e.endpoint) for e in g.edges] == [("a", "slow3"), ("a", "half-many"), ("a", "half-few"), ("a", "half-few2"), ("b", "half-few"),
+                                                         ("a", "no-base")]
 
 
 def test_service_graph_joins_callee_from_baseline_server_row_when_window_has_none() -> None:
@@ -1006,8 +1009,11 @@ def test_exemplars_lines_mark_empty_bucket_as_none_not_no_data() -> None:
     """표본은 있는데 slow 묶음이 비면 그 묶음 줄에 '없음' 이 있고 어느 줄에도 '데이터 없음' 은 없다."""
     # given
     lines = cli.exemplars_lines(_exemplars(sample=1, normal=[_exemplar()]), W)
-    # when · then
-    assert any("없음" in line for line in lines)
+    # when
+    slow_lines = [line for line in lines if line.startswith("slow")]
+    # then
+    assert len(slow_lines) == 1
+    assert "없음" in slow_lines[0]
     assert not any("데이터 없음" in line for line in lines)
 
 
@@ -1067,22 +1073,31 @@ def test_critical_path_lines_flag_incomplete_trace_with_several_roots(roots: int
     assert any("불완전" in line and "루트 2" in line for line in lines) is flagged
 
 
-def test_service_graph_lines_say_idle_not_no_data_when_rows_have_zero_calls() -> None:
-    """edges 가 비어도 idle 이 3 이면 '데이터 없음' 이 아니라 알려진 호출 3 개가 창 안에서 0 건이라고 말한다."""
-    # given · when
-    lines = cli.service_graph_lines(_graph([], idle=3), W)
+@pytest.mark.parametrize("idle", [3, 7])
+def test_service_graph_lines_say_idle_not_no_data_when_rows_have_zero_calls(idle: int) -> None:
+    """edges 가 비어도 idle 이 있으면 '데이터 없음' 이 아니라 알려진 호출 idle 개가 창 안에서 0 건이라고 말한다."""
+    # given
+    lines = cli.service_graph_lines(_graph([], idle=idle), W)
+    # when
+    zero_lines = [line for line in lines if "0건" in line]
     # then
     assert not any("데이터 없음" in line for line in lines)
-    assert any("3" in line and "0" in line for line in lines)
+    assert len(zero_lines) == 1
+    assert "%d개" % idle in zero_lines[0]
 
 
 def test_service_graph_lines_mark_unknown_callee_and_missing_server_p95() -> None:
     """callee 가 None 이면 그 자리에 '미확인' 이, server_p95_ms 가 None 이면 숫자 대신 없음 표시가 있다."""
-    # given · when
+    # given
     lines = cli.service_graph_lines(_graph([_edge(callee=None, server=None)]), W)
+    # when
+    head_lines = [line for line in lines if "→" in line]
+    endpoint_lines = [line for line in lines[1:] if "→" not in line]
     # then
-    assert any("미확인" in line for line in lines)
-    assert not any("30" in line for line in lines)
+    assert len(head_lines) == 1
+    assert "미확인" in head_lines[0]
+    assert len(endpoint_lines) == 1
+    assert "서버 —" in endpoint_lines[0]
 
 
 def test_diff_lines_mark_one_sided_spans() -> None:

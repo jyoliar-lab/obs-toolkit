@@ -239,7 +239,7 @@ def test_traceql_main_still_routes_legacy_commands_to_traceql_run(monkeypatch: p
 
 
 def test_evidence_preamble_lists_every_query_with_its_backend() -> None:
-    """queries 가 둘인 Evidence 의 summary.txt 머리에는 질의 줄이 둘이고 각각 백엔드 이름과 질의 문자열이 있다."""
+    """queries 가 둘인 Evidence 의 summary.txt 머리에는 질의 줄이 둘이고 각각 `# 질의  <backend>  <query>` 꼴이다."""
     # given
     w = Window(AT - MINUTE, AT)
     ev = Evidence(backend="traces", query="Q-traces", window=w, value=Lines(["x"]), queries=[Query("metrics", "Q-metrics", w), Query("traces", "Q-traces", w)])
@@ -247,11 +247,7 @@ def test_evidence_preamble_lists_every_query_with_its_backend() -> None:
     lines = cli.evidence_preamble(ev)
     query_lines = [line for line in lines if line.startswith("# 질의")]
     # then
-    assert len(query_lines) == 2
-    assert "metrics" in query_lines[0]
-    assert "Q-metrics" in query_lines[0]
-    assert "traces" in query_lines[1]
-    assert "Q-traces" in query_lines[1]
+    assert query_lines == ["# 질의  metrics  Q-metrics", "# 질의  traces  Q-traces"]
 
 
 def test_evidence_preamble_without_extra_queries_is_unchanged() -> None:
