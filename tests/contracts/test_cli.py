@@ -110,6 +110,8 @@ def test_emit_writes_log_items_with_one_key_set(tmp_path: Path) -> None:
     assert [(i["backend"], i["path"]) for i in items] == [(r.backend, r.path) for r in log]
     for item in items:
         assert set(item) == {"backend", "path", "params", "status", "body", "error", "size", "truncated"}
+    assert [i["status"] for i in items] == [200, None]
+    assert [i["error"] for i in items] == [None, "traces 백엔드에 닿지 못했다"]
 
 
 # ── finish — 성공은 emit, 실패도 호출 디렉터리 ───────────────────────────────────
@@ -195,6 +197,7 @@ def test_finish_spills_log_and_reraises_other_exceptions(make_client: ClientFact
         cli.finish(client, _run_after(client, 1, ValueError("bug")), "logql-failed", 40, False, env=env, out=lambda _: None, err=err.append)
     # then
     d = _only_dir(tmp_path)
+    assert d.name.endswith("-logql-failed")
     assert len(err) == 1
     assert d.name in err[0]
     assert len(json.loads((d / "raw.json").read_text())) == 1
