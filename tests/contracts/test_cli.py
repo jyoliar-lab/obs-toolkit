@@ -260,6 +260,7 @@ def test_window_preamble_has_window_line_only() -> None:
     assert not [line for line in lines if line.startswith("# 질의")]
     assert not [line for line in lines if line.startswith("# 기준선")]
     assert lines[-1] == ""
+    assert lines == [window_lines[0], ""]
 
 
 def test_window_preamble_adds_baseline_line() -> None:
