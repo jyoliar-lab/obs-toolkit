@@ -5,7 +5,7 @@
 
 구조로 거는 것:
   - 순수 함수다 — HTTP 는 `Client` 주입(`Client.get` 만 부른다), fixture(서버 환원 응답)만으로 테스트된다.
-  - 모든 연산은 `Window` 를 받고 `(Evidence[V], 원본)` 을 돌려준다. 원본은 어댑터가 spill 한다(CLI → raw.json).
+  - 모든 연산은 `Window` 를 받고 `Evidence[V]` 를 돌려준다. 보낸 호출의 기록은 `Client.log` 에 있고 어댑터가 spill 한다(CLI → raw.json).
   - 통계는 **한 질의**로 묶는다 — `label_replace(<stat>, "stat", "<이름>", "", "") or …` 를 `/api/v1/query` 한 번에.
     통계마다 질의를 따로 던지면 예산(`core.MAX_QUERIES`)이 연산 한 번에 바닥난다. 연산당 GET 은 1 회다.
   - `summarize` 의 일곱 값은 서브쿼리 `(Q)[<창 길이>:<step>]` 위의 `count_over_time` · `min_over_time` ·
@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from obs.core import (
-    JSON, Client, Evidence, ObsError, Response, Window, json_labels, json_list, json_obj, json_pair, json_str, json_strs,
+    JSON, Client, Evidence, ObsError, Window, json_labels, json_list, json_obj, json_pair, json_str, json_strs,
 )
 
 DEFAULT_BASELINE: str = "1d"   # 기준선 창 기본값 — 1일 전 같은 시각. `prev` 는 직전 창, `1w` 는 1주 전
@@ -305,20 +305,19 @@ def deltas_of(res: MetricResult) -> list[Delta]:
 
 # ── 연산 — Client 주입, Window 를 받고 Evidence 를 돌려준다. 연산당 GET 1 회 ─────────
 
-def _instant(client: Client, query: str, at: float) -> tuple[dict[str, JSON], Response]:
-    """즉시 조회 한 번 — 검사한 body 와 그 Response."""
-    resp = client.get("metrics", "api/v1/query", {"query": query, "time": at})
-    return check_status(resp.body, "metrics"), resp
+def _instant(client: Client, query: str, at: float) -> dict[str, JSON]:
+    """즉시 조회 한 번 — 검사한 body."""
+    return check_status(client.get("metrics", "api/v1/query", {"query": query, "time": at}).body, "metrics")
 
 
 def summarize(client: Client, query: str, window: Window, step: str | None = None) -> Evidence[Summary]:
     """창 안의 시계열별 n · min · p50 · p95 · max · last · 기울기 — 전부 서버가 서브쿼리 위에서 계산한다. GET 1 회.
-    보낸 조립 질의는 원본(Response.params)에 있다."""
+    보낸 조립 질의는 Client.log 의 params 에 있다."""
     if not query.strip():
         raise ObsError("PromQL 이 필요하다")
     step = step or auto_step(window.seconds)
     q = summarize_query(query, window, step)
-    body, _ = _instant(client, q, window.end)
+    body = _instant(client, q, window.end)
     value = Summary(step=step, series=summaries_of(parse_metric(body)))
     return Evidence(value=value)
 
@@ -343,7 +342,7 @@ def compare(client: Client, query: str, window: Window, step: str | None = None)
     w, offset = baseline_offset(window)
     step = step or auto_step(w.seconds)
     q = compare_query(query, w, step, offset)
-    body, _ = _instant(client, q, w.end)
+    body = _instant(client, q, w.end)
     stats = split_stats(parse_metric(body))
     value = Comparison(
         step=step, offset=offset, deltas=deltas_of(parse_metric(body)),
@@ -356,11 +355,11 @@ def compare(client: Client, query: str, window: Window, step: str | None = None)
 def top(client: Client, query: str, window: Window, k: int = DEFAULT_TOP_K, by: Sequence[str] = ("pod",),
         agg: str = DEFAULT_TOP_AGG) -> Evidence[Top]:
     """레이블 축 상위 k — `window.end` 시각의 즉시 조회. 질의를 `topk(k, agg by (by) (query))` 로 감싸 서버가 k 개만
-    돌려주게 한다. 감싼 질의는 원본(Response.params)에 있다."""
+    돌려주게 한다. 감싼 질의는 Client.log 의 params 에 있다."""
     if not query.strip():
         raise ObsError("PromQL 이 필요하다")
     wrapped = top_query(query, k, by, agg)
-    body, _ = _instant(client, wrapped, window.end)
+    body = _instant(client, wrapped, window.end)
     entries: list[TopEntry] = []
     for s in parse_metric(body).series:
         v = finite_value(s)

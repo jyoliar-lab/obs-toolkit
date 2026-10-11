@@ -5,7 +5,7 @@ matrix · Patterns API — 서버가 못 내는 것(예시 한 줄 · 첫 발생
 
 구조로 거는 것(obs.metrics 와 같다):
   - 순수 함수다 — HTTP 는 `Client` 주입(`Client.get` 만), fixture(서버 환원 응답)만으로 테스트된다.
-  - 연산은 `(Evidence[V], 원본)` 을 돌려주고 거부는 `ObsError`(요청 전). 값 dataclass 는 frozen.
+  - 연산은 `Evidence[V]` 를 돌려주고(보낸 호출의 기록은 `Client.log`) 거부는 `ObsError`(요청 전). 값 dataclass 는 frozen.
   - "데이터 없음" 과 "0" 을 구분한다 — 빈 목록 / None 이 없음이고, 0 은 0 으로 실린다.
   - 상한은 함수 안에서 — histogram 의 행 수(max_groups) · templates 의 군집 수(k) · around 의 쪽별 줄 수(limit).
 
@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Sequence
 
-from obs.core import JSON, Client, Evidence, ObsError, Params, Response, Window, json_int, json_labels, json_list, json_obj, json_pair, json_str
+from obs.core import JSON, Client, Evidence, ObsError, Params, Window, json_int, json_labels, json_list, json_obj, json_pair, json_str
 from obs.metrics import Series, auto_step, check_status, parse_metric, series_items
 
 DEFAULT_MAX_GROUPS: int = 20
@@ -193,18 +193,17 @@ def clusters_of(patterns: Sequence[Pattern], k: int, step: str) -> Templates:
     return Templates(k=k, step=step, total=total, clusters=kept, other=sum(c.count for c in counted[k:]))
 
 
-def _query_range(client: Client, params: Params) -> tuple[list[LogEntry], Response]:
-    """query_range 한 번 — 받은 줄(응답 순서)과 그 Response."""
-    resp = client.get("logs", "loki/api/v1/query_range", params)
-    body = check_status(resp.body, "logs")
-    return [LogEntry(ts, s.labels, line) for s in parse_logs(body).streams for ts, line in s.values], resp
+def _query_range(client: Client, params: Params) -> list[LogEntry]:
+    """query_range 한 번 — 받은 줄(응답 순서)."""
+    body = check_status(client.get("logs", "loki/api/v1/query_range", params).body, "logs")
+    return [LogEntry(ts, s.labels, line) for s in parse_logs(body).streams for ts, line in s.values]
 
 
-def _first_line(client: Client, query: str, window: Window) -> tuple[LogEntry | None, Response]:
+def _first_line(client: Client, query: str, window: Window) -> LogEntry | None:
     """창 안에서 질의에 걸리는 가장 이른 줄 — query_range forward · limit 1. 없으면 None."""
     params: Params = {"start": int(window.start * 1e9), "end": int(window.end * 1e9), "query": query, "limit": 1, "direction": "forward"}
-    entries, resp = _query_range(client, params)
-    return (min(entries, key=lambda e: e.ts_ns) if entries else None), resp
+    entries = _query_range(client, params)
+    return min(entries, key=lambda e: e.ts_ns) if entries else None
 
 
 def templates(client: Client, selector: str, window: Window, k: int = DEFAULT_TEMPLATES_K,
@@ -226,7 +225,7 @@ def templates(client: Client, selector: str, window: Window, k: int = DEFAULT_TE
     t = clusters_of(parse_patterns(body), k, step)
     clusters: list[Template] = []
     for c in t.clusters:
-        first, _ = _first_line(client, pattern_filter(selector, c.template), window)
+        first = _first_line(client, pattern_filter(selector, c.template), window)
         clusters.append(replace(c, example=first.line if first else None))
     return Evidence(value=replace(t, clusters=clusters))
 
@@ -264,15 +263,14 @@ def count_query(selector: str, seconds: float) -> str:
     return "sum(count_over_time(%s[%ds]))" % (selector, int(round(seconds)))
 
 
-def _side(client: Client, selector: str, start: float, end: float, direction: str, limit: int) -> tuple[list[LogEntry], Side, Response]:
+def _side(client: Client, selector: str, start: float, end: float, direction: str, limit: int) -> tuple[list[LogEntry], Side]:
     """[start, end) 의 ts 쪽 줄 limit 개 — limit+1 개를 물어 넘치면 잘림이다. direction 이 ts 에 가까운 것부터 받게 한다."""
     start_ns, end_ns = int(start * 1e9), int(end * 1e9)
     params: Params = {"start": start_ns, "end": end_ns, "query": selector, "limit": limit + 1, "direction": direction}
-    entries, resp = _query_range(client, params)
-    entries = [e for e in entries if start_ns <= e.ts_ns < end_ns]
+    entries = [e for e in _query_range(client, params) if start_ns <= e.ts_ns < end_ns]
     entries.sort(key=lambda e: e.ts_ns, reverse=(direction == "backward"))
     kept = entries[:limit]
-    return kept, Side(shown=len(kept), truncated=len(entries) > limit), resp
+    return kept, Side(shown=len(kept), truncated=len(entries) > limit)
 
 
 def around(client: Client, selector: str, ts: float, span: float, limit: int = DEFAULT_AROUND_LIMIT) -> Evidence[Context]:
@@ -286,8 +284,8 @@ def around(client: Client, selector: str, ts: float, span: float, limit: int = D
     count_resp = client.get("logs", "loki/api/v1/query", {"query": count_query(selector, 2 * span), "time": int((ts + span) * 1e9)})
     count_body = check_status(count_resp.body, "logs")
     total = sum(json_int(v) for s in parse_metric(count_body).series for _, v in s.values)
-    before, before_side, _ = _side(client, selector, ts - span, ts, "backward", limit)
-    after, after_side, _ = _side(client, selector, ts, ts + span, "forward", limit)
+    before, before_side = _side(client, selector, ts - span, ts, "backward", limit)
+    after, after_side = _side(client, selector, ts, ts + span, "forward", limit)
     entries = sorted([*before, *after], key=lambda e: e.ts_ns)
     value = Context(center=ts, span=span, limit=limit, total=total, before=before_side, after=after_side, entries=entries)
     return Evidence(value=value)
@@ -307,6 +305,6 @@ def first_seen(client: Client, selector: str, template: str, window: Window) -> 
     if not selector.strip():
         raise ObsError("LogQL selector 가 필요하다")
     q = pattern_filter(selector, template)
-    first, _ = _first_line(client, q, window)
+    first = _first_line(client, q, window)
     value = FirstSeen(template=template, ts=first.ts_ns / 1e9 if first else None, line=first.line if first else None)
     return Evidence(value=value)

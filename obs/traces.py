@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Mapping, Sequence
 
 from obs.core import (
-    JSON, Client, Evidence, ObsError, Response, Window, json_int, json_list, json_obj, json_str, json_strs, parse_duration,
+    JSON, Client, Evidence, ObsError, Window, json_int, json_list, json_obj, json_str, json_strs, parse_duration,
 )
 from obs.metrics import STAT_LABEL, MetricResult, check_status, duration_literal, finite_value, parse_metric, tagged
 
@@ -157,16 +157,16 @@ class Trace:
 
 # ── GET — 연산들이 함께 쓰는 호출 하나 ────────────────────────────────────────────
 
-def _instant(client: Client, query: str, window: Window) -> tuple[MetricResult, Response]:
-    """metrics 즉시 조회 한 번(time = 창 끝) — 검사 · 파싱한 결과와 그 Response."""
+def _instant(client: Client, query: str, window: Window) -> MetricResult:
+    """metrics 즉시 조회 한 번(time = 창 끝) — 검사 · 파싱한 결과."""
     resp = client.get("metrics", "api/v1/query", {"query": query, "time": window.end})
-    return parse_metric(check_status(resp.body, "metrics")), resp
+    return parse_metric(check_status(resp.body, "metrics"))
 
 
-def _fetch_trace(client: Client, trace_id: str) -> tuple[Trace, Response]:
-    """`api/traces/<id>` 한 번 — Trace 와 그 Response."""
+def _fetch_trace(client: Client, trace_id: str) -> Trace:
+    """`api/traces/<id>` 한 번 — Trace."""
     resp = client.get("traces", "api/traces/%s" % trace_id)
-    return Trace(trace_id, parse_spans(check_json(resp.body, "traces"))), resp
+    return Trace(trace_id, parse_spans(check_json(resp.body, "traces")))
 
 
 # ── exemplars ───────────────────────────────────────────────────────────────────
@@ -367,14 +367,14 @@ def exemplars_of(sample: Sequence[SpanMatch], thresholds: Mapping[Endpoint, Thre
 
 def exemplars(client: Client, q: str, window: Window, k: int = DEFAULT_EXEMPLARS_K, quantile: float = DEFAULT_QUANTILE,
               baseline_range: str = DEFAULT_BASELINE_RANGE, limit: int = DEFAULT_SEARCH_LIMIT) -> Evidence[Exemplars]:
-    """metrics 임계 → traces 후보 GET 2 회 — 원본은 [metrics, traces] 순."""
+    """metrics 임계 → traces 후보 GET 2 회 — Client.log 에 [metrics, traces] 순."""
     if k < 1:
         raise ObsError("k 는 1 이상이어야 한다: %d" % k)
     if limit < 1:
         raise ObsError("limit 은 1 이상이어야 한다: %d" % limit)
     mq = threshold_query(quantile, window, baseline_range)
     tq = candidates_query(q)
-    m_res, _ = _instant(client, mq, window)
+    m_res = _instant(client, mq, window)
     quantiles = parse_quantiles(m_res)
     t_resp = client.get("traces", "api/search", {"start": int(window.start), "end": int(window.end), "limit": limit + 1, "q": tq})
     hits = json_list(check_json(t_resp.body, "traces").get("traces"))
@@ -480,7 +480,7 @@ def critical_path(client: Client, trace_id: str, window: Window) -> Evidence[Cri
     """`api/traces/<id>` GET 1 회 → parse_spans → Trace → critical_path_of."""
     if not trace_id.strip():
         raise ObsError("traceID 가 필요하다")
-    trace, _ = _fetch_trace(client, trace_id)
+    trace = _fetch_trace(client, trace_id)
     value = critical_path_of(trace)
     return Evidence(value=value)
 
@@ -575,8 +575,8 @@ def service_graph(client: Client, window: Window, quantile: float = DEFAULT_QUAN
     """metrics GET 2 회 — edge_query(CLIENT) → threshold_query(SERVER). traces 백엔드를 부르지 않는다."""
     eq = edge_query(quantile, window, baseline_range)
     sq = threshold_query(quantile, window, baseline_range)
-    e_res, _ = _instant(client, eq, window)
-    s_res, _ = _instant(client, sq, window)
+    e_res = _instant(client, eq, window)
+    s_res = _instant(client, sq, window)
     value = service_graph_of(parse_edges(e_res), parse_quantiles(s_res), quantile, baseline_range)
     return Evidence(value=value)
 
@@ -647,7 +647,7 @@ def diff(client: Client, slow_id: str, normal_id: str, window: Window) -> Eviden
         raise ObsError("traceID 두 개가 필요하다")
     if slow_id == normal_id:
         raise ObsError("같은 트레이스끼리는 비교하지 않는다: %s" % slow_id)
-    slow, _ = _fetch_trace(client, slow_id)
-    normal, _ = _fetch_trace(client, normal_id)
+    slow = _fetch_trace(client, slow_id)
+    normal = _fetch_trace(client, normal_id)
     value = diff_of(slow, normal)
     return Evidence(value=value)
