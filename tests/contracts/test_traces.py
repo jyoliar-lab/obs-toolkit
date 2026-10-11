@@ -1083,13 +1083,17 @@ def test_diff_names_the_root_not_an_earlier_orphan() -> None:
     assert orphan_rows[0].delta_ms is None
 
 
-@pytest.mark.parametrize("slow", [[_span("a", "x", "m1", 0, 10), _span("b", "y", "m2", 0, 10)], [_span("a", "x", "y", 0, 10), _span("b", "y", "x", 0, 10)]],
+@pytest.mark.parametrize("slow", [[_span("root", "x", "m1", 0, 10), _span("b", "y", "m2", 5, 10)], [_span("a", "x", "y", 0, 10), _span("b", "y", "x", 0, 10)]],
                          ids=["orphans", "cycle"])
 def test_diff_rejects_trace_without_root(slow: list[Span]) -> None:
-    """한쪽에 루트(parent 가 빈 span)가 없으면 — 고아뿐이든 순환이든 — ObsError 다. 비교할 루트 이름이 없고 ValueError 가 아니다."""
-    # given · when · then
-    with pytest.raises(ObsError):
-        _pair(slow, [_span("root", "r", "", 0, 10)])
+    """한쪽에 루트(parent 가 빈 span)가 없으면 — 고아뿐이든 순환이든 — 루트 없음을 말하는 ObsError 다. 비교할 루트 이름이 없고 ValueError 가 아니다."""
+    # given — [orphans] 의 먼저 시작한 고아 이름은 정상 쪽 루트와 같다: 고아를 루트로 승격하는 구현이면 이름이 맞아 거부되지 않는다
+    normal = [_span("root", "r", "", 0, 10)]
+    # when · then
+    with pytest.raises(ObsError) as ei:
+        _pair(slow, normal)
+    assert "루트" in str(ei.value)
+    assert "이름이 다른" not in str(ei.value)
 
 
 # ── diff — GET 2 회 ────────────────────────────────────────────────────────────────
