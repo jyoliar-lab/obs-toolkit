@@ -34,7 +34,7 @@ def test_promql_backend_error_status(make_client: ClientFactory) -> None:
 def test_traceql_search_empty_hints_wider_window(make_client: ClientFactory) -> None:
     """search 결과가 비면 창을 넓히라는 힌트 한 줄을 낸다."""
     client, _ = make_client({("traces", "api/search"): (200, {"traces": []})})
-    ev = cli.traceql_run(client, cli.TraceqlArgs(cmd="search"))[0]
+    ev, _, _, _ = cli.traceql_run(client, cli.TraceqlArgs(cmd="search"))
     assert ev.value.lines == ["(결과 없음 — 트레이스는 드물다. 창을 넓혀 다시: --since 24h · 7d)"]
 
 
@@ -166,10 +166,6 @@ def test_parse_metric_broken_result_is_empty() -> None:
     assert cli.parse_metric({"data": {"resultType": "vector", "result": "garbage"}}).series == []
 
 
-class _Routed(Exception):
-    """*_run 대역이 받은 Args 를 기록한 뒤 던진다 — 라우팅 테스트는 출력(_finish)까지 가지 않는다."""
-
-
 @pytest.mark.parametrize("argv,expected", [
     (["histogram", '{a="b"}', "--by", "app", "--since", "2h"], {"cmd": "histogram", "selector": '{a="b"}', "by": "app", "since": "2h"}),
     (["first-seen", '{a="b"}', "<_> x", "--since", "2h"], {"cmd": "first-seen", "selector": '{a="b"}', "template": "<_> x", "since": "2h"}),
@@ -182,15 +178,14 @@ def test_logql_main_routes_subcommand_to_logs_run(argv: list[str], expected: dic
 
     def fake_run(client: Client, a: cli.LogsArgs, at: float | None = None) -> cli.RunResult:
         seen.append(a)
-        raise _Routed()
+        return Evidence(value=Lines(["x"])), [], "logql-histogram", Window(AT - MINUTE, AT)
 
     client, _ = make_client()
     monkeypatch.setattr(cli, "logs_run", fake_run)
     monkeypatch.setattr(cli, "_client", lambda: client)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     # when
-    with pytest.raises(_Routed):
-        cli.logql_main(argv)
+    cli.logql_main(argv)
     # then
     assert len(seen) == 1
     for name, value in expected.items():
@@ -212,15 +207,14 @@ def test_traceql_main_routes_subcommand_to_traces_run(argv: list[str], expected:
 
     def fake_run(client: Client, a: cli.TracesArgs, at: float | None = None) -> cli.RunResult:
         seen.append(a)
-        raise _Routed()
+        return Evidence(value=Lines(["x"])), [], "traceql-" + a.cmd, Window(AT - MINUTE, AT)
 
     client, _ = make_client()
     monkeypatch.setattr(cli, "traces_run", fake_run)
     monkeypatch.setattr(cli, "_client", lambda: client)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     # when
-    with pytest.raises(_Routed):
-        cli.traceql_main(argv)
+    cli.traceql_main(argv)
     # then
     assert len(seen) == 1
     assert seen[0] == expected
@@ -233,15 +227,14 @@ def test_traceql_main_still_routes_legacy_commands_to_traceql_run(monkeypatch: p
 
     def fake_run(client: Client, a: cli.TraceqlArgs, at: float | None = None) -> cli.RunResult:
         seen.append(a)
-        raise _Routed()
+        return Evidence(value=Lines(["x"])), [], "traceql-tags", Window(AT - MINUTE, AT)
 
     client, _ = make_client()
     monkeypatch.setattr(cli, "traceql_run", fake_run)
     monkeypatch.setattr(cli, "_client", lambda: client)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     # when
-    with pytest.raises(_Routed):
-        cli.traceql_main(["tags"])
+    cli.traceql_main(["tags"])
     # then
     assert [a.cmd for a in seen] == ["tags"]
 
@@ -338,7 +331,7 @@ SEARCH: dict[str, JSON] = {"traces": [{"traceID": "abc123", "rootServiceName": "
 def test_promql_range_window_and_auto_step(make_client: ClientFactory) -> None:
     """--range 는 창 길이를 계산하고 step 을 자동(range/60, 최소 15s)으로 붙여 query_range 를 부른다."""
     client, t = make_client({("metrics", "api/v1/query_range"): (200, EMPTY_MATRIX)})
-    kind = cli.promql_run(client, cli.PromqlArgs(query="sum(up)", range_="30m"), at=AT)[2]
+    _, _, kind, _ = cli.promql_run(client, cli.PromqlArgs(query="sum(up)", range_="30m"), at=AT)
     assert kind == "promql-range"
     assert "step=30s" in t.calls[0].url
     assert "start=%s" % (AT - 30 * MINUTE) in t.calls[0].url
@@ -347,14 +340,14 @@ def test_promql_range_window_and_auto_step(make_client: ClientFactory) -> None:
 def test_logql_width_clips_log_body(make_client: ClientFactory) -> None:
     """--width 는 로그 본문을 지정 폭에서 자른다."""
     client, _ = make_client({("logs", "loki/api/v1/query_range"): (200, STREAMS)})
-    ev = cli.logql_run(client, cli.LogqlArgs(query='{namespace="n"}', width=60), at=AT)[0]
+    ev, _, _, _ = cli.logql_run(client, cli.LogqlArgs(query='{namespace="n"}', width=60), at=AT)
     assert all(len(l.split("  ", 2)[-1]) <= 60 for l in ev.value.lines[1:])
 
 
 def test_logql_common_labels_go_to_the_header(make_client: ClientFactory) -> None:
     """스트림 출력의 첫 줄은 공통 레이블이고 그 뒤가 로그 줄이다 — 줄 수는 값 수 + 1."""
     client, _ = make_client({("logs", "loki/api/v1/query_range"): (200, STREAMS)})
-    ev = cli.logql_run(client, cli.LogqlArgs(query='{namespace="n"}'), at=AT)[0]
+    ev, _, _, _ = cli.logql_run(client, cli.LogqlArgs(query='{namespace="n"}'), at=AT)
     assert ev.value.lines[0].startswith("공통 레이블 {")
     assert len(ev.value.lines) == 3
 
@@ -389,7 +382,7 @@ def test_run_window_is_cli_window(make_client: ClientFactory, run: Callable[[Cli
     # given — 빈 응답
     client, _ = make_client(routes)
     # when
-    window = run(client)[3]
+    _, _, _, window = run(client)
     # then
     assert window == Window.last("30m", "-10m", AT)
 
@@ -442,7 +435,7 @@ def test_single_call_run_raw_is_one_response(make_client: ClientFactory, run: Ca
     # given
     client, _ = make_client({(backend, path): (200, body)})
     # when
-    raw = run(client)[1]
+    _, raw, _, _ = run(client)
     # then
     assert isinstance(raw, list)
     assert len(raw) == 1

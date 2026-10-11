@@ -781,10 +781,10 @@ def test_logs_run_dispatches_by_subcommand(make_client: ClientFactory, cmd: str)
                              ("logs", PATTERNS): (200, _patterns(("a <_>", [(100, 1)]))),
                              ("logs", INSTANT): (200, _vector(({}, "1")))})
     # when
-    res = cli.logs_run(client, ARGS[cmd], at=AT)
+    ev, _, kind, _ = cli.logs_run(client, ARGS[cmd], at=AT)
     # then
-    assert res[2] == "logql-%s" % cmd
-    assert res[0].value.lines
+    assert kind == "logql-%s" % cmd
+    assert ev.value.lines
 
 
 def test_logs_run_around_window_is_ts_plus_minus_span(make_client: ClientFactory) -> None:
@@ -792,7 +792,7 @@ def test_logs_run_around_window_is_ts_plus_minus_span(make_client: ClientFactory
     # given — --since 는 기본 1h · 빈 응답
     client, _ = make_client({("logs", INSTANT): (200, _vector()), ("logs", RANGE): (200, _streams())})
     # when
-    window = cli.logs_run(client, cli.LogsArgs(cmd="around", selector=SEL, ts="-30m", span="60s"), at=AT)[3]
+    _, _, _, window = cli.logs_run(client, cli.LogsArgs(cmd="around", selector=SEL, ts="-30m", span="60s"), at=AT)
     # then
     assert window == Window(AT - 30 * MINUTE - 60, AT - 30 * MINUTE + 60)
 
@@ -802,7 +802,7 @@ def test_logs_run_around_empty_lines_show_ts_plus_minus_span(make_client: Client
     # given — --since 는 기본 1h · 빈 응답
     client, _ = make_client({("logs", INSTANT): (200, _vector()), ("logs", RANGE): (200, _streams())})
     # when
-    ev = cli.logs_run(client, cli.LogsArgs(cmd="around", selector=SEL, ts="-30m", span="60s"), at=AT)[0]
+    ev, _, _, _ = cli.logs_run(client, cli.LogsArgs(cmd="around", selector=SEL, ts="-30m", span="60s"), at=AT)
     # then
     lines = ev.value.lines
     assert len(lines) == 1

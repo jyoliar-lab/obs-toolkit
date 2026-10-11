@@ -10,7 +10,7 @@ from tests.conftest import ReplayFactory, assert_snapshot, load_call, load_respo
 def test_traceql_search_lines(replay: ReplayFactory, request: pytest.FixtureRequest) -> None:
     """search 는 hit 마다 한 줄이고 첫 열이 trace ID 다 — 첫 줄의 ID 는 fixture 의 첫 hit 이다."""
     client, t = replay("traceql-search.json")
-    ev = cli.traceql_run(client, cli.TraceqlArgs(cmd="search", since="24h", limit=3), at=t.at)[0]
+    ev, _, _, _ = cli.traceql_run(client, cli.TraceqlArgs(cmd="search", since="24h", limit=3), at=t.at)
     hits = cli.parse_search(cli.check_json(load_response("traceql-search.json"), "traces"))
     assert ev.value.lines[0].split()[0] == hits[0].trace_id
     assert_snapshot(request, ev.value.lines)
@@ -20,7 +20,7 @@ def test_traceql_trace_lines(replay: ReplayFactory, request: pytest.FixtureReque
     """trace 는 총시간 · 루트 · 서비스 · 오류 수 · 느린 span 순의 요약이다."""
     client, t = replay(("traceql-trace.json", "api/traces/"))
     trace_id = load_call(("traceql-trace.json", "api/traces/")).call.request.path.rsplit("/", 1)[1]
-    ev = cli.traceql_run(client, cli.TraceqlArgs(cmd="trace", arg=trace_id), at=t.at)[0]
+    ev, _, _, _ = cli.traceql_run(client, cli.TraceqlArgs(cmd="trace", arg=trace_id), at=t.at)
     assert_snapshot(request, ev.value.lines)
 
 
@@ -28,12 +28,12 @@ def test_traceql_error_trace_lines(replay: ReplayFactory, request: pytest.Fixtur
     """오류 trace 는 `오류 span: N` 아래 ✗ 줄에 원인 한 줄을 싣는다."""
     client, _ = replay("traceql-trace-error.json", unchecked="recorded: manual — 요청이 추정이라 비교할 녹화 키가 없다")
     trace_id = load_call("traceql-trace-error.json").call.request.path.rsplit("/", 1)[1]
-    ev = cli.traceql_run(client, cli.TraceqlArgs(cmd="trace", arg=trace_id), at=0.0)[0]
+    ev, _, _, _ = cli.traceql_run(client, cli.TraceqlArgs(cmd="trace", arg=trace_id), at=0.0)
     assert_snapshot(request, ev.value.lines)
 
 
 def test_traceql_tags_lines(replay: ReplayFactory, request: pytest.FixtureRequest) -> None:
     """tags 는 scope 별로 `[scope] a, b, c` 한 줄이다."""
     client, t = replay("traceql-tags.json")
-    ev = cli.traceql_run(client, cli.TraceqlArgs(cmd="tags"), at=t.at)[0]
+    ev, _, _, _ = cli.traceql_run(client, cli.TraceqlArgs(cmd="tags"), at=t.at)
     assert_snapshot(request, ev.value.lines)

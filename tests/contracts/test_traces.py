@@ -1337,10 +1337,10 @@ def test_traces_run_dispatches_each_subcommand(make_client: ClientFactory, cmd: 
     # given
     client, _ = make_client(_routes_for(cmd))
     # when
-    res = cli.traces_run(client, _args_for(cmd), at=AT)
+    ev, _, kind, _ = cli.traces_run(client, _args_for(cmd), at=AT)
     # then
-    assert res[2] == "traceql-" + cmd
-    assert isinstance(res[0].value, Lines)
+    assert kind == "traceql-" + cmd
+    assert isinstance(ev.value, Lines)
 
 
 def test_traces_run_exemplars_passes_baseline_range(make_client: ClientFactory) -> None:
@@ -1348,7 +1348,7 @@ def test_traces_run_exemplars_passes_baseline_range(make_client: ClientFactory) 
     # given
     client, _ = make_client(_routes_for("exemplars"))
     # when
-    raw = cli.traces_run(client, cli.TracesArgs(cmd="exemplars", baseline_range="3d"), at=AT)[1]
+    _, raw, _, _ = cli.traces_run(client, cli.TracesArgs(cmd="exemplars", baseline_range="3d"), at=AT)
     # then
     assert [r.backend for r in raw] == ["metrics", "traces"]
     assert "[3d] offset" in str(raw[0].params["query"])
@@ -1360,8 +1360,7 @@ def test_traces_run_summary_carries_no_raw_trace_body(make_client: ClientFactory
     # given
     client, _ = make_client(_routes_for(cmd))
     # when
-    res = cli.traces_run(client, _args_for(cmd), at=AT)
-    ev, raw = res[0], res[1]
+    ev, raw, _, _ = cli.traces_run(client, _args_for(cmd), at=AT)
     text = "\n".join(ev.value.lines)
     # then
     for marker in RAW_MARKERS:

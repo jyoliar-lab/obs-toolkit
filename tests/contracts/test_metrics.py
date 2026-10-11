@@ -298,8 +298,7 @@ def test_metrics_run_dispatches_by_subcommand(make_client: ClientFactory) -> Non
     """metrics_run 은 세 서브커맨드를 Evidence[Lines] 와 kind 로 내고 모르는 서브커맨드는 ObsError 다."""
     client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
     for cmd, kind in (("summarize", "promql-summarize"), ("compare", "promql-compare"), ("top", "promql-top")):
-        res = cli.metrics_run(client, cli.MetricsArgs(cmd=cmd, query="up"), at=AT)
-        ev, got = res[0], res[2]
+        ev, _, got, _ = cli.metrics_run(client, cli.MetricsArgs(cmd=cmd, query="up"), at=AT)
         assert got == kind
         assert isinstance(ev.value, Lines)
     with pytest.raises(ObsError):
@@ -311,7 +310,7 @@ def test_metrics_run_compare_window_has_baseline(make_client: ClientFactory) -> 
     # given — 빈 응답
     client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
     # when
-    window = cli.metrics_run(client, cli.MetricsArgs(cmd="compare", query="up", since="1h", baseline="prev"), at=AT)[3]
+    _, _, _, window = cli.metrics_run(client, cli.MetricsArgs(cmd="compare", query="up", since="1h", baseline="prev"), at=AT)
     # then
     assert window == Window.last("1h", None, AT).with_baseline("prev")
     assert window.baseline is not None
@@ -322,7 +321,7 @@ def test_metrics_run_top_window_is_end_instant(make_client: ClientFactory) -> No
     # given — 빈 응답 · --end 는 10분 전
     client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
     # when
-    window = cli.metrics_run(client, cli.MetricsArgs(cmd="top", query="up", end="-10m"), at=AT)[3]
+    _, _, _, window = cli.metrics_run(client, cli.MetricsArgs(cmd="top", query="up", end="-10m"), at=AT)
     # then
     assert window == Window(AT - 10 * MINUTE, AT - 10 * MINUTE)
 
