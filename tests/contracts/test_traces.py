@@ -227,10 +227,7 @@ def test_parse_quantiles_folds_base_and_now_per_endpoint() -> None:
     # when
     out = traces.parse_quantiles(res)
     # then
-    assert len(out) == 1
-    assert out[0].endpoint == Endpoint("a", "x")
-    assert out[0].base == 0.01
-    assert out[0].now == 0.04
+    assert out == [EndpointQuantiles(endpoint=Endpoint("a", "x"), base=0.01, now=0.04)]
 
 
 def test_parse_quantiles_missing_stat_is_none() -> None:
@@ -330,19 +327,18 @@ def test_exemplars_of_errors_go_to_error_bucket_regardless_of_duration() -> None
 
 
 def test_exemplars_of_splits_slow_and_normal_by_pair_threshold() -> None:
-    """임계 10ms 에서 50ms 는 slow(임계 10 · 출처 · 배율 5), 5ms 는 normal 이고 둘 다 같은 임계가 표시된다."""
+    """임계 10ms 에서 50ms 는 slow(임계 10 · 출처 baseline · 배율 5), 5ms 는 normal(같은 임계 · 배율 0.5) 이고 건의 모든 필드가 표본에서 옮겨진다."""
     # given
-    sample = [_sm("t1", "x", 50, service="a"), _sm("t2", "x", 5, service="a")]
+    sample = [_sm("t1", "x", 50, service="a", span_id="s1", pod="p1"), _sm("t2", "x", 5, service="a", span_id="s2", pod="p2")]
     th = {Endpoint("a", "x"): _th(0.010)}
     # when
     out = traces.exemplars_of(sample, th, k=3, quantile=0.95, truncated=False)
     # then
-    assert _ids(out.slow.items) == ["t1"]
-    assert _ids(out.normal.items) == ["t2"]
-    assert out.slow.items[0].threshold_ms == pytest.approx(10.0)
-    assert out.slow.items[0].threshold_source == THRESHOLD_BASELINE
-    assert out.slow.items[0].ratio == pytest.approx(5.0)
-    assert out.normal.items[0].threshold_ms == pytest.approx(10.0)
+    assert out.slow.items == [Exemplar(trace_id="t1", span_id="s1", service="a", endpoint="x", pod="p1", duration_ms=50.0, start_ts=1.0,
+                                       threshold_ms=10.0, threshold_source=THRESHOLD_BASELINE, ratio=5.0)]
+    assert out.normal.items == [Exemplar(trace_id="t2", span_id="s2", service="a", endpoint="x", pod="p2", duration_ms=5.0, start_ts=1.0,
+                                         threshold_ms=10.0, threshold_source=THRESHOLD_BASELINE, ratio=0.5)]
+    assert out.error.items == []
 
 
 def test_exemplars_of_slow_endpoint_normal_does_not_displace_fast_endpoint_slow() -> None:
@@ -743,19 +739,12 @@ def _sg(clients: list[ClientRow], servers: list[EndpointQuantiles]) -> ServiceGr
 
 def test_service_graph_joins_client_row_with_server_row_by_span_name() -> None:
     """클라이언트 행(api-composer, X)은 같은 이름의 서버 행(posting-service, X)과 조인되어 callee · 건수 · 오류율 · 클라이언트/평소/서버 p95 · 배율이 있는 엣지가 된다."""
-    # given
+    # given · when
     g = _sg([_row("api-composer", "X", calls=10, errors=1, now=0.04, base=0.02)], [_eq("posting-service", "X", base=0.025, now=0.03)])
-    # when
-    e = g.edges[0]
     # then
-    assert len(g.edges) == 1
-    assert (e.caller, e.callee, e.endpoint) == ("api-composer", "posting-service", "X")
-    assert e.count == 10
-    assert e.error_rate == pytest.approx(0.1)
-    assert e.client_p95_ms == pytest.approx(40.0)
-    assert e.client_base_p95_ms == pytest.approx(20.0)
-    assert e.ratio == pytest.approx(2.0)
-    assert e.server_p95_ms == pytest.approx(30.0)
+    assert g.edges == [Edge(caller="api-composer", callee="posting-service", endpoint="X", count=10, error_rate=0.1, client_p95_ms=40.0,
+                            client_base_p95_ms=20.0, ratio=2.0, server_p95_ms=30.0)]
+    assert g.idle == 0
 
 
 def test_service_graph_splits_edges_per_endpoint_not_per_service_pair() -> None:
@@ -896,10 +885,12 @@ def test_diff_pairs_spans_by_name_and_reports_time_difference() -> None:
     # when
     d = _pair(slow, normal)
     # then
-    assert [x.name for x in d.deltas] == ["a-op", "b-op", "c-op", "root"]
-    assert [x.delta_ms for x in d.deltas] == pytest.approx([0.0, 90.0, -5.0, 90.0])
-    assert d.root_name == "root"
-    assert (d.slow_id, d.normal_id) == ("slow", "normal")
+    assert d == TraceDiff(slow_id="slow", normal_id="normal", root_name="root", deltas=[
+        SpanDelta("svc", "a-op", SpanTime(50.0, 1), SpanTime(50.0, 1), 0.0),
+        SpanDelta("svc", "b-op", SpanTime(100.0, 1), SpanTime(10.0, 1), 90.0),
+        SpanDelta("svc", "c-op", SpanTime(15.0, 1), SpanTime(20.0, 1), -5.0),
+        SpanDelta("svc", "root", SpanTime(200.0, 1), SpanTime(110.0, 1), 90.0),
+    ])
 
 
 def test_diff_marks_spans_present_on_one_side_only() -> None:
