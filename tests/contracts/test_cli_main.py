@@ -111,6 +111,7 @@ def test_main_failure_leaves_call_directory(monkeypatch: pytest.MonkeyPatch, cli
     assert len(dirs) == 1
     assert dirs[0].name.endswith("-%s-failed" % name)
     assert dirs[0].name in err
+    assert "%s/" % dirs[0].name in err
     items = json.loads((dirs[0] / "raw.json").read_text())
     assert len(items) == 1
     assert items[0]["status"] == 400

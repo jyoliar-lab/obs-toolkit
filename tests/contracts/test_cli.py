@@ -167,6 +167,7 @@ def test_finish_names_call_directory_in_obs_error(make_client: ClientFactory, tm
     d = _only_dir(tmp_path)
     assert d.name.endswith("-promql-failed")
     assert d.name in msg
+    assert "%s/" % d.name in msg
     assert "raw.json" in msg
 
 
@@ -192,14 +193,17 @@ def test_finish_spills_log_and_reraises_other_exceptions(make_client: ClientFact
     env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     client, _ = make_client(FINISH_ROUTES)
     err: list[str] = []
+    bug = ValueError("bug")
     # when
-    with pytest.raises(ValueError):
-        cli.finish(client, _run_after(client, 1, ValueError("bug")), "logql-failed", 40, False, env=env, out=lambda _: None, err=err.append)
+    with pytest.raises(ValueError) as ei:
+        cli.finish(client, _run_after(client, 1, bug), "logql-failed", 40, False, env=env, out=lambda _: None, err=err.append)
     # then
+    assert ei.value is bug
     d = _only_dir(tmp_path)
     assert d.name.endswith("-logql-failed")
     assert len(err) == 1
     assert d.name in err[0]
+    assert "%s/" % d.name in err[0]
     assert len(json.loads((d / "raw.json").read_text())) == 1
 
 
