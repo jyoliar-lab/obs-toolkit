@@ -79,7 +79,8 @@ traceql.py service-graph --since 6h
 - **병목은 self 시간이다.** 트레이스에서 "제일 긴 span" 은 루트다 — 자식을 포함하기 때문. `critical-path` 의 병목 줄(self 내림차순)을 인용하고, 잘림(`+Nms`) · 고아 · 루트 없음 표시가 있으면 그 트레이스는 불완전하다고 함께 적는다.
 - 요약 줄의 시각은 **UTC** 이고 `Z` 를 붙여 표기한다(`09-15 05:20:11Z`). 코멘트에 옮길 때 그대로 적는다.
 - 명령 한 번이 **호출 디렉터리 하나** `tmp/obs/<시각>-<종류>/` 를 만든다 — `raw.json`(응답 원본) · `summary.txt`(머리에 창·기준선, 그 아래 잘리지 않은 요약 전체). stdout 은 **요약** 이고 `--max-lines`(기본 40) 에서 잘리며, 마지막 줄이 그 경로다. `--json` 은 stdout 에 요약을 찍지 않고 경로만.
-- `raw.json` 은 어느 명령이든 **호출 순서의 응답 목록** `[{backend, path, params, status, body}, …]` 이다 — 호출이 하나인 명령도 원소 하나짜리 목록. 응답 본문은 `.[].body`, 어느 질의의 응답인지는 `.[].params` 로 꺼낸다.
+- `raw.json` 은 어느 명령이든 **보낸 호출 전부를 호출 순서로** 담은 목록 `[{backend, path, params, status, body, error, size, truncated}, …]` 이다 — 호출이 하나인 명령도 원소 하나짜리 목록이고, 원소 수가 그 명령이 보낸 GET 수다. 응답 본문은 `.[].body`, 어느 질의의 응답인지는 `.[].params` 로 꺼낸다. 실패한 호출도 원소다: HTTP 오류는 `status` 와 본문 전체가, 전송 실패(연결 실패 · 시간 초과)는 `status: null` 과 `error`(오류 문구)가, 응답 총량 예산을 넘긴 응답은 `size` 와 앞부분만(`truncated: true`) 실린다.
+- **명령이 실패해도 호출 디렉터리는 남는다** — `tmp/obs/<시각>-<명령>-failed/`(명령 = `promql` · `promql-summarize` · `logql-templates` …). `raw.json` 에 그때까지 보낸 호출(성공한 앞 호출 + 실패한 호출)이 순서대로, `summary.txt` 에 오류 문구가 있고, stderr 의 오류 문구 끝이 그 경로다. 보낸 호출이 없는 실패(질의 없음 등)는 디렉터리를 만들지 않는다.
 - 파일을 읽을 때는 통째로 열지 말고 `jq`·`grep` 으로 필요한 부분만 꺼낸다.
 - Loki 는 `--limit` 기본 30 이다. 넓게 보고 싶으면 먼저 메트릭 질의(`count_over_time`)로 분포를 본 뒤 좁혀 들어간다.
 - `tmp/obs/` 는 인박스다 — 프로젝트(`CLAUDE_PROJECT_DIR`) 아래, 최근 50개 호출만 남고 오래된 것은 코어가 지운다. 커밋하지 않는다.
