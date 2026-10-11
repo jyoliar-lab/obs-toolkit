@@ -192,7 +192,7 @@ def test_logql_main_routes_subcommand_to_logs_run(argv: list[str], expected: dic
 
 
 @pytest.mark.parametrize("argv,expected", [
-    (["exemplars", "--q", 'resource.service.name = "a"', "--k", "2", "--quantile", "0.9", "--baseline-range", "3d", "--limit", "50", "--since", "6h", "--end", "-10m"],
+    (["exemplars", "--q", 'resource.service.name = "a"', "--k", "2", "--quantile", "0.9", "--baseline-range", "3d", "--limit", "50", "--since", "6h", "--end=-10m"],
      cli.TracesArgs(cmd="exemplars", q='resource.service.name = "a"', since="6h", end="-10m", k=2, quantile=0.9, baseline_range="3d", limit=50)),
     (["critical-path", "abc"], cli.TracesArgs(cmd="critical-path", trace_id="abc")),
     (["service-graph", "--quantile", "0.9", "--baseline-range", "3d"], cli.TracesArgs(cmd="service-graph", quantile=0.9, baseline_range="3d")),
