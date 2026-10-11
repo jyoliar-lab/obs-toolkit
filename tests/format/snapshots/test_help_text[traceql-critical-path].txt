@@ -6,8 +6,8 @@ traceql.py critical-path <traceID>
 경로 줄은 `+시작 오프셋  길이  self  서비스 / 이름` — 깊이만큼 들여 쓴다. 부모보다 늦게 끝난 자식은 부모 끝에서 잘린다(잘림 표시),
 부모 밖에서 통째로 돈 서브트리는 버리고 그 수를 헤더에. 루트가 둘 이상이면 불완전한 트레이스 표시. traces 1 회.
 
-원본(span 트리 · 검색 응답)은 호출 디렉터리의 raw.json 에 남고 stdout 은 환원물이다. 보낸 질의 전부(연산이 둘 이상 부르면
-그 전부)와 창은 summary.txt 머리에 남는다. stdout 은 --max-lines 에서 잘린다. --json 은 경로만.
+원본(span 트리 · 검색 응답)은 호출 디렉터리의 raw.json 에 남고 stdout 은 환원물이다. 창은 summary.txt 머리에
+남는다. stdout 은 --max-lines 에서 잘린다. --json 은 경로만.
 
 positional arguments:
   trace_id              traceID

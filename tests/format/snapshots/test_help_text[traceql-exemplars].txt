@@ -8,8 +8,8 @@ traceql.py exemplars [--q '<조건식>'] [--since 1h] [--k 3] [--quantile 0.95] 
 표본 p95 순으로 있는 것. 건마다 적용한 임계와 그 출처(baseline · window · sample)가 붙는다. metrics 1 회 + traces 검색 1 회.
 요약 줄은 표본 수 · 임계 초과 수 · 평소 기대 비율((1 − 분위수) × 100%). 검색이 --limit 을 넘으면 절단 표시.
 
-원본(span 트리 · 검색 응답)은 호출 디렉터리의 raw.json 에 남고 stdout 은 환원물이다. 보낸 질의 전부(연산이 둘 이상 부르면
-그 전부)와 창은 summary.txt 머리에 남는다. stdout 은 --max-lines 에서 잘린다. --json 은 경로만.
+원본(span 트리 · 검색 응답)은 호출 디렉터리의 raw.json 에 남고 stdout 은 환원물이다. 창은 summary.txt 머리에
+남는다. stdout 은 --max-lines 에서 잘린다. --json 은 경로만.
 
 options:
   -h, --help            show this help message and exit

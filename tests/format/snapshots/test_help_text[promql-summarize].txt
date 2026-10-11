@@ -6,8 +6,8 @@ promql.py summarize '<PromQL>' --since 1h [--end <시각>] [--step 60s]
 max/last_over_time · deriv(slope, 값/초)를 한 질의로. 첫 줄은 창·step 헤더. 시계열이 없으면 "데이터 없음"(0 과 다르다).
 step 은 창 길이/60(최소 15s) — 긴 창(--since 7d)이면 해상도가 거칠어지므로 헤더의 step 을 같이 읽는다.
 
-계산은 백엔드가 한다 — 코어는 질의를 조립해 결과만 받는다(연산당 질의 1회). 조립된 질의와 창은 호출 디렉터리의
-summary.txt 머리에 남는다(그대로 재실행 가능). stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만.
+계산은 백엔드가 한다 — 코어는 질의를 조립해 결과만 받는다(연산당 질의 1회). 창(compare 는 기준선도)은 호출 디렉터리의
+summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만.
 
 positional arguments:
   query                 PromQL

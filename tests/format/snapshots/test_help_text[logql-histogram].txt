@@ -8,7 +8,7 @@ by 값별 · 구간별 건수 표 — `sum by (<by>) (count_over_time(<selector>
 로그가 없으면 "데이터 없음"(0 과 다르다 — 건수 0 인 행은 0 으로 실린다).
 
 계산은 백엔드(Loki)가 한다 — count_over_time · Patterns API 의 환원 결과만 받고, 원본 로그 줄은 예시 · 첫 발생 · 문맥에만 온다.
-실제로 보낸 질의와 창은 호출 디렉터리의 summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만.
+창(around 는 --ts ± --span)은 호출 디렉터리의 summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만.
 
 positional arguments:
   selector              LogQL 스트림 selector — 예: '{namespace="x"}'

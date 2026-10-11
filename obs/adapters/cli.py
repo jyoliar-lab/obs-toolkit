@@ -79,7 +79,7 @@ def emit(lines: list[str], full: object, kind: str, max_lines: int, quiet: bool 
          preamble: Sequence[str] = ()) -> Emitted:
     """항상 호출 디렉터리를 만든다(원본 raw.json · 요약 전체 summary.txt). stdout 에는 앞 max_lines 줄만 —
     quiet 면 요약을 찍지 않고 경로만. 잘렸으면 몇 줄이 더 있는지 알린다.
-    `preamble` 은 summary.txt 의 머리에만 쓴다(재실행에 필요한 질의·창 — stdout 에는 찍지 않는다)."""
+    `preamble` 은 summary.txt 의 머리에만 쓴다(창 · 기준선 — stdout 에는 찍지 않는다)."""
     ref = spill_ref(spill(kind, full, [*preamble, *lines] if preamble else lines, env), env)
     shown = [] if quiet else lines[:max_lines]
     for line in shown:
@@ -164,7 +164,7 @@ PROMQL_DOC = """promql — 즉시 조회·구간 조회 (metrics 백엔드, GET 
                                                          --baseline: 1d(기본 — 1일 전 같은 시각) · 1w · prev(직전 창)
   promql.py top '<PromQL>' --by pod [--k 10] [--agg sum]  레이블 축 상위 k — topk 로 감싸 서버가 k 개만 돌려준다.
                                                          --end 시각의 즉시 조회(창이 없다 — --since 를 받지 않는다)
-  summarize · compare 의 시간은 --since/--end (logql 과 같다). 연산당 질의 1회. 조립된 질의는 호출 디렉터리의
+  summarize · compare 의 시간은 --since/--end (logql 과 같다). 연산당 질의 1회. 창(compare 는 기준선도)은 호출 디렉터리의
   summary.txt 머리에 남는다. 각 서브커맨드의 설명·옵션 전부는 `promql.py <서브커맨드> --help`.
 
 옵션:
@@ -297,8 +297,8 @@ def promql_main(argv: Sequence[str] | None = None) -> None:
 
 METRICS_SUBCOMMANDS: tuple[str, ...] = ("summarize", "compare", "top")
 
-METRICS_COMMON_DOC = """계산은 백엔드가 한다 — 코어는 질의를 조립해 결과만 받는다(연산당 질의 1회). 조립된 질의와 창은 호출 디렉터리의
-summary.txt 머리에 남는다(그대로 재실행 가능). stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만."""
+METRICS_COMMON_DOC = """계산은 백엔드가 한다 — 코어는 질의를 조립해 결과만 받는다(연산당 질의 1회). 창(compare 는 기준선도)은 호출 디렉터리의
+summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만."""
 
 SUMMARIZE_DOC = """promql.py summarize '<PromQL>' --since 1h [--end <시각>] [--step 60s]
 
@@ -691,7 +691,7 @@ def logs_run(client: Client, a: LogsArgs, at: float | None = None) -> RunResult:
 
 
 LOGS_COMMON_DOC = """계산은 백엔드(Loki)가 한다 — count_over_time · Patterns API 의 환원 결과만 받고, 원본 로그 줄은 예시 · 첫 발생 · 문맥에만 온다.
-실제로 보낸 질의와 창은 호출 디렉터리의 summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만."""
+창(around 는 --ts ± --span)은 호출 디렉터리의 summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만."""
 
 HISTOGRAM_DOC = """logql.py histogram '<selector>' [--by detected_level] [--since 1h] [--end <시각>] [--step 60s]
 
@@ -984,8 +984,8 @@ def _span_time(t: SpanTime | None) -> str:
     return "%.1fms×%d" % (t.total_ms, t.n) if t is not None else "—"
 
 
-TRACES_COMMON_DOC = """원본(span 트리 · 검색 응답)은 호출 디렉터리의 raw.json 에 남고 stdout 은 환원물이다. 보낸 질의 전부(연산이 둘 이상 부르면
-그 전부)와 창은 summary.txt 머리에 남는다. stdout 은 --max-lines 에서 잘린다. --json 은 경로만."""
+TRACES_COMMON_DOC = """원본(span 트리 · 검색 응답)은 호출 디렉터리의 raw.json 에 남고 stdout 은 환원물이다. 창은 summary.txt 머리에
+남는다. stdout 은 --max-lines 에서 잘린다. --json 은 경로만."""
 
 EXEMPLARS_DOC = """traceql.py exemplars [--q '<조건식>'] [--since 1h] [--k 3] [--quantile 0.95] [--baseline-range 7d] [--limit 100]
 
