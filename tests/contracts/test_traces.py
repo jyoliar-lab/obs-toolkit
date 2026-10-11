@@ -150,6 +150,20 @@ def test_parse_span_matches_falls_back_to_span_set() -> None:
     assert [m.name for m in matches] == ["a"]
 
 
+def test_parse_span_matches_skips_trace_without_span_sets() -> None:
+    """spanSets 도 spanSet 도 없는 빈 껍데기 트레이스는 건너뛴다 — 매치는 다른 트레이스의 것뿐이고 예외는 없다."""
+    # given — t1 은 매치 하나 · t2 는 spanSets · spanSet 둘 다 없다
+    body = _search(("t1", [_hit_span("a", 10)]))
+    hollow: JSON = {"traceID": "t2", "rootServiceName": "svc", "rootTraceName": "root", "startTimeUnixNano": "1000000000", "durationMs": 1}
+    items = body["traces"]
+    assert isinstance(items, list)
+    items.append(hollow)
+    # when
+    matches = traces.parse_span_matches(body)
+    # then
+    assert [m.trace_id for m in matches] == ["t1"]
+
+
 def test_parse_span_matches_empty_response_is_empty() -> None:
     """traces 가 비면 빈 목록이다."""
     # given · when
@@ -289,6 +303,16 @@ def test_thresholds_fall_back_to_sample_p95() -> None:
     assert out[Endpoint("a", "x")].source == THRESHOLD_SAMPLE
 
 
+def test_thresholds_sample_fallback_follows_quantile() -> None:
+    """quantile 0.5 면 표본 폴백은 중앙값(nearest-rank — 다섯이면 세 번째) 이고 출처는 sample 이다 — 표본 폴백도 quantile 을 따른다."""
+    # given — 1 · 2 · 3 · 4 · 5ms
+    sample = [_sm("t%d" % i, "x", ms, service="a") for i, ms in enumerate([4, 1, 5, 2, 3])]
+    # when
+    out = traces.thresholds_of([], sample, quantile=0.5)
+    # then
+    assert out[Endpoint("a", "x")] == _th(0.003, THRESHOLD_SAMPLE)
+
+
 def test_thresholds_single_sample_is_its_own_p95() -> None:
     """표본에만 있고 건이 하나면 임계는 그 건의 지속시간이다."""
     # given
@@ -309,6 +333,29 @@ def test_thresholds_cover_exactly_the_sample_endpoints() -> None:
     out = traces.thresholds_of(quantiles, sample)
     # then
     assert set(out) == {Endpoint("a", "x"), Endpoint("b", "y")}
+
+
+@pytest.mark.parametrize("quantiles,expected", [(_eq("a", "x", base=0.0, now=0.02), _th(0.02, THRESHOLD_WINDOW)),
+                                                (_eq("a", "x", base=0.0, now=0.0), _th(0.005, THRESHOLD_SAMPLE))], ids=["base_zero", "both_zero"])
+def test_thresholds_skip_non_positive_quantile_values(quantiles: EndpointQuantiles, expected: Threshold) -> None:
+    """base 가 0 이면 now 로, now 도 0 이면 표본 p95 로 — 0 이하인 출처는 없는 것으로 보고 다음 폴백으로 간다(0 으로 나눌 임계를 만들지 않는다)."""
+    # given — 그 엔드포인트의 건 셋, 전부 5ms
+    sample = [_sm("t%d" % i, "x", 5, service="a") for i in range(3)]
+    # when
+    out = traces.thresholds_of([quantiles], sample)
+    # then
+    assert out[Endpoint("a", "x")] == expected
+
+
+def test_thresholds_reject_duplicate_endpoint_quantiles() -> None:
+    """같은 엔드포인트의 EndpointQuantiles 가 둘이면 ObsError 이고 문구에 그 엔드포인트가 있다 — 뒤의 것이 조용히 이기지 않는다."""
+    # given
+    quantiles = [_eq("a", "dup-ep", 0.01, 0.02), _eq("a", "dup-ep", 0.02, 0.02)]
+    sample = [_sm("t1", "dup-ep", 5, service="a")]
+    # when · then
+    with pytest.raises(ObsError) as ei:
+        traces.thresholds_of(quantiles, sample)
+    assert "dup-ep" in str(ei.value)
 
 
 # ── exemplars_of ────────────────────────────────────────────────────────────────────
@@ -423,6 +470,17 @@ def test_exemplars_of_rejects_sample_endpoint_without_threshold() -> None:
     with pytest.raises(ObsError) as ei:
         traces.exemplars_of(sample, {}, k=3, quantile=0.95, truncated=False)
     assert "orphan" in str(ei.value)
+
+
+def test_exemplars_of_rejects_non_positive_threshold() -> None:
+    """그 엔드포인트의 Threshold.seconds 가 0 이면 ObsError 이고 문구에 그 엔드포인트가 있다 — ZeroDivisionError 가 아니다."""
+    # given — 표본 전부 0ns 라 표본 p95 도 0 인 경우
+    sample = [_sm("t1", "zero-ep", 0, service="a")]
+    thresholds = {Endpoint("a", "zero-ep"): _th(0.0, THRESHOLD_SAMPLE)}
+    # when · then
+    with pytest.raises(ObsError) as ei:
+        traces.exemplars_of(sample, thresholds, k=3, quantile=0.95, truncated=False)
+    assert "zero-ep" in str(ei.value)
 
 
 def test_exemplars_of_rejects_k_below_one() -> None:
@@ -593,6 +651,20 @@ def test_critical_path_clips_fire_and_forget_child_at_parent_end() -> None:
     assert cp.path[0].self_ms == pytest.approx(700.0)
 
 
+def test_critical_path_clips_child_starting_before_parent_at_parent_start() -> None:
+    """부모(0–800)보다 먼저 시작한 자식(−200–500)은 부모 시작에서 잘려 offset 0 · 길이 500 · clipped_ms 200 이고 루트 self 는 300 이다 — 시작 쪽도 부모 경계로 자른다."""
+    # given
+    spans = [_span("root", "r", start_ms=0, end_ms=800), _span("early", "e", parent="r", start_ms=-200, end_ms=500)]
+    # when
+    cp = _cp(spans)
+    # then
+    assert _names(cp.path) == ["root", "early"]
+    assert cp.path[1].offset_ms == pytest.approx(0.0)
+    assert cp.path[1].duration_ms == pytest.approx(500.0)
+    assert cp.path[1].clipped_ms == pytest.approx(200.0)
+    assert cp.path[0].self_ms == pytest.approx(300.0)
+
+
 def test_critical_path_tolerates_one_ms_clock_drift() -> None:
     """A 가 B 시작 뒤 0.5ms 에 끝나도(드리프트) A 는 경로에 있다 — happensBefore 를 1ms 로 완화한다."""
     # given
@@ -636,7 +708,7 @@ def test_critical_path_of_single_span_is_itself() -> None:
 
 
 def test_critical_path_picks_the_earliest_root_when_there_are_several() -> None:
-    """부모 없는 span 이 둘이면(불완전한 트레이스) 먼저 시작한 것이 루트이고 roots 가 2 다 — 거부하지 않고 표시한다."""
+    """parent 가 빈 span 이 둘이면(루트가 둘인 불완전한 트레이스) 먼저 시작한 것이 루트이고 roots 2 · orphans 0 이다 — 거부하지 않고 표시한다."""
     # given
     spans = [_span("late-root", "b", start_ms=50, end_ms=100), _span("early-root", "a", start_ms=0, end_ms=80)]
     # when
@@ -644,6 +716,42 @@ def test_critical_path_picks_the_earliest_root_when_there_are_several() -> None:
     # then
     assert cp.path[0].name == "early-root"
     assert cp.roots == 2
+    assert cp.orphans == 0
+
+
+def test_critical_path_rejects_trace_without_root() -> None:
+    """span 둘이 서로를 부모로 가리키면(순환 — 루트 0 · 고아 0 인데 span 이 있다) ObsError 이고 문구에 trace_id 가 있다 — ValueError 가 아니다."""
+    # given
+    spans = [_span("a", "x", parent="y", start_ms=0, end_ms=10), _span("b", "y", parent="x", start_ms=0, end_ms=10)]
+    # when · then
+    with pytest.raises(ObsError) as ei:
+        _cp(spans, trace_id="cyc-1")
+    assert "cyc-1" in str(ei.value)
+
+
+def test_critical_path_walks_from_the_root_not_from_an_earlier_orphan() -> None:
+    """루트(parent 빔, 100–800) 와 그보다 먼저 시작한 고아(parent 가 없는 id, 0–50) 가 있으면 경로는 루트에서 시작하고 고아는 경로에 없으며 roots 1 · orphans 1 이다."""
+    # given
+    spans = [_span("orphan", "o", parent="missing", start_ms=0, end_ms=50), _span("root", "r", start_ms=100, end_ms=800)]
+    # when
+    cp = _cp(spans)
+    # then
+    assert _names(cp.path) == ["root"]
+    assert cp.roots == 1
+    assert cp.orphans == 1
+
+
+def test_critical_path_without_root_has_no_path_and_counts_orphans() -> None:
+    """parent 가 빈 span 이 없고 고아만 둘이면(루트 유실) path · bottlenecks 가 비고 roots 0 · orphans 2 다 — 예외가 아니고 고아를 루트로 승격하지 않는다."""
+    # given
+    spans = [_span("a", "x", parent="m1", start_ms=0, end_ms=10), _span("b", "y", parent="m2", start_ms=5, end_ms=20)]
+    # when
+    cp = _cp(spans)
+    # then
+    assert cp.path == []
+    assert cp.bottlenecks == []
+    assert cp.roots == 0
+    assert cp.orphans == 2
 
 
 # ── critical_path — GET 1 회 ───────────────────────────────────────────────────────
@@ -801,6 +909,16 @@ def test_service_graph_marks_callee_unknown_when_span_name_is_ambiguous() -> Non
     assert g.edges[0].callee is None
 
 
+def test_service_graph_rejects_duplicate_server_quantiles() -> None:
+    """servers 에 같은 엔드포인트(서비스까지 같은) 의 EndpointQuantiles 가 둘이면 ObsError 이고 문구에 그 엔드포인트가 있다 — 첫 것을 조용히 쓰지 않는다."""
+    # given
+    servers = [_eq("b", "dup-X", 0.03, 0.03), _eq("b", "dup-X", 0.05, 0.05)]
+    # when · then
+    with pytest.raises(ObsError) as ei:
+        _sg([_row("a", "dup-X", calls=1, now=0.04, base=0.02)], servers)
+    assert "dup-X" in str(ei.value)
+
+
 def test_service_graph_of_no_client_rows_is_no_data() -> None:
     """클라이언트 행이 없으면 edges [] · idle 0 — 데이터 없음이다."""
     # given · when
@@ -829,6 +947,15 @@ def test_service_graph_rates_without_division_by_missing_values(row: ClientRow, 
     g = _sg([row], [])
     # then
     assert getattr(g.edges[0], field) == expected
+
+
+def test_service_graph_ratio_is_none_when_baseline_is_zero() -> None:
+    """base 가 0.0 이면 ratio 는 None 이고 client_base_p95_ms 는 0.0 이다 — 0 으로 나누지 않고 평소 없음과 같이 다룬다."""
+    # given · when
+    g = _sg([_row("a", "X", calls=10, now=0.04, base=0.0)], [])
+    # then
+    assert g.edges[0].ratio is None
+    assert g.edges[0].client_base_p95_ms == 0.0
 
 
 # ── service_graph — metrics GET 2 회 ────────────────────────────────────────────────
@@ -941,6 +1068,30 @@ def test_diff_rejects_empty_trace() -> None:
         _pair([_span("root", "r", "", 0, 10)], [])
 
 
+def test_diff_names_the_root_not_an_earlier_orphan() -> None:
+    """느린 쪽에 루트(parent 빔)와 그보다 먼저 시작한 고아(parent 가 없는 id · 이름 다름)가 있으면 root_name 은 루트의 이름이고 ObsError 가 아니며 고아는 느린 쪽에만 있음 행으로 남는다."""
+    # given
+    slow = [_span("db.query", "o", "missing", 0, 50), _span("GET /jobs", "r", "", 100, 800)]
+    normal = [_span("GET /jobs", "r", "", 0, 10)]
+    # when
+    d = _pair(slow, normal)
+    orphan_rows = [x for x in d.deltas if x.name == "db.query"]
+    # then
+    assert d.root_name == "GET /jobs"
+    assert len(orphan_rows) == 1
+    assert orphan_rows[0].normal is None
+    assert orphan_rows[0].delta_ms is None
+
+
+@pytest.mark.parametrize("slow", [[_span("a", "x", "m1", 0, 10), _span("b", "y", "m2", 0, 10)], [_span("a", "x", "y", 0, 10), _span("b", "y", "x", 0, 10)]],
+                         ids=["orphans", "cycle"])
+def test_diff_rejects_trace_without_root(slow: list[Span]) -> None:
+    """한쪽에 루트(parent 가 빈 span)가 없으면 — 고아뿐이든 순환이든 — ObsError 다. 비교할 루트 이름이 없고 ValueError 가 아니다."""
+    # given · when · then
+    with pytest.raises(ObsError):
+        _pair(slow, [_span("root", "r", "", 0, 10)])
+
+
 # ── diff — GET 2 회 ────────────────────────────────────────────────────────────────
 
 def test_diff_fetches_slow_then_normal(make_client: ClientFactory) -> None:
@@ -989,8 +1140,8 @@ def _path_span(name: str = "x", clipped_ms: float = 0.0, depth: int = 0) -> Path
     return PathSpan(service="a", name=name, span_id=name, depth=depth, offset_ms=0.0, duration_ms=10.0, self_ms=5.0, clipped_ms=clipped_ms)
 
 
-def _critical(path: list[PathSpan], roots: int = 1) -> CriticalPath:
-    return CriticalPath(trace_id="t", spans=len(path), total_ms=10.0, path=path, dropped=0, roots=roots)
+def _critical(path: list[PathSpan], roots: int = 1, orphans: int = 0, spans: int | None = None) -> CriticalPath:
+    return CriticalPath(trace_id="t", spans=len(path) if spans is None else spans, total_ms=10.0, path=path, dropped=0, roots=roots, orphans=orphans)
 
 
 def _edge(callee: str | None = "b", server: float | None = 30.0) -> Edge:
@@ -1015,6 +1166,16 @@ def test_exemplars_lines_mark_empty_bucket_as_none_not_no_data() -> None:
     assert len(slow_lines) == 1
     assert "없음" in slow_lines[0]
     assert not any("데이터 없음" in line for line in lines)
+
+
+def test_exemplars_lines_no_data_when_sample_is_zero() -> None:
+    """sample 이 0 이면 한 줄이고 '(데이터 없음' 으로 시작하며 창을 넓히라는 --since 안내가 있다."""
+    # given · when
+    lines = cli.exemplars_lines(_exemplars(sample=0), W)
+    # then
+    assert len(lines) == 1
+    assert lines[0].startswith("(데이터 없음")
+    assert "--since" in lines[0]
 
 
 @pytest.mark.parametrize("source", [THRESHOLD_BASELINE, THRESHOLD_SAMPLE])
@@ -1053,7 +1214,7 @@ def test_exemplars_lines_summarize_sample_exceeded_and_expected_ratio(quantile: 
 
 
 def test_critical_path_lines_mark_clipped_spans() -> None:
-    """clipped_ms 가 0 보다 큰 경로 span 의 줄에만 잘림 표시가 있고 그 줄에 넘친 길이(+400.0ms)가 함께 있다."""
+    """clipped_ms 가 0 보다 큰 경로 span 의 줄에만 잘림 표시가 있고 그 줄에 넘친 길이(+400.0ms)가 함께 있으며 문구는 "부모 경계" 를 말한다(시작 쪽 잘림에도 맞는 말)."""
     # given
     lines = cli.critical_path_lines(_critical([_path_span("root"), _path_span("async", clipped_ms=400.0, depth=1)]), W)
     # when
@@ -1062,6 +1223,7 @@ def test_critical_path_lines_mark_clipped_spans() -> None:
     assert len(marked) == 1
     assert "async" in marked[0]
     assert "+400.0ms" in marked[0]
+    assert "부모 경계" in marked[0]
     assert not any("잘림" in line and "root" in line for line in lines)
 
 
@@ -1072,6 +1234,25 @@ def test_critical_path_lines_flag_incomplete_trace_with_several_roots(roots: int
     lines = cli.critical_path_lines(_critical([_path_span("root")], roots=roots), W)
     # then
     assert any("불완전" in line and "루트 2" in line for line in lines) is flagged
+
+
+@pytest.mark.parametrize("orphans,flagged", [(1, True), (0, False)], ids=["one", "none"])
+def test_critical_path_lines_flag_orphans(orphans: int, flagged: bool) -> None:
+    """orphans 가 1 이면 헤더에 고아 표시("고아 1 개" · 부모 span 유실)가 있고 0 이면 없다."""
+    # given · when
+    lines = cli.critical_path_lines(_critical([_path_span("root")], orphans=orphans), W)
+    # then
+    assert any("고아 1" in line for line in lines) is flagged
+
+
+def test_critical_path_lines_say_no_path_without_root() -> None:
+    """roots 가 0 이고 path 가 비면 헤더 한 줄뿐이고 거기에 "임계경로 없음" 과 "루트 없음" 이 있다 — 경로 줄도 병목 줄도 없다."""
+    # given · when
+    lines = cli.critical_path_lines(_critical([], roots=0, orphans=2, spans=2), W)
+    # then
+    assert len(lines) == 1
+    assert "임계경로 없음" in lines[0]
+    assert "루트 없음" in lines[0]
 
 
 @pytest.mark.parametrize("idle", [3, 7])

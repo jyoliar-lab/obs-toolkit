@@ -394,7 +394,8 @@ class CriticalPath:
     total_ms: float                  # 루트 길이
     path: list[PathSpan]             # 임계경로 위 span 만, 루트부터 시간 순 — 겹쳐 무시된 형제 · 그 서브트리 · dropped 는 없다. [] = span 없음
     dropped: int                     # 부모 밖에서 통째로 시작 · 끝나 버린 서브트리 수
-    roots: int                       # 부모 없는 span 수 — 1 이 정상 · 2 이상 = 불완전한 트레이스, 가장 먼저 시작한 것을 루트로 따랐다
+    roots: int                       # parent 가 빈 span 수 — 1 이 정상 · 2 이상 = 불완전(가장 먼저 시작한 것을 따랐다) · 0 = 루트 유실(path 는 비고 고아를 승격하지 않는다)
+    orphans: int                     # parent id 가 트레이스 안에 없는 span 수 — 부모 유실. 그 서브트리는 path 에 없다
 
     @property
     def bottlenecks(self) -> list[PathSpan]:
@@ -405,7 +406,7 @@ class CriticalPath:
 def critical_path_of(trace: Trace) -> CriticalPath:
     """CRISP — LFC 를 따라 임계경로 · exclusive time · 경계 규칙(드리프트 1ms · 부모 경계 절단 · 밖 서브트리 폐기)."""
     if not trace.spans:
-        return CriticalPath(trace_id=trace.trace_id, spans=0, total_ms=0.0, path=[], dropped=0, roots=0)
+        return CriticalPath(trace_id=trace.trace_id, spans=0, total_ms=0.0, path=[], dropped=0, roots=0, orphans=0)
     roots = _roots(trace.spans)
     children: dict[str, list[Span]] = {}
     for s in trace.spans:
@@ -414,7 +415,7 @@ def critical_path_of(trace: Trace) -> CriticalPath:
     walk = _CrispWalk(children=children, origin=root.start_ns)
     walk.visit(root, root.start_ns, root.end_ns, 0)
     return CriticalPath(trace_id=trace.trace_id, spans=len(trace.spans), total_ms=root.duration_ms, path=walk.path,
-                        dropped=walk.dropped, roots=len(roots))
+                        dropped=walk.dropped, roots=len(roots), orphans=0)
 
 
 def _roots(spans: Sequence[Span]) -> list[Span]:
