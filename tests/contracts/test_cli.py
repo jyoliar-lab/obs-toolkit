@@ -193,14 +193,14 @@ def test_logql_main_routes_subcommand_to_logs_run(argv: list[str], expected: dic
 
 @pytest.mark.parametrize("argv,expected", [
     (["exemplars", "--q", 'resource.service.name = "a"', "--k", "2", "--quantile", "0.9", "--baseline-range", "3d"],
-     {"cmd": "exemplars", "q": 'resource.service.name = "a"', "k": 2, "quantile": 0.9, "baseline_range": "3d"}),
-    (["critical-path", "abc"], {"cmd": "critical-path", "trace_id": "abc"}),
-    (["service-graph", "--quantile", "0.9", "--baseline-range", "3d"], {"cmd": "service-graph", "quantile": 0.9, "baseline_range": "3d"}),
-    (["diff", "s1", "n1"], {"cmd": "diff", "slow_id": "s1", "normal_id": "n1"}),
+     cli.TracesArgs(cmd="exemplars", q='resource.service.name = "a"', k=2, quantile=0.9, baseline_range="3d")),
+    (["critical-path", "abc"], cli.TracesArgs(cmd="critical-path", trace_id="abc")),
+    (["service-graph", "--quantile", "0.9", "--baseline-range", "3d"], cli.TracesArgs(cmd="service-graph", quantile=0.9, baseline_range="3d")),
+    (["diff", "s1", "n1"], cli.TracesArgs(cmd="diff", slow_id="s1", normal_id="n1")),
 ], ids=["exemplars", "critical-path", "service-graph", "diff"])
-def test_traceql_main_routes_subcommand_to_traces_run(argv: list[str], expected: dict[str, object], monkeypatch: pytest.MonkeyPatch,
+def test_traceql_main_routes_subcommand_to_traces_run(argv: list[str], expected: cli.TracesArgs, monkeypatch: pytest.MonkeyPatch,
                                                       make_client: ClientFactory, tmp_path: Path) -> None:
-    """traceql.py 의 첫 인자가 서브커맨드면 traces_run 으로 간다 — cmd · 위치 인자(traceID) · 옵션(k · quantile · baseline-range) 이 TracesArgs 로 들어간다."""
+    """traceql.py 의 첫 인자가 서브커맨드면 traces_run 으로 간다 — cmd · 위치 인자(traceID) · 옵션(k · quantile · baseline-range) 이 TracesArgs 로 들어가고 나머지 필드는 전부 기본값이다."""
     # given — traces_run 대역이 받은 Args 를 기록한다
     seen: list[cli.TracesArgs] = []
 
@@ -216,8 +216,7 @@ def test_traceql_main_routes_subcommand_to_traces_run(argv: list[str], expected:
     cli.traceql_main(argv)
     # then
     assert len(seen) == 1
-    for name, value in expected.items():
-        assert getattr(seen[0], name) == value
+    assert seen[0] == expected
 
 
 def test_traceql_main_still_routes_legacy_commands_to_traceql_run(monkeypatch: pytest.MonkeyPatch, make_client: ClientFactory, tmp_path: Path) -> None:
