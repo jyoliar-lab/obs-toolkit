@@ -45,8 +45,8 @@ DEFAULT_LOG_LIMIT: int = 30
 
 V = TypeVar("V")
 
-RunResult: TypeAlias = "tuple[Evidence[Lines], list[Response], str]"   # 둘째 자리(원본) — 호출 순서의 Response 목록
-"""(근거, 원본 Response 목록, spill 종류 이름)"""
+RunResult: TypeAlias = "tuple[Evidence[Lines], list[Response], str, Window]"   # 둘째 자리(원본) — 호출 순서의 Response 목록
+"""(근거, 원본 Response 목록, spill 종류 이름, CLI 가 인자로 계산한 창)"""
 
 
 # ── 응답 dataclass + 파서 — Loki 의 로그 파서(Stream · LogResult · parse_logs)는 obs.logs 에, Prometheus 형은 obs.metrics 에 ──
@@ -115,24 +115,12 @@ def fmt_val(v: str | int | float) -> str:
     return "%.6g" % f
 
 
-def evidence_preamble(ev: Evidence[Lines]) -> list[str]:
-    """summary.txt 머리 — 재실행에 필요한 것: 백엔드에 실제로 보낸 질의(환원 연산은 조립된 식 그대로) · 창(RFC3339 + unix 초) ·
-    기준선. stdout 에는 찍지 않는다 — 조립된 질의는 길다."""
-    lines = ["# 질의  %s  %s" % (q.backend, q.query) for q in ev.queries] or ["# 질의  %s" % ev.query]
-    w = ev.window
-    if w is not None:
-        lines.append("# 창  %s  (start=%.3f end=%.3f)" % (w.label(), w.start, w.end))
-        if w.baseline is not None:
-            b = w.baseline
-            lines.append("# 기준선  %s  (start=%.3f end=%.3f)" % (b.label(), b.start, b.end))
-    lines.append("")
-    return lines
+def window_preamble(window: Window) -> list[str]:
+    raise NotImplementedError("window_preamble")
 
 
-def _finish(ev: Evidence[Lines], raw: list[Response], kind: str, max_lines: int, as_json: bool) -> None:
-    """Evidence 를 stdout 규약으로. as_json 은 stdout 에 요약을 찍지 않고 경로만(파일은 어느 쪽이든 같다).
-    summary.txt 는 머리(질의·창) + 요약 전체다."""
-    emit(ev.value.lines or ["(결과 없음)"], raw, kind, max_lines, quiet=as_json, preamble=evidence_preamble(ev))
+def _finish(ev: Evidence[Lines], raw: list[Response], kind: str, window: Window, max_lines: int, as_json: bool) -> None:
+    raise NotImplementedError("_finish")
 
 
 def _common(ap: argparse.ArgumentParser) -> None:
@@ -154,8 +142,8 @@ def main_guard(fn: Callable[[], None]) -> None:
         sys.exit(1)
 
 
-def _evidence(backend: str, query: str, window: Window, lines: list[str]) -> Evidence[Lines]:
-    return Evidence(backend=backend, query=query, window=window, value=Lines(lines or ["(결과 없음)"]))
+def _evidence(lines: list[str]) -> Evidence[Lines]:
+    return Evidence(value=Lines(lines or ["(결과 없음)"]))
 
 
 # ── promql ───────────────────────────────────────────────────────────────────────
@@ -279,7 +267,7 @@ def promql_run(client: Client, a: PromqlArgs, at: float | None = None) -> RunRes
         lines = instant_lines(parse_metric(body))
         kind, query = "promql", match
 
-    return _evidence("metrics", query, window, lines), [resp], kind
+    return _evidence(lines), [resp], kind
 
 
 def promql_main(argv: Sequence[str] | None = None) -> None:
@@ -301,8 +289,8 @@ def promql_main(argv: Sequence[str] | None = None) -> None:
     a = ap.parse_args(argv)
     args = PromqlArgs(query=a.query, end=a.end, range_=a.range_, step=a.step, points=a.points,
                       labels=a.labels, label_values=a.label_values, series=a.series)
-    ev, raw, kind = promql_run(_client(), args)
-    _finish(ev, raw, kind, a.max_lines, a.json)
+    ev, raw, kind, window = promql_run(_client(), args)
+    _finish(ev, raw, kind, window, a.max_lines, a.json)
 
 
 # ── 환원 연산 — promql.py 의 서브커맨드 (계산은 obs.metrics, 표는 여기) ─────────────────
@@ -411,15 +399,14 @@ def metrics_run(client: Client, a: MetricsArgs, at: float | None = None) -> RunR
     window = Window.last(a.since, a.end, at) if a.cmd != "top" else Window(parse_time(a.end, base_ts), parse_time(a.end, base_ts))
     if a.cmd == "summarize":
         ev, raw = summarize(client, a.query, window, a.step)
-        return _evidence("metrics", ev.query, ev.window or window, summary_lines(ev.value, ev.window or window)), raw, "promql-summarize"
+        return _evidence(summary_lines(ev.value, window)), raw, "promql-summarize"
     if a.cmd == "compare":
-        ev_c, raw = compare(client, a.query, window.with_baseline(a.baseline), a.step)
-        w = ev_c.window or window
-        return _evidence("metrics", ev_c.query, w, compare_lines(ev_c.value, w)), raw, "promql-compare"
+        w = window.with_baseline(a.baseline)
+        ev_c, raw = compare(client, a.query, w, a.step)
+        return _evidence(compare_lines(ev_c.value, w)), raw, "promql-compare"
     if a.cmd == "top":
         ev_t, raw = top(client, a.query, window, k=a.k, by=a.by.split(","), agg=a.agg)
-        w = ev_t.window or window
-        return _evidence("metrics", ev_t.query, w, top_lines(ev_t.value, w)), raw, "promql-top"
+        return _evidence(top_lines(ev_t.value, window)), raw, "promql-top"
     raise ObsError("알 수 없는 명령 %r — %s" % (a.cmd, " · ".join(METRICS_SUBCOMMANDS)))
 
 
@@ -453,8 +440,8 @@ def metrics_main(argv: Sequence[str]) -> None:
     args = MetricsArgs(cmd=a.cmd, query=a.query, since=getattr(a, "since", "1h"), end=a.end, step=getattr(a, "step", None),
                        baseline=getattr(a, "baseline", DEFAULT_BASELINE), k=getattr(a, "k", DEFAULT_TOP_K),
                        by=getattr(a, "by", "pod"), agg=getattr(a, "agg", DEFAULT_TOP_AGG))
-    ev, raw, kind = metrics_run(_client(), args)
-    _finish(ev, raw, kind, a.max_lines, a.json)
+    ev, raw, kind, window = metrics_run(_client(), args)
+    _finish(ev, raw, kind, window, a.max_lines, a.json)
 
 
 # ── logql ────────────────────────────────────────────────────────────────────────
@@ -577,7 +564,7 @@ def logql_run(client: Client, a: LogqlArgs, at: float | None = None) -> RunResul
         lines = matrix_lines(res) if res.result_type == "matrix" else stream_lines(res, a.direction, a.width)
         kind, query = "logql", a.query
 
-    return _evidence("logs", query, window, lines), [resp], kind
+    return _evidence(lines), [resp], kind
 
 
 def logql_main(argv: Sequence[str] | None = None) -> None:
@@ -600,8 +587,8 @@ def logql_main(argv: Sequence[str] | None = None) -> None:
     a = ap.parse_args(argv)
     args = LogqlArgs(query=a.query, since=a.since, end=a.end, limit=a.limit, direction=a.direction,
                      width=a.width, labels=a.labels, label_values=a.label_values, series=a.series)
-    ev, raw, kind = logql_run(_client(), args)
-    _finish(ev, raw, kind, a.max_lines, a.json)
+    ev, raw, kind, window = logql_run(_client(), args)
+    _finish(ev, raw, kind, window, a.max_lines, a.json)
 
 
 # ── 환원 연산 — logql.py 의 서브커맨드 (계산은 obs.logs, 표는 여기) ────────────────────
@@ -691,20 +678,16 @@ def logs_run(client: Client, a: LogsArgs, at: float | None = None) -> RunResult:
     window = Window.last(a.since, a.end, at)
     if a.cmd == "histogram":
         ev_h, raw = histogram(client, a.selector, window, by=a.by.split(","), step=a.step)
-        w = ev_h.window or window
-        return _evidence("logs", ev_h.query, w, histogram_lines(ev_h.value, w)), raw, "logql-histogram"
+        return _evidence(histogram_lines(ev_h.value, window)), raw, "logql-histogram"
     if a.cmd == "templates":
         ev_t, raw = templates(client, a.selector, window, k=a.k, step=a.step)
-        w = ev_t.window or window
-        return _evidence("logs", ev_t.query, w, templates_lines(ev_t.value, w)), raw, "logql-templates"
+        return _evidence(templates_lines(ev_t.value, window)), raw, "logql-templates"
     if a.cmd == "around":
         ts = parse_time(a.ts, now() if at is None else at)
         ev_a, raw = around(client, a.selector, ts, parse_duration(a.span), limit=a.limit)
-        w = ev_a.window or window
-        return _evidence("logs", ev_a.query, w, around_lines(ev_a.value, w)), raw, "logql-around"
+        return _evidence(around_lines(ev_a.value, window)), raw, "logql-around"
     ev_f, raw = first_seen(client, a.selector, a.template or "", window)
-    w = ev_f.window or window
-    return _evidence("logs", ev_f.query, w, first_seen_lines(ev_f.value, w)), raw, "logql-first-seen"
+    return _evidence(first_seen_lines(ev_f.value, window)), raw, "logql-first-seen"
 
 
 LOGS_COMMON_DOC = """계산은 백엔드(Loki)가 한다 — count_over_time · Patterns API 의 환원 결과만 받고, 원본 로그 줄은 예시 · 첫 발생 · 문맥에만 온다.
@@ -775,8 +758,8 @@ def logs_main(argv: Sequence[str]) -> None:
                     by=getattr(a, "by", "detected_level"), step=getattr(a, "step", None), k=getattr(a, "k", DEFAULT_TEMPLATES_K),
                     ts=getattr(a, "ts", None), span=getattr(a, "span", DEFAULT_AROUND_SPAN), limit=getattr(a, "limit", DEFAULT_AROUND_LIMIT),
                     template=getattr(a, "template", None))
-    ev, raw, kind = logs_run(_client(), args)
-    _finish(ev, raw, kind, a.max_lines, a.json)
+    ev, raw, kind, window = logs_run(_client(), args)
+    _finish(ev, raw, kind, window, a.max_lines, a.json)
 
 
 # ── traceql ──────────────────────────────────────────────────────────────────────
@@ -896,7 +879,7 @@ def traceql_run(client: Client, a: TraceqlArgs, at: float | None = None) -> RunR
     else:
         raise ObsError("알 수 없는 명령 %r — search · trace · tags · tag-values" % a.cmd)
 
-    return _evidence("traces", query, window, lines), [resp], kind
+    return _evidence(lines), [resp], kind
 
 
 def traceql_main(argv: Sequence[str] | None = None) -> None:
@@ -919,8 +902,8 @@ def traceql_main(argv: Sequence[str] | None = None) -> None:
     a = ap.parse_args(argv)
     args = TraceqlArgs(cmd=a.cmd, arg=a.arg, q=a.q, since=a.since, end=a.end, limit=a.limit,
                        min_duration=a.min_duration, scope=a.scope, top=a.top)
-    ev, raw, kind = traceql_run(_client(), args)
-    _finish(ev, raw, kind, a.max_lines, a.json)
+    ev, raw, kind, window = traceql_run(_client(), args)
+    _finish(ev, raw, kind, window, a.max_lines, a.json)
 
 
 # ── 환원 연산 — traceql.py 의 서브커맨드 (계산은 obs.traces, 표는 여기) ─────────────────
@@ -1069,20 +1052,15 @@ def traces_run(client: Client, a: TracesArgs, at: float | None = None) -> RunRes
     kind = "traceql-" + a.cmd
     if a.cmd == "exemplars":
         ev_e, raw = exemplars(client, a.q, window, k=a.k, quantile=a.quantile, baseline_range=a.baseline_range, limit=a.limit)
-        return _traces_evidence(ev_e, exemplars_lines(ev_e.value, window)), raw, kind
+        return _evidence(exemplars_lines(ev_e.value, window)), raw, kind
     if a.cmd == "critical-path":
         ev_c, raw = critical_path(client, a.trace_id or "", window)
-        return _traces_evidence(ev_c, critical_path_lines(ev_c.value, window)), raw, kind
+        return _evidence(critical_path_lines(ev_c.value, window)), raw, kind
     if a.cmd == "service-graph":
         ev_g, raw = service_graph(client, window, quantile=a.quantile, baseline_range=a.baseline_range)
-        return _traces_evidence(ev_g, service_graph_lines(ev_g.value, window)), raw, kind
+        return _evidence(service_graph_lines(ev_g.value, window)), raw, kind
     ev_d, raw = diff(client, a.slow_id or "", a.normal_id or "", window)
-    return _traces_evidence(ev_d, diff_lines(ev_d.value, window)), raw, kind
-
-
-def _traces_evidence(ev: Evidence[V], lines: list[str]) -> Evidence[Lines]:
-    """연산의 Evidence 를 줄로 — 백엔드 · 주 질의 · 창 · queries 는 그대로."""
-    return Evidence(backend=ev.backend, query=ev.query, window=ev.window, value=Lines(lines), queries=ev.queries)
+    return _evidence(diff_lines(ev_d.value, window)), raw, kind
 
 
 def traces_main(argv: Sequence[str]) -> None:
@@ -1124,8 +1102,8 @@ def traces_main(argv: Sequence[str]) -> None:
                       k=getattr(a, "k", DEFAULT_EXEMPLARS_K), quantile=getattr(a, "quantile", DEFAULT_QUANTILE),
                       baseline_range=getattr(a, "baseline_range", DEFAULT_BASELINE_RANGE), limit=getattr(a, "limit", DEFAULT_SEARCH_LIMIT),
                       trace_id=getattr(a, "trace_id", None), slow_id=getattr(a, "slow_id", None), normal_id=getattr(a, "normal_id", None))
-    ev, raw, kind = traces_run(_client(), args)
-    _finish(ev, raw, kind, a.max_lines, a.json)
+    ev, raw, kind, w = traces_run(_client(), args)
+    _finish(ev, raw, kind, w, a.max_lines, a.json)
 
 
 # ── obs-doctor.py — 사람용. 물리가 보이는 유일한 출력 ───────────────────────────────

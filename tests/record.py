@@ -369,7 +369,7 @@ def _diff_fixture(client: Client, at: float) -> None:
 
 
 def _first_trace_id(client: Client, search: cli.TraceqlArgs, at: float) -> str:
-    _, raw, _ = cli.traceql_run(client, search, at=at)
+    raw = cli.traceql_run(client, search, at=at)[1]
     hits = cli.parse_search(cli.check_json(raw[0].body, "traces"))
     if not hits:
         raise Unreproducible("search(%s, since=%s) 에 trace 가 없다 — 창을 넓히거나 recorded: manual 로" % (search.q or "", search.since))

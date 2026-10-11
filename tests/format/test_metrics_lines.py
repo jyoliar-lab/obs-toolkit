@@ -9,7 +9,7 @@ import pytest
 from obs import metrics
 from obs.adapters import cli
 from obs.core import Window, fmt_rfc3339, json_list, json_obj
-from tests.conftest import AT, UNCHECKED_SHARED_EMPTY, ClientFactory, ReplayFactory, _stat, _vector, assert_snapshot, load_response, window_of
+from tests.conftest import AT, UNCHECKED_SHARED_EMPTY, ClientFactory, ReplayFactory, _stat, _vector, assert_snapshot, load_response
 from tests.record import CPU_QUERY
 
 
@@ -24,18 +24,20 @@ def _pods_in(name: str) -> set[str]:
 def test_summary_lines(replay: ReplayFactory, request: pytest.FixtureRequest) -> None:
     """summarize 의 렌더링은 창 헤더 한 줄 뒤에 시계열마다 일곱 통계 한 줄이다 — 시계열 수는 fixture 의 pod 수이고 min ≤ p50 ≤ p95 ≤ max 다."""
     client, t = replay("promql-instant-summarize-cpu-by-pod.json")
-    ev, _ = metrics.summarize(client, CPU_QUERY, Window.last("1h", at=t.at))
+    w = Window.last("1h", at=t.at)
+    ev, _ = metrics.summarize(client, CPU_QUERY, w)
     assert len(ev.value.series) == len(_pods_in("promql-instant-summarize-cpu-by-pod.json"))
     for s in ev.value.series:
         assert s.min <= s.p50 <= s.p95 <= s.max
-    assert_snapshot(request, cli.summary_lines(ev.value, window_of(ev)))
+    assert_snapshot(request, cli.summary_lines(ev.value, w))
 
 
 def test_summary_lines_empty(replay: ReplayFactory, request: pytest.FixtureRequest) -> None:
     """빈 응답의 summarize 렌더링은 "데이터 없음" 한 줄이다."""
     client, t = replay("promql-instant-empty.json", unchecked=UNCHECKED_SHARED_EMPTY)
-    ev, _ = metrics.summarize(client, CPU_QUERY, Window.last("1h", at=t.at))
-    assert_snapshot(request, cli.summary_lines(ev.value, window_of(ev)))
+    w = Window.last("1h", at=t.at)
+    ev, _ = metrics.summarize(client, CPU_QUERY, w)
+    assert_snapshot(request, cli.summary_lines(ev.value, w))
 
 
 # ── compare ──────────────────────────────────────────────────────────────────────
@@ -43,7 +45,8 @@ def test_summary_lines_empty(replay: ReplayFactory, request: pytest.FixtureReque
 def test_compare_lines(replay: ReplayFactory, request: pytest.FixtureRequest) -> None:
     """compare 의 렌더링은 헤더 한 줄 뒤에 시계열마다 비율 · Δ · now · base 한 줄이 비율 내림차순이다 — Δ 는 now − base 다."""
     client, t = replay("promql-instant-compare-cpu-by-pod-1d.json")
-    ev, _ = metrics.compare(client, CPU_QUERY, Window.last("1h", at=t.at).with_baseline("1d"))
+    w = Window.last("1h", at=t.at).with_baseline("1d")
+    ev, _ = metrics.compare(client, CPU_QUERY, w)
     assert len(ev.value.deltas) == len(_pods_in("promql-instant-compare-cpu-by-pod-1d.json"))
     ratios = [d.ratio for d in ev.value.deltas]
     assert ratios == sorted((r for r in ratios if r is not None), reverse=True)
@@ -51,16 +54,17 @@ def test_compare_lines(replay: ReplayFactory, request: pytest.FixtureRequest) ->
         assert d.now is not None
         assert d.base is not None
         assert d.delta == pytest.approx(d.now - d.base)
-    assert_snapshot(request, cli.compare_lines(ev.value, window_of(ev)))
+    assert_snapshot(request, cli.compare_lines(ev.value, w))
 
 
 def test_compare_lines_without_baseline(replay: ReplayFactory, request: pytest.FixtureRequest) -> None:
     """보존 밖 offset 으로 base 가 부재면 렌더링이 "기준선 없음" 을 말하고 비율은 어디에도 없다."""
     client, t = replay("promql-instant-compare-cpu-by-pod-no-baseline.json")
-    ev, _ = metrics.compare(client, CPU_QUERY, Window.last("1h", at=t.at).with_baseline("60d"))
+    w = Window.last("1h", at=t.at).with_baseline("60d")
+    ev, _ = metrics.compare(client, CPU_QUERY, w)
     assert ev.value.baseline_empty
     assert all(d.ratio is None for d in ev.value.deltas)
-    assert_snapshot(request, cli.compare_lines(ev.value, window_of(ev)))
+    assert_snapshot(request, cli.compare_lines(ev.value, w))
 
 
 def test_compare_lines_mark_missing_baseline_zero_and_missing_now(make_client: ClientFactory, request: pytest.FixtureRequest) -> None:
@@ -68,8 +72,9 @@ def test_compare_lines_mark_missing_baseline_zero_and_missing_now(make_client: C
     body = _vector(_stat("a", "now", "0.4"), _stat("a", "base", "0"), _stat("b", "now", "1"), _stat("c", "base", "3"),
                    _stat("d", "now", "3.9"), _stat("d", "base", "1"))
     client, _ = make_client({("metrics", "api/v1/query"): (200, body)})
-    ev, _ = metrics.compare(client, "q", Window.last("1h", at=AT).with_baseline("1d"))
-    assert_snapshot(request, cli.compare_lines(ev.value, window_of(ev)))
+    w = Window.last("1h", at=AT).with_baseline("1d")
+    ev, _ = metrics.compare(client, "q", w)
+    assert_snapshot(request, cli.compare_lines(ev.value, w))
 
 
 # ── top ──────────────────────────────────────────────────────────────────────────
@@ -77,23 +82,25 @@ def test_compare_lines_mark_missing_baseline_zero_and_missing_now(make_client: C
 def test_top_lines(replay: ReplayFactory, request: pytest.FixtureRequest) -> None:
     """top 의 렌더링은 값 내림차순으로 항목마다 `값  {레이블}` 한 줄이다."""
     client, t = replay("promql-instant-topk-memory-by-pod.json")
-    ev, _ = metrics.top(client, "container_memory_working_set_bytes", Window.last("1h", at=t.at), k=10, by=["pod"])
+    w = Window.last("1h", at=t.at)
+    ev, _ = metrics.top(client, "container_memory_working_set_bytes", w, k=10, by=["pod"])
     assert [e.value for e in ev.value.entries] == sorted((e.value for e in ev.value.entries), reverse=True)
-    assert_snapshot(request, cli.top_lines(ev.value, window_of(ev)))
+    assert_snapshot(request, cli.top_lines(ev.value, w))
 
 
 def test_top_lines_empty(replay: ReplayFactory, request: pytest.FixtureRequest) -> None:
     """빈 응답의 top 렌더링은 "데이터 없음" 한 줄이다."""
     client, t = replay("promql-instant-empty.json", unchecked=UNCHECKED_SHARED_EMPTY)
-    ev, _ = metrics.top(client, "nothing", Window.last("1h", at=t.at))
-    assert_snapshot(request, cli.top_lines(ev.value, window_of(ev)))
+    w = Window.last("1h", at=t.at)
+    ev, _ = metrics.top(client, "nothing", w)
+    assert_snapshot(request, cli.top_lines(ev.value, w))
 
 
 # ── CLI — stdout 절제 · summary.txt 머리 ───────────────────────────────────────────
 
 def test_promql_main_top_prints_table_and_call_dir_only(replay: ReplayFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
                                                         capsys: pytest.CaptureFixture[str]) -> None:
-    """`promql.py top …` 은 stdout 에 표와 호출 디렉터리 한 줄만 찍고(조립 질의 없음), summary.txt 머리에 감싼 질의 · 창이 남고 그 뒤가 stdout 의 표다."""
+    """`promql.py top …` 은 stdout 에 표와 호출 디렉터리 한 줄만 찍고(조립 질의 없음), summary.txt 머리에 창만 남고 그 뒤가 stdout 의 표다."""
     client, t = replay("promql-instant-topk-memory-by-pod.json")
     monkeypatch.setattr(cli, "_client", lambda: client)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
@@ -103,10 +110,10 @@ def test_promql_main_top_prints_table_and_call_dir_only(replay: ReplayFactory, m
     assert out[-1].endswith("-promql-top/ (raw.json · summary.txt)")
     assert not any("topk(" in l for l in out)
     summary = (tmp_path / out[-1].split()[1].rstrip("/")).joinpath("summary.txt").read_text(encoding="utf-8").splitlines()
-    assert summary[0] == "# 질의  topk(10, sum by (pod) (container_memory_working_set_bytes))"
-    assert summary[1].startswith("# 창  ")
-    assert summary[2] == ""
-    assert summary[3:] == out[:-1]
+    assert summary[0].startswith("# 창  ")
+    assert summary[1] == ""
+    assert summary[2:] == out[:-1]
+    assert not any("topk(" in l for l in summary)
     t.assert_exhausted()
 
 
@@ -121,9 +128,9 @@ def test_promql_main_plain_query_is_instant_lookup(replay: ReplayFactory, monkey
     t.assert_exhausted()
 
 
-def test_compare_summary_preamble_has_query_window_baseline(replay: ReplayFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+def test_compare_summary_preamble_has_window_baseline(replay: ReplayFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
                                                             capsys: pytest.CaptureFixture[str]) -> None:
-    """summary.txt 머리에는 조립 질의 · 창 · 기준선이 RFC3339 와 unix 초로 남고 stdout 에는 조립 질의가 없다."""
+    """summary.txt 머리에는 창 · 기준선이 RFC3339 와 unix 초로 남고 stdout · summary.txt 어디에도 조립 질의가 없다."""
     client, t = replay("promql-instant-compare-cpu-by-pod-1d.json")
     monkeypatch.setattr(cli, "_client", lambda: client)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
@@ -131,9 +138,8 @@ def test_compare_summary_preamble_has_query_window_baseline(replay: ReplayFactor
     out = capsys.readouterr().out.splitlines()
     assert not any("label_replace" in l for l in out)
     summary = (tmp_path / out[-1].split()[1].rstrip("/")).joinpath("summary.txt").read_text(encoding="utf-8").splitlines()
-    assert summary[0].startswith("# 질의  label_replace(quantile_over_time(0.95, ")
-    assert "offset 86400s" in summary[0]
-    assert summary[1] == "# 창  %s ~ %s  (start=%.3f end=%.3f)" % (fmt_rfc3339(t.at - 3600), fmt_rfc3339(t.at), t.at - 3600, t.at)
-    assert summary[2] == "# 기준선  %s ~ %s  (start=%.3f end=%.3f)" % (fmt_rfc3339(t.at - 3600 - 86400), fmt_rfc3339(t.at - 86400), t.at - 3600 - 86400, t.at - 86400)
-    assert summary[3] == ""
-    assert summary[4:] == out[:-1]
+    assert summary[0] == "# 창  %s ~ %s  (start=%.3f end=%.3f)" % (fmt_rfc3339(t.at - 3600), fmt_rfc3339(t.at), t.at - 3600, t.at)
+    assert summary[1] == "# 기준선  %s ~ %s  (start=%.3f end=%.3f)" % (fmt_rfc3339(t.at - 3600 - 86400), fmt_rfc3339(t.at - 86400), t.at - 3600 - 86400, t.at - 86400)
+    assert summary[2] == ""
+    assert summary[3:] == out[:-1]
+    assert not any("label_replace" in l for l in summary)

@@ -115,7 +115,7 @@ def histogram(client: Client, selector: str, window: Window, by: Sequence[str] =
     groups.sort(key=lambda g: -g.total)
     value = Histogram(by=[a.strip() for a in by if a.strip()], step=step, times=times, groups=groups[:max_groups],
                       folded=max(0, len(groups) - max_groups))
-    return Evidence(backend="logs", query=q, window=window, value=value), [resp]
+    return Evidence(value=value), [resp]
 
 
 # ── templates ────────────────────────────────────────────────────────────────────
@@ -230,7 +230,7 @@ def templates(client: Client, selector: str, window: Window, k: int = DEFAULT_TE
         first, example_resp = _first_line(client, pattern_filter(selector, c.template), window)
         clusters.append(replace(c, example=first.line if first else None))
         raw.append(example_resp)
-    return Evidence(backend="logs", query=selector, window=window, value=replace(t, clusters=clusters)), raw
+    return Evidence(value=replace(t, clusters=clusters)), raw
 
 
 # ── around ───────────────────────────────────────────────────────────────────────
@@ -292,7 +292,7 @@ def around(client: Client, selector: str, ts: float, span: float, limit: int = D
     after, after_side, after_resp = _side(client, selector, ts, ts + span, "forward", limit)
     entries = sorted([*before, *after], key=lambda e: e.ts_ns)
     value = Context(center=ts, span=span, limit=limit, total=total, before=before_side, after=after_side, entries=entries)
-    return Evidence(backend="logs", query=selector, window=Window(ts - span, ts + span), value=value), [count_resp, before_resp, after_resp]
+    return Evidence(value=value), [count_resp, before_resp, after_resp]
 
 
 # ── first_seen ───────────────────────────────────────────────────────────────────
@@ -311,4 +311,4 @@ def first_seen(client: Client, selector: str, template: str, window: Window) -> 
     q = pattern_filter(selector, template)
     first, resp = _first_line(client, q, window)
     value = FirstSeen(template=template, ts=first.ts_ns / 1e9 if first else None, line=first.line if first else None)
-    return Evidence(backend="logs", query=q, window=window, value=value), [resp]
+    return Evidence(value=value), [resp]

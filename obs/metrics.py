@@ -320,7 +320,7 @@ def summarize(client: Client, query: str, window: Window, step: str | None = Non
     q = summarize_query(query, window, step)
     body, resp = _instant(client, q, window.end)
     value = Summary(step=step, series=summaries_of(parse_metric(body)))
-    return Evidence(backend="metrics", query=q, window=window, value=value), [resp]
+    return Evidence(value=value), [resp]
 
 
 def baseline_offset(window: Window) -> tuple[Window, str]:
@@ -350,7 +350,7 @@ def compare(client: Client, query: str, window: Window, step: str | None = None)
         now_empty=not any("now" in st for st in stats.values()),
         baseline_empty=not any("base" in st for st in stats.values()),
     )
-    return Evidence(backend="metrics", query=q, window=w, value=value), [resp]
+    return Evidence(value=value), [resp]
 
 
 def top(client: Client, query: str, window: Window, k: int = DEFAULT_TOP_K, by: Sequence[str] = ("pod",),
@@ -368,4 +368,4 @@ def top(client: Client, query: str, window: Window, k: int = DEFAULT_TOP_K, by: 
             entries.append(TopEntry(labels=dict(s.labels), value=v))
     entries.sort(key=lambda e: -e.value)
     value = Top(k=k, by=[a.strip() for a in by if a.strip()], agg=agg, entries=entries[:k])
-    return Evidence(backend="metrics", query=wrapped, window=Window(start=window.end, end=window.end), value=value), [resp]
+    return Evidence(value=value), [resp]

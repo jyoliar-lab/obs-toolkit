@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Mapping, Sequence
 
 from obs.core import (
-    JSON, Client, Evidence, ObsError, Query, Response, Window, json_int, json_list, json_obj, json_str, json_strs, parse_duration,
+    JSON, Client, Evidence, ObsError, Response, Window, json_int, json_list, json_obj, json_str, json_strs, parse_duration,
 )
 from obs.metrics import STAT_LABEL, MetricResult, check_status, duration_literal, finite_value, parse_metric, tagged
 
@@ -381,8 +381,7 @@ def exemplars(client: Client, q: str, window: Window, k: int = DEFAULT_EXEMPLARS
     hits = json_list(check_json(t_resp.body, "traces").get("traces"))
     sample = parse_span_matches({"traces": hits[:limit]})
     value = exemplars_of(sample, thresholds_of(quantiles, sample, quantile), k, quantile, truncated=len(hits) > limit)
-    queries = [Query("metrics", mq, window), Query("traces", tq, window)]
-    return Evidence(backend="traces", query=tq, window=window, value=value, queries=queries), [m_resp, t_resp]
+    return Evidence(value=value), [m_resp, t_resp]
 
 
 # ── critical_path ───────────────────────────────────────────────────────────────
@@ -484,7 +483,7 @@ def critical_path(client: Client, trace_id: str, window: Window) -> tuple[Eviden
         raise ObsError("traceID 가 필요하다")
     trace, resp = _fetch_trace(client, trace_id)
     value = critical_path_of(trace)
-    return Evidence(backend="traces", query="critical_path(%s)" % trace_id, window=window, value=value), [resp]
+    return Evidence(value=value), [resp]
 
 
 # ── service_graph ───────────────────────────────────────────────────────────────
@@ -580,8 +579,7 @@ def service_graph(client: Client, window: Window, quantile: float = DEFAULT_QUAN
     e_res, e_resp = _instant(client, eq, window)
     s_res, s_resp = _instant(client, sq, window)
     value = service_graph_of(parse_edges(e_res), parse_quantiles(s_res), quantile, baseline_range)
-    queries = [Query("metrics", eq, window), Query("metrics", sq, window)]
-    return Evidence(backend="metrics", query=eq, window=window, value=value, queries=queries), [e_resp, s_resp]
+    return Evidence(value=value), [e_resp, s_resp]
 
 
 # ── diff ────────────────────────────────────────────────────────────────────────
@@ -653,6 +651,4 @@ def diff(client: Client, slow_id: str, normal_id: str, window: Window) -> tuple[
     slow, s_resp = _fetch_trace(client, slow_id)
     normal, n_resp = _fetch_trace(client, normal_id)
     value = diff_of(slow, normal)
-    main = "diff(%s, %s)" % (slow_id, normal_id)
-    queries = [Query("traces", main, window), Query("traces", "trace(%s)" % slow_id, window), Query("traces", "trace(%s)" % normal_id, window)]
-    return Evidence(backend="traces", query=main, window=window, value=value, queries=queries), [s_resp, n_resp]
+    return Evidence(value=value), [s_resp, n_resp]

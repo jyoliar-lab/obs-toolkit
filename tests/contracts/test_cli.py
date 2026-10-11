@@ -2,14 +2,15 @@
 from __future__ import annotations
 
 import json
+import urllib.parse
 from pathlib import Path
 from typing import Callable
 
 import pytest
 
 from obs.adapters import cli
-from obs.core import JSON, Client, Evidence, Query, Lines, Response, Window
-from tests.conftest import AT, MINUTE, ClientFactory, _no_physical, _vector
+from obs.core import JSON, Client, Evidence, Lines, Response, Window
+from tests.conftest import AT, HOUR, MINUTE, ClientFactory, RouteKey, _no_physical, _vector
 
 
 # ── 거부 · 오류 ──────────────────────────────────────────────────────────────────
@@ -33,7 +34,7 @@ def test_promql_backend_error_status(make_client: ClientFactory) -> None:
 def test_traceql_search_empty_hints_wider_window(make_client: ClientFactory) -> None:
     """search 결과가 비면 창을 넓히라는 힌트 한 줄을 낸다."""
     client, _ = make_client({("traces", "api/search"): (200, {"traces": []})})
-    ev, _, _ = cli.traceql_run(client, cli.TraceqlArgs(cmd="search"))
+    ev = cli.traceql_run(client, cli.TraceqlArgs(cmd="search"))[0]
     assert ev.value.lines == ["(결과 없음 — 트레이스는 드물다. 창을 넓혀 다시: --since 24h · 7d)"]
 
 
@@ -165,6 +166,10 @@ def test_parse_metric_broken_result_is_empty() -> None:
     assert cli.parse_metric({"data": {"resultType": "vector", "result": "garbage"}}).series == []
 
 
+class _Routed(Exception):
+    """*_run 대역이 받은 Args 를 기록한 뒤 던진다 — 라우팅 테스트는 출력(_finish)까지 가지 않는다."""
+
+
 @pytest.mark.parametrize("argv,expected", [
     (["histogram", '{a="b"}', "--by", "app", "--since", "2h"], {"cmd": "histogram", "selector": '{a="b"}', "by": "app", "since": "2h"}),
     (["first-seen", '{a="b"}', "<_> x", "--since", "2h"], {"cmd": "first-seen", "selector": '{a="b"}', "template": "<_> x", "since": "2h"}),
@@ -177,14 +182,15 @@ def test_logql_main_routes_subcommand_to_logs_run(argv: list[str], expected: dic
 
     def fake_run(client: Client, a: cli.LogsArgs, at: float | None = None) -> cli.RunResult:
         seen.append(a)
-        return Evidence(backend="logs", query=a.selector, window=Window(AT - MINUTE, AT), value=Lines(["x"])), [], "logql-histogram"
+        raise _Routed()
 
     client, _ = make_client()
     monkeypatch.setattr(cli, "logs_run", fake_run)
     monkeypatch.setattr(cli, "_client", lambda: client)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     # when
-    cli.logql_main(argv)
+    with pytest.raises(_Routed):
+        cli.logql_main(argv)
     # then
     assert len(seen) == 1
     for name, value in expected.items():
@@ -206,14 +212,15 @@ def test_traceql_main_routes_subcommand_to_traces_run(argv: list[str], expected:
 
     def fake_run(client: Client, a: cli.TracesArgs, at: float | None = None) -> cli.RunResult:
         seen.append(a)
-        return Evidence(backend="traces", query=a.cmd, window=Window(AT - MINUTE, AT), value=Lines(["x"])), [], "traceql-" + a.cmd
+        raise _Routed()
 
     client, _ = make_client()
     monkeypatch.setattr(cli, "traces_run", fake_run)
     monkeypatch.setattr(cli, "_client", lambda: client)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     # when
-    cli.traceql_main(argv)
+    with pytest.raises(_Routed):
+        cli.traceql_main(argv)
     # then
     assert len(seen) == 1
     assert seen[0] == expected
@@ -226,39 +233,89 @@ def test_traceql_main_still_routes_legacy_commands_to_traceql_run(monkeypatch: p
 
     def fake_run(client: Client, a: cli.TraceqlArgs, at: float | None = None) -> cli.RunResult:
         seen.append(a)
-        return Evidence(backend="traces", query="tags()", window=Window(AT - MINUTE, AT), value=Lines(["x"])), [], "traceql-tags"
+        raise _Routed()
 
     client, _ = make_client()
     monkeypatch.setattr(cli, "traceql_run", fake_run)
     monkeypatch.setattr(cli, "_client", lambda: client)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     # when
-    cli.traceql_main(["tags"])
+    with pytest.raises(_Routed):
+        cli.traceql_main(["tags"])
     # then
     assert [a.cmd for a in seen] == ["tags"]
 
 
-def test_evidence_preamble_lists_every_query_with_its_backend() -> None:
-    """queries 가 둘인 Evidence 의 summary.txt 머리에는 질의 줄이 둘이고 각각 `# 질의  <backend>  <query>` 꼴이다."""
+def test_window_preamble_has_window_line_only() -> None:
+    """기준선 없는 창의 머리는 창의 label · start · end 를 담은 `# 창` 줄 하나와 빈 줄이다 — `# 질의` · `# 기준선` 줄이 없다."""
     # given
     w = Window(AT - MINUTE, AT)
-    ev = Evidence(backend="traces", query="Q-traces", window=w, value=Lines(["x"]), queries=[Query("metrics", "Q-metrics", w), Query("traces", "Q-traces", w)])
     # when
-    lines = cli.evidence_preamble(ev)
-    query_lines = [line for line in lines if line.startswith("# 질의")]
+    lines = cli.window_preamble(w)
     # then
-    assert query_lines == ["# 질의  metrics  Q-metrics", "# 질의  traces  Q-traces"]
+    window_lines = [line for line in lines if line.startswith("# 창")]
+    assert len(window_lines) == 1
+    assert w.label() in window_lines[0]
+    assert "start=%.3f end=%.3f" % (w.start, w.end) in window_lines[0]
+    assert not [line for line in lines if line.startswith("# 질의")]
+    assert not [line for line in lines if line.startswith("# 기준선")]
+    assert lines[-1] == ""
 
 
-def test_evidence_preamble_without_extra_queries_is_unchanged() -> None:
-    """queries 가 비면 머리는 전과 같다 — `# 질의  <query>` 한 줄뿐이다."""
+def test_window_preamble_adds_baseline_line() -> None:
+    """기준선이 달린 창의 머리에는 `# 창` 바로 다음에 기준선 창의 label · start · end 를 담은 `# 기준선` 줄 하나가 있다."""
     # given
-    ev = Evidence(backend="metrics", query="up", window=Window(AT - MINUTE, AT), value=Lines(["x"]))
+    w = Window(AT - HOUR, AT).with_baseline("1d")
+    assert w.baseline is not None
+    b = w.baseline
     # when
-    lines = cli.evidence_preamble(ev)
+    lines = cli.window_preamble(w)
     # then
-    assert lines[0] == "# 질의  up"
-    assert sum(1 for line in lines if line.startswith("# 질의")) == 1
+    baseline_idx = [i for i, line in enumerate(lines) if line.startswith("# 기준선")]
+    assert len(baseline_idx) == 1
+    assert lines[baseline_idx[0] - 1].startswith("# 창")
+    assert b.label() in lines[baseline_idx[0]]
+    assert "start=%.3f end=%.3f" % (b.start, b.end) in lines[baseline_idx[0]]
+
+
+def _summary_text(root: Path) -> str:
+    """spill 디렉터리(<root>/tmp/obs) 안의 summary.txt 하나를 읽는다 — 호출이 하나뿐이어야 한다."""
+    found = sorted(root.glob("tmp/obs/*/summary.txt"))
+    assert len(found) == 1, "summary.txt 가 하나가 아니다: %r" % found
+    return found[0].read_text(encoding="utf-8")
+
+
+def test_finish_writes_window_preamble_then_lines(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """_finish 의 summary.txt 는 window_preamble(창) 뒤에 요약 줄이고, stdout 에는 요약 줄만 — `# ` 머리 줄이 없다."""
+    # given — 기준선이 달린 창 · 요약 줄 둘 · spill 은 tmp
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    w = Window(AT - HOUR, AT).with_baseline("1d")
+    ev = Evidence(value=Lines(["a 1", "b 2"]))
+    # when
+    cli._finish(ev, [], "k", w, 40, False)  # pyright: ignore[reportPrivateUsage]
+    # then
+    assert _summary_text(tmp_path).splitlines() == [*cli.window_preamble(w), "a 1", "b 2"]
+    out = capsys.readouterr().out.splitlines()
+    assert out[:2] == ["a 1", "b 2"]
+    assert not [line for line in out if line.startswith("# ")]
+
+
+def test_promql_main_summarize_writes_no_assembled_query(monkeypatch: pytest.MonkeyPatch, make_client: ClientFactory, tmp_path: Path,
+                                                         capsys: pytest.CaptureFixture[str]) -> None:
+    """promql.py summarize 의 stdout · summary.txt 어디에도 실제로 보낸 조립 질의가 없고, summary.txt 에는 `# 창` 줄이 있다."""
+    # given — 빈 응답 · spill 은 tmp
+    client, t = make_client({("metrics", "api/v1/query"): (200, _vector())})
+    monkeypatch.setattr(cli, "_client", lambda: client)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    # when
+    cli.promql_main(["summarize", "up", "--since", "1h"])
+    # then
+    sent = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(t.calls[0].url).query))["query"]
+    assert sent != "up"
+    summary = _summary_text(tmp_path)
+    assert [line for line in summary.splitlines() if line.startswith("# 창")]
+    assert sent not in summary
+    assert sent not in capsys.readouterr().out
 
 
 def test_promql_main_top_rejects_since() -> None:
@@ -280,10 +337,8 @@ SEARCH: dict[str, JSON] = {"traces": [{"traceID": "abc123", "rootServiceName": "
 def test_promql_range_window_and_auto_step(make_client: ClientFactory) -> None:
     """--range 는 창 길이를 계산하고 step 을 자동(range/60, 최소 15s)으로 붙여 query_range 를 부른다."""
     client, t = make_client({("metrics", "api/v1/query_range"): (200, EMPTY_MATRIX)})
-    ev, _, kind = cli.promql_run(client, cli.PromqlArgs(query="sum(up)", range_="30m"), at=AT)
+    kind = cli.promql_run(client, cli.PromqlArgs(query="sum(up)", range_="30m"), at=AT)[2]
     assert kind == "promql-range"
-    assert ev.window is not None
-    assert ev.window.seconds == 30 * MINUTE
     assert "step=30s" in t.calls[0].url
     assert "start=%s" % (AT - 30 * MINUTE) in t.calls[0].url
 
@@ -291,16 +346,51 @@ def test_promql_range_window_and_auto_step(make_client: ClientFactory) -> None:
 def test_logql_width_clips_log_body(make_client: ClientFactory) -> None:
     """--width 는 로그 본문을 지정 폭에서 자른다."""
     client, _ = make_client({("logs", "loki/api/v1/query_range"): (200, STREAMS)})
-    ev, _, _ = cli.logql_run(client, cli.LogqlArgs(query='{namespace="n"}', width=60), at=AT)
+    ev = cli.logql_run(client, cli.LogqlArgs(query='{namespace="n"}', width=60), at=AT)[0]
     assert all(len(l.split("  ", 2)[-1]) <= 60 for l in ev.value.lines[1:])
 
 
 def test_logql_common_labels_go_to_the_header(make_client: ClientFactory) -> None:
     """스트림 출력의 첫 줄은 공통 레이블이고 그 뒤가 로그 줄이다 — 줄 수는 값 수 + 1."""
     client, _ = make_client({("logs", "loki/api/v1/query_range"): (200, STREAMS)})
-    ev, _, _ = cli.logql_run(client, cli.LogqlArgs(query='{namespace="n"}'), at=AT)
+    ev = cli.logql_run(client, cli.LogqlArgs(query='{namespace="n"}'), at=AT)[0]
     assert ev.value.lines[0].startswith("공통 레이블 {")
     assert len(ev.value.lines) == 3
+
+
+EMPTY_STREAMS: dict[str, JSON] = {"status": "success", "data": {"resultType": "streams", "result": []}}
+EMPTY_PATTERNS: dict[str, JSON] = {"status": "success", "data": []}
+
+WINDOW_RUNS: list[tuple[str, Callable[[Client], cli.RunResult], dict[RouteKey, tuple[int, object]]]] = [
+    ("promql-range", lambda c: cli.promql_run(c, cli.PromqlArgs(query="up", range_="30m", end="-10m"), at=AT),
+     {("metrics", "api/v1/query_range"): (200, EMPTY_MATRIX)}),
+    ("logql", lambda c: cli.logql_run(c, cli.LogqlArgs(query='{a="b"}', since="30m", end="-10m"), at=AT),
+     {("logs", "loki/api/v1/query_range"): (200, EMPTY_STREAMS)}),
+    ("summarize", lambda c: cli.metrics_run(c, cli.MetricsArgs(cmd="summarize", query="up", since="30m", end="-10m"), at=AT),
+     {("metrics", "api/v1/query"): (200, _vector())}),
+    ("histogram", lambda c: cli.logs_run(c, cli.LogsArgs(cmd="histogram", selector='{a="b"}', since="30m", end="-10m"), at=AT),
+     {("logs", "loki/api/v1/query_range"): (200, EMPTY_MATRIX)}),
+    ("templates", lambda c: cli.logs_run(c, cli.LogsArgs(cmd="templates", selector='{a="b"}', since="30m", end="-10m"), at=AT),
+     {("logs", "loki/api/v1/patterns"): (200, EMPTY_PATTERNS)}),
+    ("first-seen", lambda c: cli.logs_run(c, cli.LogsArgs(cmd="first-seen", selector='{a="b"}', template="<_> x", since="30m", end="-10m"), at=AT),
+     {("logs", "loki/api/v1/query_range"): (200, EMPTY_STREAMS)}),
+    ("exemplars", lambda c: cli.traces_run(c, cli.TracesArgs(cmd="exemplars", since="30m", end="-10m"), at=AT),
+     {("metrics", "api/v1/query"): (200, _vector()), ("traces", "api/search"): (200, {"traces": []})}),
+    ("service-graph", lambda c: cli.traces_run(c, cli.TracesArgs(cmd="service-graph", since="30m", end="-10m"), at=AT),
+     {("metrics", "api/v1/query"): (200, _vector())}),
+]
+
+
+@pytest.mark.parametrize("run,routes", [(r, rt) for _, r, rt in WINDOW_RUNS], ids=[name for name, _, _ in WINDOW_RUNS])
+def test_run_window_is_cli_window(make_client: ClientFactory, run: Callable[[Client], cli.RunResult],
+                                  routes: dict[RouteKey, tuple[int, object]]) -> None:
+    """창 인자(--since · --range · --end)를 받는 명령의 RunResult 넷째 자리는 그 인자로 계산한 창이다 — 기준선이 없다."""
+    # given — 빈 응답
+    client, _ = make_client(routes)
+    # when
+    window = run(client)[3]
+    # then
+    assert window == Window.last("30m", "-10m", AT)
 
 
 def _lines_of(client: Client, backend: str) -> list[str]:
@@ -351,7 +441,7 @@ def test_single_call_run_raw_is_one_response(make_client: ClientFactory, run: Ca
     # given
     client, _ = make_client({(backend, path): (200, body)})
     # when
-    _, raw, _ = run(client)
+    raw = run(client)[1]
     # then
     assert isinstance(raw, list)
     assert len(raw) == 1

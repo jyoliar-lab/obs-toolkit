@@ -7,7 +7,7 @@ import pytest
 from obs import traces
 from obs.adapters import cli
 from obs.core import Window
-from tests.conftest import ReplayFactory, assert_snapshot, load_call, load_fixture_calls, window_of
+from tests.conftest import ReplayFactory, assert_snapshot, load_call, load_fixture_calls
 from tests.record import NO_SUCH_SERVICE
 
 
@@ -22,8 +22,9 @@ def test_exemplars_lines(replay: ReplayFactory, request: pytest.FixtureRequest) 
     # given
     client, t = replay("traceql-exemplars.json")
     # when
-    ev, _ = traces.exemplars(client, "", _day(t.at), k=3)
-    lines = cli.exemplars_lines(ev.value, window_of(ev))
+    w = _day(t.at)
+    ev, _ = traces.exemplars(client, "", w, k=3)
+    lines = cli.exemplars_lines(ev.value, w)
     v = ev.value
     # then
     assert len(lines) == 2 + 3 + len(v.slow.items) + len(v.error.items) + len(v.normal.items)
@@ -37,8 +38,9 @@ def test_exemplars_lines_empty(replay: ReplayFactory, request: pytest.FixtureReq
     # given
     client, t = replay("traceql-exemplars-empty.json")
     # when
-    ev, _ = traces.exemplars(client, NO_SUCH_SERVICE, _day(t.at), k=3)
-    lines = cli.exemplars_lines(ev.value, window_of(ev))
+    w = _day(t.at)
+    ev, _ = traces.exemplars(client, NO_SUCH_SERVICE, w, k=3)
+    lines = cli.exemplars_lines(ev.value, w)
     # then
     assert len(lines) == 1
     assert lines[0].startswith("(데이터 없음")
@@ -54,8 +56,9 @@ def test_critical_path_lines(replay: ReplayFactory, request: pytest.FixtureReque
     client, t = replay(("traceql-critical-path.json", "api/traces/"))
     trace_id = load_call(("traceql-critical-path.json", "api/traces/")).call.request.path.rsplit("/", 1)[1]
     # when
-    ev, _ = traces.critical_path(client, trace_id, Window.last("1h", at=t.at))
-    lines = cli.critical_path_lines(ev.value, window_of(ev))
+    w = Window.last("1h", at=t.at)
+    ev, _ = traces.critical_path(client, trace_id, w)
+    lines = cli.critical_path_lines(ev.value, w)
     v = ev.value
     # then
     assert len(lines) == 1 + len(v.path) + 1 + min(3, len(v.bottlenecks))
@@ -71,8 +74,9 @@ def test_service_graph_lines(replay: ReplayFactory, request: pytest.FixtureReque
     # given
     client, t = replay("traceql-service-graph.json")
     # when
-    ev, _ = traces.service_graph(client, _day(t.at))
-    lines = cli.service_graph_lines(ev.value, window_of(ev))
+    w = _day(t.at)
+    ev, _ = traces.service_graph(client, w)
+    lines = cli.service_graph_lines(ev.value, w)
     edges = ev.value.edges
     # then
     assert edges
@@ -87,8 +91,9 @@ def test_service_graph_lines_empty(replay: ReplayFactory, request: pytest.Fixtur
     # given
     client, t = replay("traceql-service-graph-empty.json")
     # when
-    ev, _ = traces.service_graph(client, Window.last("1h", end="-60d", at=t.at))
-    lines = cli.service_graph_lines(ev.value, window_of(ev))
+    w = Window.last("1h", end="-60d", at=t.at)
+    ev, _ = traces.service_graph(client, w)
+    lines = cli.service_graph_lines(ev.value, w)
     # then
     assert len(lines) == 1
     assert lines[0].startswith("(데이터 없음")
@@ -104,8 +109,9 @@ def test_diff_lines(replay: ReplayFactory, request: pytest.FixtureRequest) -> No
     client, t = replay("traceql-diff.json")
     slow_id, normal_id = [c.call.request.path.rsplit("/", 1)[1] for c in load_fixture_calls("traceql-diff.json")]
     # when
-    ev, _ = traces.diff(client, slow_id, normal_id, Window.last("1h", at=t.at))
-    lines = cli.diff_lines(ev.value, window_of(ev))
+    w = Window.last("1h", at=t.at)
+    ev, _ = traces.diff(client, slow_id, normal_id, w)
+    lines = cli.diff_lines(ev.value, w)
     # then
     assert len(lines) == 1 + len(ev.value.deltas)
     assert_snapshot(request, lines)
