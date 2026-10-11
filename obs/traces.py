@@ -384,7 +384,7 @@ class PathSpan:
     offset_ms: float                 # 루트 시작 기준 누적 오프셋
     duration_ms: float               # 부모 경계로 자른 뒤
     self_ms: float                   # exclusive time — 임계경로 위 자식에 귀속되지 않은 시간
-    clipped: bool                    # 부모 경계에서 잘렸다(fire-and-forget)
+    clipped_ms: float                # 부모 경계 밖으로 넘친 길이(0.0 = 잘리지 않음 · 원래 길이 = duration_ms + clipped_ms)
 
 
 @dataclass(frozen=True)
@@ -451,7 +451,7 @@ class _CrispWalk:
         self_ns += cursor - lo
         self.path.append(PathSpan(service=span.service, name=span.name, span_id=span.span_id, depth=depth,
                                   offset_ms=(lo - self.origin) / 1e6, duration_ms=(hi - lo) / 1e6, self_ms=self_ns / 1e6,
-                                  clipped=(lo, hi) != (span.start_ns, span.end_ns)))
+                                  clipped_ms=float((lo, hi) != (span.start_ns, span.end_ns))))
         for c_lo, c_hi, c in reversed(picked):
             self.visit(c, c_lo, c_hi, depth + 1)
 

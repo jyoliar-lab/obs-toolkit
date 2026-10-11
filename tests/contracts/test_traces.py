@@ -580,7 +580,7 @@ def test_critical_path_ignores_siblings_overlapping_the_last_finishing_child() -
 
 
 def test_critical_path_clips_fire_and_forget_child_at_parent_end() -> None:
-    """부모(0–800)보다 늦게 끝나는 자식(700–1200)은 부모 끝에서 잘려 길이 100 · clipped 이고 루트 self 는 700 이다."""
+    """부모(0–800)보다 늦게 끝나는 자식(700–1200)은 부모 끝에서 잘려 길이 100 · 넘친 길이 clipped_ms 400 이고 루트는 0 · self 700 이다."""
     # given
     spans = [_span("root", "r", start_ms=0, end_ms=800), _span("async", "a", parent="r", start_ms=700, end_ms=1200)]
     # when
@@ -588,8 +588,8 @@ def test_critical_path_clips_fire_and_forget_child_at_parent_end() -> None:
     # then
     assert _names(cp.path) == ["root", "async"]
     assert cp.path[1].duration_ms == pytest.approx(100.0)
-    assert cp.path[1].clipped is True
-    assert cp.path[0].clipped is False
+    assert cp.path[1].clipped_ms == pytest.approx(400.0)
+    assert cp.path[0].clipped_ms == 0.0
     assert cp.path[0].self_ms == pytest.approx(700.0)
 
 
@@ -625,13 +625,13 @@ def test_critical_path_of_empty_trace_has_no_path() -> None:
 
 
 def test_critical_path_of_single_span_is_itself() -> None:
-    """자식 없는 루트 하나면 경로는 그것뿐이고 self 가 길이와 같으며 roots 는 1 이다."""
+    """자식 없는 루트 하나면 경로는 그것뿐이고 self 가 길이와 같고 clipped_ms 는 0 이며 roots 는 1 이다."""
     # given · when
     cp = _cp([_span("root", "r", start_ms=0, end_ms=42)])
     # then
     assert _names(cp.path) == ["root"]
     assert cp.path[0].self_ms == pytest.approx(42.0)
-    assert cp.path[0].clipped is False
+    assert cp.path[0].clipped_ms == 0.0
     assert cp.roots == 1
 
 
@@ -985,8 +985,8 @@ def _exemplars(sample: int = 1, slow: list[Exemplar] | None = None, normal: list
                      normal=Bucket("normal", len(normal or []), normal or []))
 
 
-def _path_span(name: str = "x", clipped: bool = False, depth: int = 0) -> PathSpan:
-    return PathSpan(service="a", name=name, span_id=name, depth=depth, offset_ms=0.0, duration_ms=10.0, self_ms=5.0, clipped=clipped)
+def _path_span(name: str = "x", clipped_ms: float = 0.0, depth: int = 0) -> PathSpan:
+    return PathSpan(service="a", name=name, span_id=name, depth=depth, offset_ms=0.0, duration_ms=10.0, self_ms=5.0, clipped_ms=clipped_ms)
 
 
 def _critical(path: list[PathSpan], roots: int = 1) -> CriticalPath:
@@ -1053,14 +1053,15 @@ def test_exemplars_lines_summarize_sample_exceeded_and_expected_ratio(quantile: 
 
 
 def test_critical_path_lines_mark_clipped_spans() -> None:
-    """clipped 인 경로 span 의 줄에만 잘림 표시가 있다."""
+    """clipped_ms 가 0 보다 큰 경로 span 의 줄에만 잘림 표시가 있고 그 줄에 넘친 길이(+400.0ms)가 함께 있다."""
     # given
-    lines = cli.critical_path_lines(_critical([_path_span("root"), _path_span("async", clipped=True, depth=1)]), W)
+    lines = cli.critical_path_lines(_critical([_path_span("root"), _path_span("async", clipped_ms=400.0, depth=1)]), W)
     # when
     marked = [line for line in lines if "잘림" in line]
     # then
-    assert len(marked) >= 1
-    assert all("async" in line for line in marked)
+    assert len(marked) == 1
+    assert "async" in marked[0]
+    assert "+400.0ms" in marked[0]
     assert not any("잘림" in line and "root" in line for line in lines)
 
 
