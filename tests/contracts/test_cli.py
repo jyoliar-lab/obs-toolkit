@@ -9,7 +9,7 @@ from typing import Callable
 import pytest
 
 from obs.adapters import cli
-from obs.core import JSON, Client, Evidence, Lines, Response, Window
+from obs.core import JSON, BudgetExceeded, Client, Evidence, Lines, ObsError, Response, Window
 from tests.conftest import AT, HOUR, MINUTE, ClientFactory, RouteKey, _no_physical, _vector
 
 
@@ -31,10 +31,24 @@ def test_promql_backend_error_status(make_client: ClientFactory) -> None:
     assert str(ei.value).startswith("metrics 백엔드 질의 오류(bad_data): boom")
 
 
+def test_rejected_response_stays_in_log(make_client: ClientFactory) -> None:
+    """HTTP 200 인데 본문이 `status: error` 라 연산이 거부해도 그 응답은 client.log 에 남는다 — status 200 · body 가 그 거부된 본문."""
+    # given — 200 인데 status: error
+    body: dict[str, JSON] = {"status": "error", "errorType": "bad_data", "error": "boom"}
+    client, _ = make_client({("metrics", "api/v1/query"): (200, body)})
+    # when
+    with pytest.raises(cli.ObsError):
+        cli.promql_run(client, cli.PromqlArgs(query="up"))
+    # then
+    assert len(client.log) == 1
+    assert client.log[0].status == 200
+    assert client.log[0].body == body
+
+
 def test_traceql_search_empty_hints_wider_window(make_client: ClientFactory) -> None:
     """search 결과가 비면 창을 넓히라는 힌트 한 줄을 낸다."""
     client, _ = make_client({("traces", "api/search"): (200, {"traces": []})})
-    ev, _, _, _ = cli.traceql_run(client, cli.TraceqlArgs(cmd="search"))
+    ev, _, _ = cli.traceql_run(client, cli.TraceqlArgs(cmd="search"))
     assert ev.value.lines == ["(결과 없음 — 트레이스는 드물다. 창을 넓혀 다시: --since 24h · 7d)"]
 
 
@@ -83,19 +97,120 @@ def test_emit_always_writes_even_when_fits(tmp_path: Path) -> None:
     assert sorted(q.name for q in (tmp_path / res.ref).iterdir()) == ["raw.json", "summary.txt"]
 
 
-def test_emit_writes_responses_as_items_with_five_keys(tmp_path: Path) -> None:
-    """Response 목록은 raw.json 에 같은 순서의 목록으로 쓰이고 항목마다 backend · path · params · status · body 키가 있다 — params 가 비어도."""
-    # given — 하나는 파라미터 없이 보낸 호출
+def test_emit_writes_log_items_with_one_key_set(tmp_path: Path) -> None:
+    """log(성공 · 실패 섞임)는 raw.json 에 같은 순서의 목록으로 쓰이고 원소마다 키 집합이 backend · path · params · status · body · error · size · truncated 로 같다."""
+    # given — 성공 하나 · 전송 실패 하나
     env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
-    raw = [Response(backend="metrics", path="api/v1/query", status=200, body={"a": 1}, params={"query": "up"}),
-           Response(backend="traces", path="api/traces/abc", status=200, body={"b": 2})]
+    log = [Response(backend="metrics", path="api/v1/query", status=200, body={"a": 1}, params={"query": "up"}, size=8),
+           Response(backend="traces", path="api/search", status=None, body=None, error="traces 백엔드에 닿지 못했다")]
     # when
-    res = cli.emit(["x"], raw, "k", max_lines=3, env=env, out=lambda _: None)
+    res = cli.emit(["x"], log, "k", max_lines=3, env=env, out=lambda _: None)
     # then
     items = json.loads((tmp_path / res.ref / "raw.json").read_text())
-    assert [(i["backend"], i["path"]) for i in items] == [(r.backend, r.path) for r in raw]
+    assert [(i["backend"], i["path"]) for i in items] == [(r.backend, r.path) for r in log]
     for item in items:
-        assert set(item) == {"backend", "path", "params", "status", "body"}
+        assert set(item) == {"backend", "path", "params", "status", "body", "error", "size", "truncated"}
+
+
+# ── finish — 성공은 emit, 실패도 호출 디렉터리 ───────────────────────────────────
+
+FINISH_ROUTES: dict[RouteKey, tuple[int, object]] = {("metrics", "api/v1/labels"): (200, {"data": []}), ("metrics", "api/v1/series"): (200, {"data": []})}
+
+
+def _run_after(client: Client, calls: int, raise_: BaseException | None = None) -> Callable[[], cli.RunResult]:
+    """호출 calls 개(labels · series 순)를 보낸 뒤 raise_ 를 올리거나 요약 하나를 돌려주는 run 대역."""
+    def run() -> cli.RunResult:
+        for path in ("api/v1/labels", "api/v1/series")[:calls]:
+            client.get("metrics", path)
+        if raise_ is not None:
+            raise raise_
+        return Evidence(value=Lines(["x"])), "k", Window(AT - MINUTE, AT)
+    return run
+
+
+def _only_dir(root: Path) -> Path:
+    """<root>/tmp/obs 의 호출 디렉터리 하나."""
+    dirs = sorted((root / "tmp" / "obs").iterdir())
+    assert len(dirs) == 1, "호출 디렉터리가 하나가 아니다: %r" % dirs
+    return dirs[0]
+
+
+def test_finish_writes_log_as_raw_json(make_client: ClientFactory, tmp_path: Path) -> None:
+    """성공하면 raw.json 의 원소 수가 client.log 와 같고, 디렉터리 이름은 run 의 kind 이며(-failed 아님), out 의 마지막 줄이 그 경로다."""
+    # given — 호출 둘을 보내고 성공하는 run
+    env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+    client, _ = make_client(FINISH_ROUTES)
+    out: list[str] = []
+    # when
+    cli.finish(client, _run_after(client, 2), "k-failed", 40, False, env=env, out=out.append)
+    # then
+    assert len(client.log) == 2
+    d = _only_dir(tmp_path)
+    assert d.name.endswith("-k")
+    assert len(json.loads((d / "raw.json").read_text())) == 2
+    assert d.name in out[-1]
+
+
+def test_finish_names_call_directory_in_obs_error(make_client: ClientFactory, tmp_path: Path) -> None:
+    """run 이 ObsError(하위 종류 포함)를 올리면 같은 종류로 다시 올라오고 — 문구가 원래 문구로 시작하며 끝에 -failed 디렉터리 경로와 raw.json 을 말한다."""
+    # given — 호출 둘 뒤 BudgetExceeded
+    env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+    client, _ = make_client(FINISH_ROUTES)
+    # when
+    with pytest.raises(BudgetExceeded) as ei:
+        cli.finish(client, _run_after(client, 2, BudgetExceeded("예산 초과 — 질의 20회 상한")), "promql-failed", 40, False, env=env, out=lambda _: None)
+    # then
+    msg = str(ei.value)
+    assert msg.startswith("예산 초과 — 질의 20회 상한")
+    d = _only_dir(tmp_path)
+    assert d.name.endswith("-promql-failed")
+    assert d.name in msg
+    assert "raw.json" in msg
+
+
+def test_finish_spills_log_on_obs_error(make_client: ClientFactory, tmp_path: Path) -> None:
+    """run 이 ObsError 를 올리면 그 디렉터리의 raw.json 은 client.log 전부(원소 2) · summary.txt 는 원래 오류 문구이고 out 으로는 아무것도 찍지 않는다."""
+    # given — 호출 둘 뒤 ObsError
+    env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+    client, _ = make_client(FINISH_ROUTES)
+    out: list[str] = []
+    # when
+    with pytest.raises(ObsError):
+        cli.finish(client, _run_after(client, 2, ObsError("metrics 백엔드가 질의를 거부했다(400)")), "promql-failed", 40, False, env=env, out=out.append)
+    # then
+    d = _only_dir(tmp_path)
+    assert len(json.loads((d / "raw.json").read_text())) == 2
+    assert "metrics 백엔드가 질의를 거부했다(400)" in (d / "summary.txt").read_text()
+    assert out == []
+
+
+def test_finish_spills_log_and_reraises_other_exceptions(make_client: ClientFactory, tmp_path: Path) -> None:
+    """run 이 ObsError 가 아닌 예외(버그)를 올리면 그대로 올라오고, err 로 -failed 경로 한 줄을 찍으며, 디렉터리의 raw.json 에 보낸 호출(원소 1)이 있다."""
+    # given — 호출 하나 뒤 ValueError
+    env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+    client, _ = make_client(FINISH_ROUTES)
+    err: list[str] = []
+    # when
+    with pytest.raises(ValueError):
+        cli.finish(client, _run_after(client, 1, ValueError("bug")), "logql-failed", 40, False, env=env, out=lambda _: None, err=err.append)
+    # then
+    d = _only_dir(tmp_path)
+    assert len(err) == 1
+    assert d.name in err[0]
+    assert len(json.loads((d / "raw.json").read_text())) == 1
+
+
+def test_finish_without_sent_calls_leaves_no_directory(make_client: ClientFactory, tmp_path: Path) -> None:
+    """보낸 호출이 없는 실패(보내기 전 거부)는 디렉터리를 만들지 않고 ObsError 문구가 그대로다 — 경로가 붙지 않는다."""
+    # given — 호출 없이 ObsError
+    env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+    client, _ = make_client()
+    # when
+    with pytest.raises(ObsError) as ei:
+        cli.finish(client, _run_after(client, 0, ObsError("PromQL 이 필요하다")), "promql-failed", 40, False, env=env, out=lambda _: None)
+    # then
+    assert str(ei.value) == "PromQL 이 필요하다"
+    assert not (tmp_path / "tmp" / "obs").exists()
 
 
 # ── 인터페이스 — 물리 인자가 없다 ────────────────────────────────────────────────
@@ -178,7 +293,7 @@ def test_logql_main_routes_subcommand_to_logs_run(argv: list[str], expected: dic
 
     def fake_run(client: Client, a: cli.LogsArgs, at: float | None = None) -> cli.RunResult:
         seen.append(a)
-        return Evidence(value=Lines(["x"])), [], "logql-histogram", Window(AT - MINUTE, AT)
+        return Evidence(value=Lines(["x"])), "logql-histogram", Window(AT - MINUTE, AT)
 
     client, _ = make_client()
     monkeypatch.setattr(cli, "logs_run", fake_run)
@@ -207,7 +322,7 @@ def test_traceql_main_routes_subcommand_to_traces_run(argv: list[str], expected:
 
     def fake_run(client: Client, a: cli.TracesArgs, at: float | None = None) -> cli.RunResult:
         seen.append(a)
-        return Evidence(value=Lines(["x"])), [], "traceql-" + a.cmd, Window(AT - MINUTE, AT)
+        return Evidence(value=Lines(["x"])), "traceql-" + a.cmd, Window(AT - MINUTE, AT)
 
     client, _ = make_client()
     monkeypatch.setattr(cli, "traces_run", fake_run)
@@ -227,7 +342,7 @@ def test_traceql_main_still_routes_legacy_commands_to_traceql_run(monkeypatch: p
 
     def fake_run(client: Client, a: cli.TraceqlArgs, at: float | None = None) -> cli.RunResult:
         seen.append(a)
-        return Evidence(value=Lines(["x"])), [], "traceql-tags", Window(AT - MINUTE, AT)
+        return Evidence(value=Lines(["x"])), "traceql-tags", Window(AT - MINUTE, AT)
 
     client, _ = make_client()
     monkeypatch.setattr(cli, "traceql_run", fake_run)
@@ -331,7 +446,7 @@ SEARCH: dict[str, JSON] = {"traces": [{"traceID": "abc123", "rootServiceName": "
 def test_promql_range_window_and_auto_step(make_client: ClientFactory) -> None:
     """--range 는 창 길이를 계산하고 step 을 자동(range/60, 최소 15s)으로 붙여 query_range 를 부른다."""
     client, t = make_client({("metrics", "api/v1/query_range"): (200, EMPTY_MATRIX)})
-    _, _, kind, _ = cli.promql_run(client, cli.PromqlArgs(query="sum(up)", range_="30m"), at=AT)
+    _, kind, _ = cli.promql_run(client, cli.PromqlArgs(query="sum(up)", range_="30m"), at=AT)
     assert kind == "promql-range"
     assert "step=30s" in t.calls[0].url
     assert "start=%s" % (AT - 30 * MINUTE) in t.calls[0].url
@@ -340,14 +455,14 @@ def test_promql_range_window_and_auto_step(make_client: ClientFactory) -> None:
 def test_logql_width_clips_log_body(make_client: ClientFactory) -> None:
     """--width 는 로그 본문을 지정 폭에서 자른다."""
     client, _ = make_client({("logs", "loki/api/v1/query_range"): (200, STREAMS)})
-    ev, _, _, _ = cli.logql_run(client, cli.LogqlArgs(query='{namespace="n"}', width=60), at=AT)
+    ev, _, _ = cli.logql_run(client, cli.LogqlArgs(query='{namespace="n"}', width=60), at=AT)
     assert all(len(l.split("  ", 2)[-1]) <= 60 for l in ev.value.lines[1:])
 
 
 def test_logql_common_labels_go_to_the_header(make_client: ClientFactory) -> None:
     """스트림 출력의 첫 줄은 공통 레이블이고 그 뒤가 로그 줄이다 — 줄 수는 값 수 + 1."""
     client, _ = make_client({("logs", "loki/api/v1/query_range"): (200, STREAMS)})
-    ev, _, _, _ = cli.logql_run(client, cli.LogqlArgs(query='{namespace="n"}'), at=AT)
+    ev, _, _ = cli.logql_run(client, cli.LogqlArgs(query='{namespace="n"}'), at=AT)
     assert ev.value.lines[0].startswith("공통 레이블 {")
     assert len(ev.value.lines) == 3
 
@@ -378,11 +493,11 @@ WINDOW_RUNS: list[tuple[str, Callable[[Client], cli.RunResult], dict[RouteKey, t
 @pytest.mark.parametrize("run,routes", [(r, rt) for _, r, rt in WINDOW_RUNS], ids=[name for name, _, _ in WINDOW_RUNS])
 def test_run_window_is_cli_window(make_client: ClientFactory, run: Callable[[Client], cli.RunResult],
                                   routes: dict[RouteKey, tuple[int, object]]) -> None:
-    """창 인자(--since · --range · --end)를 받는 명령의 RunResult 넷째 자리는 그 인자로 계산한 창이다 — 기준선이 없다."""
+    """창 인자(--since · --range · --end)를 받는 명령의 RunResult 셋째 자리는 그 인자로 계산한 창이다 — 기준선이 없다."""
     # given — 빈 응답
     client, _ = make_client(routes)
     # when
-    _, _, _, window = run(client)
+    _, _, window = run(client)
     # then
     assert window == Window.last("30m", "-10m", AT)
 
@@ -403,45 +518,6 @@ def test_run_outputs_carry_no_physical(make_client: ClientFactory, backend: str)
     client, _ = make_client({("metrics", "api/v1/query"): (200, _vector(({"__name__": "up", "job": "j"}, "1"))),
                              ("logs", "loki/api/v1/query_range"): (200, STREAMS), ("traces", "api/search"): (200, SEARCH)})
     _no_physical("\n".join(_lines_of(client, backend)))
-
-
-# ── 원본 — 단일 호출 분기마다 Response 하나 ───────────────────────────────────────
-
-STRINGS: dict[str, JSON] = {"status": "success", "data": ["a"]}
-LABEL_SETS: dict[str, JSON] = {"status": "success", "data": [{"a": "b"}]}
-
-RUN_BRANCHES: list[tuple[str, Callable[[Client], cli.RunResult], str, str, dict[str, JSON]]] = [
-    ("promql-labels", lambda c: cli.promql_run(c, cli.PromqlArgs(labels=True), at=AT), "metrics", "api/v1/labels", STRINGS),
-    ("promql-label-values", lambda c: cli.promql_run(c, cli.PromqlArgs(label_values="job"), at=AT), "metrics", "api/v1/label/job/values", STRINGS),
-    ("promql-series", lambda c: cli.promql_run(c, cli.PromqlArgs(series='{a="b"}'), at=AT), "metrics", "api/v1/series", LABEL_SETS),
-    ("promql-range", lambda c: cli.promql_run(c, cli.PromqlArgs(query="up", range_="1h"), at=AT), "metrics", "api/v1/query_range", EMPTY_MATRIX),
-    ("promql-instant", lambda c: cli.promql_run(c, cli.PromqlArgs(query="up"), at=AT), "metrics", "api/v1/query", _vector(({"job": "j"}, "1"))),
-    ("logql-labels", lambda c: cli.logql_run(c, cli.LogqlArgs(labels=True), at=AT), "logs", "loki/api/v1/labels", STRINGS),
-    ("logql-label-values", lambda c: cli.logql_run(c, cli.LogqlArgs(label_values="app"), at=AT), "logs", "loki/api/v1/label/app/values", STRINGS),
-    ("logql-series", lambda c: cli.logql_run(c, cli.LogqlArgs(series='{a="b"}'), at=AT), "logs", "loki/api/v1/series", LABEL_SETS),
-    ("logql-query", lambda c: cli.logql_run(c, cli.LogqlArgs(query='{namespace="n"}'), at=AT), "logs", "loki/api/v1/query_range", STREAMS),
-    ("traceql-search", lambda c: cli.traceql_run(c, cli.TraceqlArgs(cmd="search"), at=AT), "traces", "api/search", SEARCH),
-    ("traceql-trace", lambda c: cli.traceql_run(c, cli.TraceqlArgs(cmd="trace", arg="abc123"), at=AT), "traces", "api/traces/abc123", {"batches": []}),
-    ("traceql-tags", lambda c: cli.traceql_run(c, cli.TraceqlArgs(cmd="tags"), at=AT), "traces", "api/v2/search/tags", {"scopes": []}),
-    ("traceql-tag-values", lambda c: cli.traceql_run(c, cli.TraceqlArgs(cmd="tag-values", arg="service.name"), at=AT), "traces",
-     "api/v2/search/tag/service.name/values", {"tagValues": []}),
-]
-
-
-@pytest.mark.parametrize("run,backend,path,body", [b[1:] for b in RUN_BRANCHES], ids=[b[0] for b in RUN_BRANCHES])
-def test_single_call_run_raw_is_one_response(make_client: ClientFactory, run: Callable[[Client], cli.RunResult], backend: str, path: str,
-                                             body: dict[str, JSON]) -> None:
-    """단일 호출 분기의 원본은 그 호출 하나의 Response 를 담은 길이 1 목록이다 — 그 분기의 경로와 받은 응답이 실린다."""
-    # given
-    client, _ = make_client({(backend, path): (200, body)})
-    # when
-    _, raw, _, _ = run(client)
-    # then
-    assert isinstance(raw, list)
-    assert len(raw) == 1
-    assert isinstance(raw[0], Response)
-    assert raw[0].path == path
-    assert raw[0].body == body
 
 
 # ── 값의 표기 — fmt_val · fmt_signed 의 경계 ─────────────────────────────────────

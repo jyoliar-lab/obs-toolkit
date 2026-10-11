@@ -95,7 +95,7 @@ def histogram_query(selector: str, by: Sequence[str], step: str) -> str:
 
 
 def histogram(client: Client, selector: str, window: Window, by: Sequence[str] = ("detected_level",),
-              step: str | None = None, max_groups: int = DEFAULT_MAX_GROUPS) -> tuple[Evidence[Histogram], list[Response]]:
+              step: str | None = None, max_groups: int = DEFAULT_MAX_GROUPS) -> Evidence[Histogram]:
     """by 값별 · 구간별 건수 표 — `count_over_time` matrix 를 query_range 한 번으로 받아 편다. 행은 total 내림차순, max_groups 까지."""
     if not selector.strip():
         raise ObsError("LogQL selector 가 필요하다")
@@ -115,7 +115,7 @@ def histogram(client: Client, selector: str, window: Window, by: Sequence[str] =
     groups.sort(key=lambda g: -g.total)
     value = Histogram(by=[a.strip() for a in by if a.strip()], step=step, times=times, groups=groups[:max_groups],
                       folded=max(0, len(groups) - max_groups))
-    return Evidence(value=value), [resp]
+    return Evidence(value=value)
 
 
 # ── templates ────────────────────────────────────────────────────────────────────
@@ -208,7 +208,7 @@ def _first_line(client: Client, query: str, window: Window) -> tuple[LogEntry | 
 
 
 def templates(client: Client, selector: str, window: Window, k: int = DEFAULT_TEMPLATES_K,
-              step: str | None = None) -> tuple[Evidence[Templates], list[Response]]:
+              step: str | None = None) -> Evidence[Templates]:
     """창 안의 로그 군집 상위 k — Patterns API 한 번 + 남긴 군집마다 예시 한 줄(pattern_filter · forward · limit 1)."""
     if not selector.strip():
         raise ObsError("LogQL selector 가 필요하다")
@@ -225,12 +225,10 @@ def templates(client: Client, selector: str, window: Window, k: int = DEFAULT_TE
     body = check_status(patterns_resp.body, "logs")
     t = clusters_of(parse_patterns(body), k, step)
     clusters: list[Template] = []
-    raw: list[Response] = [patterns_resp]
     for c in t.clusters:
-        first, example_resp = _first_line(client, pattern_filter(selector, c.template), window)
+        first, _ = _first_line(client, pattern_filter(selector, c.template), window)
         clusters.append(replace(c, example=first.line if first else None))
-        raw.append(example_resp)
-    return Evidence(value=replace(t, clusters=clusters)), raw
+    return Evidence(value=replace(t, clusters=clusters))
 
 
 # ── around ───────────────────────────────────────────────────────────────────────
@@ -277,7 +275,7 @@ def _side(client: Client, selector: str, start: float, end: float, direction: st
     return kept, Side(shown=len(kept), truncated=len(entries) > limit), resp
 
 
-def around(client: Client, selector: str, ts: float, span: float, limit: int = DEFAULT_AROUND_LIMIT) -> tuple[Evidence[Context], list[Response]]:
+def around(client: Client, selector: str, ts: float, span: float, limit: int = DEFAULT_AROUND_LIMIT) -> Evidence[Context]:
     """ts 앞뒤 span 의 문맥 — 창 전체 건수(count 질의) + 앞(backward [ts−span, ts)) · 뒤(forward [ts, ts+span)) 각 limit 줄."""
     if not selector.strip():
         raise ObsError("LogQL selector 가 필요하다")
@@ -288,11 +286,11 @@ def around(client: Client, selector: str, ts: float, span: float, limit: int = D
     count_resp = client.get("logs", "loki/api/v1/query", {"query": count_query(selector, 2 * span), "time": int((ts + span) * 1e9)})
     count_body = check_status(count_resp.body, "logs")
     total = sum(json_int(v) for s in parse_metric(count_body).series for _, v in s.values)
-    before, before_side, before_resp = _side(client, selector, ts - span, ts, "backward", limit)
-    after, after_side, after_resp = _side(client, selector, ts, ts + span, "forward", limit)
+    before, before_side, _ = _side(client, selector, ts - span, ts, "backward", limit)
+    after, after_side, _ = _side(client, selector, ts, ts + span, "forward", limit)
     entries = sorted([*before, *after], key=lambda e: e.ts_ns)
     value = Context(center=ts, span=span, limit=limit, total=total, before=before_side, after=after_side, entries=entries)
-    return Evidence(value=value), [count_resp, before_resp, after_resp]
+    return Evidence(value=value)
 
 
 # ── first_seen ───────────────────────────────────────────────────────────────────
@@ -304,11 +302,11 @@ class FirstSeen:
     line: str | None
 
 
-def first_seen(client: Client, selector: str, template: str, window: Window) -> tuple[Evidence[FirstSeen], list[Response]]:
+def first_seen(client: Client, selector: str, template: str, window: Window) -> Evidence[FirstSeen]:
     """템플릿(패턴)에 걸리는 창 안의 첫 줄 — pattern_filter 질의를 forward · limit 1 로 한 번. 없으면 ts · line 이 None."""
     if not selector.strip():
         raise ObsError("LogQL selector 가 필요하다")
     q = pattern_filter(selector, template)
-    first, resp = _first_line(client, q, window)
+    first, _ = _first_line(client, q, window)
     value = FirstSeen(template=template, ts=first.ts_ns / 1e9 if first else None, line=first.line if first else None)
-    return Evidence(value=value), [resp]
+    return Evidence(value=value)

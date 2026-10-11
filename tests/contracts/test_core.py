@@ -17,7 +17,7 @@ from typing import Callable, Iterator
 import pytest
 
 from obs.core import (
-    Budget, Config, Lines, BudgetExceeded, Client, Evidence, ObsError, Response, Window, doctor, fmt_rfc3339,
+    JSON, SPILL_HEAD_CHARS, Budget, Config, Lines, BudgetExceeded, Client, Evidence, ObsError, Response, Window, doctor, fmt_rfc3339,
     http_error_message, load_config, parse_duration, parse_time, prune, spill, spill_ref, spill_root, to_dict, to_json,
 )
 from tests.conftest import AT, DAY, HOUR, MINUTE, PHYSICAL, WEEK, ClientFactory, FakeTransport, RouteKey
@@ -311,6 +311,150 @@ def test_error_messages_never_carry_token(make_client: ClientFactory) -> None:
     with pytest.raises(ObsError) as ei:
         client.get("metrics", "api/v1/query")
     assert "test-token-not-real" not in str(ei.value)
+
+
+# ── Client.log — 전송을 시도한 호출의 기록 ─────────────────────────────────────────
+
+def test_get_logs_each_sent_call(make_client: ClientFactory) -> None:
+    """전송된 호출은 log 에 하나로 남는다 — 돌려준 Response 와 같은 것이고, error 없음 · size 는 받은 본문 바이트 수 · truncated 아님."""
+    # given — None · "" 가 섞인 파라미터 · 200 응답
+    body: dict[str, JSON] = {"status": "success"}
+    client, _ = make_client({("metrics", "api/v1/query"): (200, body)})
+    # when
+    r = client.get("metrics", "api/v1/query", {"query": "up", "time": 1.5, "empty": "", "none": None})
+    # then
+    assert len(client.log) == 1
+    logged = client.log[0]
+    assert logged == r
+    assert (logged.backend, logged.path) == ("metrics", "api/v1/query")
+    assert logged.params == {"query": "up", "time": 1.5}
+    assert logged.status == 200
+    assert logged.body == body
+    assert logged.error is None
+    assert logged.size == len(json.dumps(body).encode("utf-8"))
+    assert logged.truncated is False
+
+
+@pytest.mark.parametrize("backend,max_queries", [("prometheus", 2), ("metrics", 1)], ids=["unknown-backend", "query-budget"])
+def test_rejected_before_send_is_not_logged(make_client: ClientFactory, backend: str, max_queries: int) -> None:
+    """보내기 전에 거부된 호출(모르는 backend · 질의 횟수 예산 초과)은 log 에 없다 — 길이가 호출 전과 같다."""
+    # given — 성공 호출 하나가 쌓인 Client (예산은 그 하나 뒤에 남거나 소진된다)
+    client, _ = make_client({("metrics", "api/v1/query"): (200, {"status": "success"})})
+    client.budget = Budget(max_queries=max_queries)
+    client.get("metrics", "api/v1/query")
+    assert len(client.log) == 1
+    # when
+    with pytest.raises(ObsError):
+        client.get(backend, "api/v1/query")
+    # then
+    assert len(client.log) == 1
+
+
+def test_over_budget_response_is_logged_as_size_and_head(make_client: ClientFactory) -> None:
+    """응답 총량 상한을 넘긴 응답은 BudgetExceeded 와 별개로 log 에 남되, 본문 전체가 아니라 크기와 앞부분(SPILL_HEAD_CHARS 이하)만 — truncated 다."""
+    # given — 상한(150 bytes)보다 크고 앞부분 길이보다도 큰 200 본문
+    body: dict[str, JSON] = {"pad": "x" * (2 * SPILL_HEAD_CHARS)}
+    full = json.dumps(body)
+    client, _ = make_client({("metrics", "api/v1/query"): (200, body)})
+    client.budget = Budget(max_response_bytes=150)
+    # when
+    with pytest.raises(BudgetExceeded):
+        client.get("metrics", "api/v1/query")
+    # then
+    assert len(client.log) == 1
+    logged = client.log[0]
+    assert logged.status == 200
+    assert logged.size == len(full.encode("utf-8"))
+    assert logged.truncated is True
+    assert isinstance(logged.body, str)
+    assert len(logged.body) <= SPILL_HEAD_CHARS
+    assert full.startswith(logged.body)
+    assert logged.body != full
+
+
+@pytest.mark.parametrize("status", [400, 500])
+def test_http_error_response_is_logged_with_full_body(make_client: ClientFactory, status: int) -> None:
+    """HTTP 400 이상은 ObsError 와 별개로 log 에 남고, status 가 그 상태 · body 가 파싱된 본문 전체(오류 문구의 300자 절단과 무관) · error 없음이다."""
+    # given — message 가 300자를 넘는 오류 본문
+    body: dict[str, JSON] = {"status": "error", "error": "e" * 400}
+    client, _ = make_client({("metrics", "api/v1/query"): (status, body)})
+    # when
+    with pytest.raises(ObsError):
+        client.get("metrics", "api/v1/query", {"query": "up}"})
+    # then
+    assert len(client.log) == 1
+    logged = client.log[0]
+    assert logged.status == status
+    assert logged.body == body
+    assert logged.error is None
+    assert logged.truncated is False
+
+
+def test_transport_failure_is_logged_with_error_message(make_client: ClientFactory) -> None:
+    """전송 실패는 ObsError 와 별개로 log 에 남고 — 요청(backend · path · params)은 그대로, status · body · size 는 None, error 가 올라온 ObsError 의 문구다."""
+    # given
+    client, _ = make_client(fail="[Errno 8] nodename nor servname provided")
+    # when
+    with pytest.raises(ObsError) as ei:
+        client.get("traces", "api/search", {"q": "{}", "limit": 5})
+    # then
+    assert len(client.log) == 1
+    logged = client.log[0]
+    assert (logged.backend, logged.path) == ("traces", "api/search")
+    assert logged.params == {"q": "{}", "limit": 5}
+    assert logged.status is None
+    assert logged.body is None
+    assert logged.size is None
+    assert logged.error == str(ei.value)
+
+
+def test_read_timeout_is_logged_with_error_message(make_client: ClientFactory) -> None:
+    """읽기 시간 초과도 log 에 남고 — status 는 None, error 가 "답하지 않았다" 를 말한다."""
+    # given
+    client, _ = make_client(hang=True)
+    # when
+    with pytest.raises(ObsError):
+        client.get("logs", "loki/api/v1/query_range")
+    # then
+    assert len(client.log) == 1
+    logged = client.log[0]
+    assert logged.status is None
+    assert logged.error is not None
+    assert "답하지 않았다" in logged.error
+
+
+def test_log_keeps_successes_before_a_failure(make_client: ClientFactory) -> None:
+    """앞 두 호출이 성공하고 셋째가 500 이면 log 는 셋 — 앞 둘은 200 · 셋째는 500 이고 호출 순서 그대로다."""
+    # given — 경로 셋: 둘은 200 · 셋째는 500
+    client, _ = make_client({("metrics", "api/v1/labels"): (200, {"data": []}), ("metrics", "api/v1/series"): (200, {"data": []}),
+                             ("metrics", "api/v1/query"): (500, {"error": "boom"})})
+    # when
+    client.get("metrics", "api/v1/labels")
+    client.get("metrics", "api/v1/series")
+    with pytest.raises(ObsError):
+        client.get("metrics", "api/v1/query")
+    # then
+    assert [r.path for r in client.log] == ["api/v1/labels", "api/v1/series", "api/v1/query"]
+    assert [r.status for r in client.log] == [200, 200, 500]
+
+
+def test_log_carries_no_physical_or_token(make_client: ClientFactory) -> None:
+    """성공과 전송 실패가 쌓인 log 를 직렬화해도 논리 이름 · 네이티브 경로만 있고 물리 문자열 · 토큰 · URL 이 없다."""
+    # given — 성공 하나(파라미터 있음) 뒤 전송 실패 하나(문구는 transport 가 호스트를 이미 지운 꼴)
+    client, t = make_client({("metrics", "api/v1/query"): (200, {"status": "success"})})
+    client.get("metrics", "api/v1/query", {"query": "up"})
+    t.fail = "connection refused"
+    with pytest.raises(ObsError):
+        client.get("logs", "loki/api/v1/labels")
+    # when
+    text = to_json(client.log)
+    # then
+    assert '"api/v1/query"' in text
+    assert '"loki/api/v1/labels"' in text
+    for word in PHYSICAL:
+        assert word not in text, word
+    assert "test-token-not-real" not in text
+    assert "https://" not in text
 
 
 # ── 실제 transport — 로컬 HTTP 서버로 프록시 행위를 본다 ─────────────────────────

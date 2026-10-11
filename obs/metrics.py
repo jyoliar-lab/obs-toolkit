@@ -311,16 +311,16 @@ def _instant(client: Client, query: str, at: float) -> tuple[dict[str, JSON], Re
     return check_status(resp.body, "metrics"), resp
 
 
-def summarize(client: Client, query: str, window: Window, step: str | None = None) -> tuple[Evidence[Summary], list[Response]]:
+def summarize(client: Client, query: str, window: Window, step: str | None = None) -> Evidence[Summary]:
     """창 안의 시계열별 n · min · p50 · p95 · max · last · 기울기 — 전부 서버가 서브쿼리 위에서 계산한다. GET 1 회.
     보낸 조립 질의는 원본(Response.params)에 있다."""
     if not query.strip():
         raise ObsError("PromQL 이 필요하다")
     step = step or auto_step(window.seconds)
     q = summarize_query(query, window, step)
-    body, resp = _instant(client, q, window.end)
+    body, _ = _instant(client, q, window.end)
     value = Summary(step=step, series=summaries_of(parse_metric(body)))
-    return Evidence(value=value), [resp]
+    return Evidence(value=value)
 
 
 def baseline_offset(window: Window) -> tuple[Window, str]:
@@ -335,7 +335,7 @@ def baseline_offset(window: Window) -> tuple[Window, str]:
     return w, duration_literal(w.end - base.end)
 
 
-def compare(client: Client, query: str, window: Window, step: str | None = None) -> tuple[Evidence[Comparison], list[Response]]:
+def compare(client: Client, query: str, window: Window, step: str | None = None) -> Evidence[Comparison]:
     """같은 질의의 p95 를 지금 창과 기준선 창(같은 식의 `offset`)에서 한 질의로 받아 시계열별 차이만. GET 1 회.
     기준선 시계열이 부재면 "기준선 없음" — 서버 응답만으로 선다."""
     if not query.strip():
@@ -343,24 +343,24 @@ def compare(client: Client, query: str, window: Window, step: str | None = None)
     w, offset = baseline_offset(window)
     step = step or auto_step(w.seconds)
     q = compare_query(query, w, step, offset)
-    body, resp = _instant(client, q, w.end)
+    body, _ = _instant(client, q, w.end)
     stats = split_stats(parse_metric(body))
     value = Comparison(
         step=step, offset=offset, deltas=deltas_of(parse_metric(body)),
         now_empty=not any("now" in st for st in stats.values()),
         baseline_empty=not any("base" in st for st in stats.values()),
     )
-    return Evidence(value=value), [resp]
+    return Evidence(value=value)
 
 
 def top(client: Client, query: str, window: Window, k: int = DEFAULT_TOP_K, by: Sequence[str] = ("pod",),
-        agg: str = DEFAULT_TOP_AGG) -> tuple[Evidence[Top], list[Response]]:
+        agg: str = DEFAULT_TOP_AGG) -> Evidence[Top]:
     """레이블 축 상위 k — `window.end` 시각의 즉시 조회. 질의를 `topk(k, agg by (by) (query))` 로 감싸 서버가 k 개만
     돌려주게 한다. 감싼 질의는 원본(Response.params)에 있다."""
     if not query.strip():
         raise ObsError("PromQL 이 필요하다")
     wrapped = top_query(query, k, by, agg)
-    body, resp = _instant(client, wrapped, window.end)
+    body, _ = _instant(client, wrapped, window.end)
     entries: list[TopEntry] = []
     for s in parse_metric(body).series:
         v = finite_value(s)
@@ -368,4 +368,4 @@ def top(client: Client, query: str, window: Window, k: int = DEFAULT_TOP_K, by: 
             entries.append(TopEntry(labels=dict(s.labels), value=v))
     entries.sort(key=lambda e: -e.value)
     value = Top(k=k, by=[a.strip() for a in by if a.strip()], agg=agg, entries=entries[:k])
-    return Evidence(value=value), [resp]
+    return Evidence(value=value)
