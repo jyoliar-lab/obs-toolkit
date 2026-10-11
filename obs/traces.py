@@ -27,6 +27,8 @@ DEFAULT_BASELINE_RANGE: str = "7d"      # 평소 분포의 구간 — 조사 창
 DRIFT_NS: int = 1_000_000               # CRISP happensBefore 완화 — 1ms
 SPAN_METRIC: str = "traces_span_metrics_duration_seconds"   # spanmetrics native histogram
 CALLS_METRIC: str = "traces_span_metrics_calls_total"
+SERVER_KIND: str = 'span_kind="SPAN_KIND_SERVER"'      # spanmetrics 의 서버 span 행 — 임계 · callee
+CLIENT_KIND: str = 'span_kind="SPAN_KIND_CLIENT"'      # spanmetrics 의 클라이언트 span 행 — 엣지
 THRESHOLD_BASELINE: str = "baseline"    # 평소 p95 — 조사 창 직전 baseline_range 분포
 THRESHOLD_WINDOW: str = "window"        # 조사 창 p95
 THRESHOLD_SAMPLE: str = "sample"        # 검색 표본 p95 — 같은 엔드포인트의 표본
@@ -154,6 +156,20 @@ class Trace:
     spans: list[Span]
 
 
+# ── GET — 연산들이 함께 쓰는 호출 하나 ────────────────────────────────────────────
+
+def _instant(client: Client, query: str, window: Window) -> tuple[MetricResult, Response]:
+    """metrics 즉시 조회 한 번(time = 창 끝) — 검사 · 파싱한 결과와 그 Response."""
+    resp = client.get("metrics", "api/v1/query", {"query": query, "time": window.end})
+    return parse_metric(check_status(resp.body, "metrics")), resp
+
+
+def _fetch_trace(client: Client, trace_id: str) -> tuple[Trace, Response]:
+    """`api/traces/<id>` 한 번 — Trace 와 그 Response."""
+    resp = client.get("traces", "api/traces/%s" % trace_id)
+    return Trace(trace_id, parse_spans(check_json(resp.body, "traces"))), resp
+
+
 # ── exemplars ───────────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -260,14 +276,25 @@ def _stats_by_endpoint(res: MetricResult) -> dict[Endpoint, dict[str, float | No
 
 def threshold_query(quantile: float, window: Window, baseline_range: str) -> str:
     """평소(`[<baseline_range>] offset <창 길이>`) · 조사 창(`[<창 길이>]`) 의 서버 span 분위수를 tagged 로 한 질의에."""
+    length = _window_length(quantile, window, baseline_range)
+    return " or ".join([
+        tagged(_quantile_expr(quantile, SERVER_KIND, baseline_range, offset=length), "base"),
+        tagged(_quantile_expr(quantile, SERVER_KIND, length), "now"),
+    ])
+
+
+def _window_length(quantile: float, window: Window, baseline_range: str) -> str:
+    """분위수 · baseline_range 를 검사하고 창 길이의 PromQL 기간 표기를 돌려준다 — 질의 조립 전, 요청 전."""
     if not 0 < quantile < 1:
         raise ObsError("분위수는 0 과 1 사이여야 한다: %s" % quantile)
     parse_duration(baseline_range)
-    length = duration_literal(window.seconds)
-    selector = '%s{span_kind="SPAN_KIND_SERVER"}' % SPAN_METRIC
-    base = "histogram_quantile(%s, sum by (service_name, span_name) (rate(%s[%s] offset %s)))" % (quantile, selector, baseline_range, length)
-    now = "histogram_quantile(%s, sum by (service_name, span_name) (rate(%s[%s])))" % (quantile, selector, length)
-    return " or ".join([tagged(base, "base"), tagged(now, "now")])
+    return duration_literal(window.seconds)
+
+
+def _quantile_expr(quantile: float, kind: str, range_: str, offset: str | None = None) -> str:
+    """(service_name, span_name) 별 spanmetrics 분위수 — `rate(…[<range_>])`, offset 이 있으면 `[<range_>] offset <offset>`."""
+    selector = "%s{%s}[%s]%s" % (SPAN_METRIC, kind, range_, " offset %s" % offset if offset is not None else "")
+    return "histogram_quantile(%s, sum by (service_name, span_name) (rate(%s)))" % (quantile, selector)
 
 
 def candidates_query(q: str) -> str:
@@ -336,8 +363,8 @@ def exemplars(client: Client, q: str, window: Window, k: int = DEFAULT_EXEMPLARS
         raise ObsError("limit 은 1 이상이어야 한다: %d" % limit)
     mq = threshold_query(quantile, window, baseline_range)
     tq = candidates_query(q)
-    m_resp = client.get("metrics", "api/v1/query", {"query": mq, "time": window.end})
-    quantiles = parse_quantiles(parse_metric(check_status(m_resp.body, "metrics")))
+    m_res, m_resp = _instant(client, mq, window)
+    quantiles = parse_quantiles(m_res)
     t_resp = client.get("traces", "api/search", {"start": int(window.start), "end": int(window.end), "limit": limit + 1, "q": tq})
     hits = json_list(check_json(t_resp.body, "traces").get("traces"))
     sample = parse_span_matches({"traces": hits[:limit]})
@@ -379,8 +406,7 @@ def critical_path_of(trace: Trace) -> CriticalPath:
     """CRISP — LFC 를 따라 임계경로 · exclusive time · 경계 규칙(드리프트 1ms · 부모 경계 절단 · 밖 서브트리 폐기)."""
     if not trace.spans:
         return CriticalPath(trace_id=trace.trace_id, spans=0, total_ms=0.0, path=[], dropped=0, roots=0)
-    ids = {s.span_id for s in trace.spans}
-    roots = [s for s in trace.spans if s.parent_id not in ids]
+    roots = _roots(trace.spans)
     children: dict[str, list[Span]] = {}
     for s in trace.spans:
         children.setdefault(s.parent_id, []).append(s)
@@ -389,6 +415,12 @@ def critical_path_of(trace: Trace) -> CriticalPath:
     walk.visit(root, root.start_ns, root.end_ns, 0)
     return CriticalPath(trace_id=trace.trace_id, spans=len(trace.spans), total_ms=root.duration_ms, path=walk.path,
                         dropped=walk.dropped, roots=len(roots))
+
+
+def _roots(spans: Sequence[Span]) -> list[Span]:
+    """부모가 트레이스 안에 없는 span — 정상이면 하나."""
+    ids = {s.span_id for s in spans}
+    return [s for s in spans if s.parent_id not in ids]
 
 
 @dataclass
@@ -409,13 +441,13 @@ class _CrispWalk:
             inside.append((max(c.start_ns, lo), min(c.end_ns, hi), c))
         picked: list[tuple[int, int, Span]] = []
         cursor, self_ns = hi, 0
-        candidates = inside
+        candidates: list[tuple[int, int, Span]] = inside
         while candidates:
             lfc = max(candidates, key=lambda x: (x[1], x[0]))
             picked.append(lfc)
             self_ns += cursor - min(lfc[1], cursor)
             cursor = lfc[0]
-            candidates = [x for x in inside if x[1] <= cursor + DRIFT_NS and x not in picked]
+            candidates = [x for x in candidates if x is not lfc and x[1] <= cursor + DRIFT_NS]
         self_ns += cursor - lo
         self.path.append(PathSpan(service=span.service, name=span.name, span_id=span.span_id, depth=depth,
                                   offset_ms=(lo - self.origin) / 1e6, duration_ms=(hi - lo) / 1e6, self_ms=self_ns / 1e6,
@@ -428,8 +460,8 @@ def critical_path(client: Client, trace_id: str, window: Window) -> tuple[Eviden
     """`api/traces/<id>` GET 1 회 → parse_spans → Trace → critical_path_of."""
     if not trace_id.strip():
         raise ObsError("traceID 가 필요하다")
-    resp = client.get("traces", "api/traces/%s" % trace_id)
-    value = critical_path_of(Trace(trace_id, parse_spans(check_json(resp.body, "traces"))))
+    trace, resp = _fetch_trace(client, trace_id)
+    value = critical_path_of(trace)
     return Evidence(backend="traces", query="critical_path(%s)" % trace_id, window=window, value=value), [resp]
 
 
@@ -470,16 +502,14 @@ class ServiceGraph:
 
 def edge_query(quantile: float, window: Window, baseline_range: str) -> str:
     """클라이언트 span 행의 calls · errors · now · base 를 tagged 로 한 질의에."""
-    if not 0 < quantile < 1:
-        raise ObsError("분위수는 0 과 1 사이여야 한다: %s" % quantile)
-    parse_duration(baseline_range)
-    length = duration_literal(window.seconds)
-    client = 'span_kind="SPAN_KIND_CLIENT"'
-    calls = "sum by (service_name, span_name) (increase(%s{%s}[%s]))" % (CALLS_METRIC, client, length)
-    errors = 'sum by (service_name, span_name) (increase(%s{%s, status_code="STATUS_CODE_ERROR"}[%s]))' % (CALLS_METRIC, client, length)
-    now = "histogram_quantile(%s, sum by (service_name, span_name) (rate(%s{%s}[%s])))" % (quantile, SPAN_METRIC, client, length)
-    base = "histogram_quantile(%s, sum by (service_name, span_name) (rate(%s{%s}[%s] offset %s)))" % (quantile, SPAN_METRIC, client, baseline_range, length)
-    return " or ".join([tagged(calls, "calls"), tagged(errors, "errors"), tagged(now, "now"), tagged(base, "base")])
+    length = _window_length(quantile, window, baseline_range)
+    calls = "sum by (service_name, span_name) (increase(%s{%s}[%s]))" % (CALLS_METRIC, CLIENT_KIND, length)
+    errors = 'sum by (service_name, span_name) (increase(%s{%s, status_code="STATUS_CODE_ERROR"}[%s]))' % (CALLS_METRIC, CLIENT_KIND, length)
+    return " or ".join([
+        tagged(calls, "calls"), tagged(errors, "errors"),
+        tagged(_quantile_expr(quantile, CLIENT_KIND, length), "now"),
+        tagged(_quantile_expr(quantile, CLIENT_KIND, baseline_range, offset=length), "base"),
+    ])
 
 
 def parse_edges(res: MetricResult) -> list[ClientRow]:
@@ -525,11 +555,9 @@ def service_graph(client: Client, window: Window, quantile: float = DEFAULT_QUAN
     """metrics GET 2 회 — edge_query(CLIENT) → threshold_query(SERVER). traces 백엔드를 부르지 않는다."""
     eq = edge_query(quantile, window, baseline_range)
     sq = threshold_query(quantile, window, baseline_range)
-    e_resp = client.get("metrics", "api/v1/query", {"query": eq, "time": window.end})
-    clients = parse_edges(parse_metric(check_status(e_resp.body, "metrics")))
-    s_resp = client.get("metrics", "api/v1/query", {"query": sq, "time": window.end})
-    servers = parse_quantiles(parse_metric(check_status(s_resp.body, "metrics")))
-    value = service_graph_of(clients, servers, quantile, baseline_range)
+    e_res, e_resp = _instant(client, eq, window)
+    s_res, s_resp = _instant(client, sq, window)
+    value = service_graph_of(parse_edges(e_res), parse_quantiles(s_res), quantile, baseline_range)
     queries = [Query("metrics", eq, window), Query("metrics", sq, window)]
     return Evidence(backend="metrics", query=eq, window=window, value=value, queries=queries), [e_resp, s_resp]
 
@@ -579,8 +607,7 @@ def _root(trace: Trace) -> Span:
     """부모 없는 span 중 가장 먼저 시작한 것 — span 이 없으면 ObsError."""
     if not trace.spans:
         raise ObsError("트레이스 %s 에 span 이 없다" % trace.trace_id)
-    ids = {s.span_id for s in trace.spans}
-    return min((s for s in trace.spans if s.parent_id not in ids), key=lambda s: s.start_ns)
+    return min(_roots(trace.spans), key=lambda s: s.start_ns)
 
 
 def _times(trace: Trace) -> dict[tuple[str, str], SpanTime]:
@@ -598,9 +625,9 @@ def diff(client: Client, slow_id: str, normal_id: str, window: Window) -> tuple[
         raise ObsError("traceID 두 개가 필요하다")
     if slow_id == normal_id:
         raise ObsError("같은 트레이스끼리는 비교하지 않는다: %s" % slow_id)
-    s_resp = client.get("traces", "api/traces/%s" % slow_id)
-    n_resp = client.get("traces", "api/traces/%s" % normal_id)
-    value = diff_of(Trace(slow_id, parse_spans(check_json(s_resp.body, "traces"))), Trace(normal_id, parse_spans(check_json(n_resp.body, "traces"))))
+    slow, s_resp = _fetch_trace(client, slow_id)
+    normal, n_resp = _fetch_trace(client, normal_id)
+    value = diff_of(slow, normal)
     main = "diff(%s, %s)" % (slow_id, normal_id)
     queries = [Query("traces", main, window), Query("traces", "trace(%s)" % slow_id, window), Query("traces", "trace(%s)" % normal_id, window)]
     return Evidence(backend="traces", query=main, window=window, value=value, queries=queries), [s_resp, n_resp]
