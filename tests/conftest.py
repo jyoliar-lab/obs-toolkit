@@ -7,11 +7,11 @@ import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping, Protocol, Sequence, TypeVar, cast
+from typing import Mapping, Protocol, Sequence, cast
 
 import pytest
 
-from obs.core import JSON, Client, Config, Evidence, TransportError, TransportTimeout, Window, load_config
+from obs.core import JSON, Client, Config, TransportError, TransportTimeout, load_config
 from obs.logs import LogEntry
 from tests.record import FIXTURES, ROOT, read_fixture, response_of, strip_physical
 from tests.replay import Call, FixtureSpec, Loaded, ReplayTransport, load_call, load_fixture_calls
@@ -200,17 +200,6 @@ def replay(config: Config) -> ReplayFactory:
         t = ReplayTransport(expected=expected, config=config, unchecked=unchecked)
         return Client(config=config, token="test-token-not-real", transport=t), t
     return _make
-
-
-# ── Evidence 의 창 ───────────────────────────────────────────────────────────────
-
-V = TypeVar("V")
-
-
-def window_of(ev: Evidence[V]) -> Window:
-    """렌더링 함수에 넘길 Evidence 의 창 — `ev.window or Window(0, 0)` 대신. 창 없는 Evidence 는 테스트가 만들지 않는다."""
-    assert ev.window is not None, "Evidence 에 창이 없다"
-    return ev.window
 
 
 # ── 스냅샷 — format 티어의 비교 장치 ─────────────────────────────────────────────

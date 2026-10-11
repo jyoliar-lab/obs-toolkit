@@ -108,12 +108,11 @@ def test_window_to_dict_nests_baseline() -> None:
 
 def test_dataclasses_are_json_serializable(config: Config) -> None:
     """코어의 dataclass 는 전부 to_json 으로 직렬화되고 중첩은 dict 로 풀리며, 옮길 수 없는 값은 TypeError 다."""
-    ev = Evidence(backend="metrics", query="up", window=Window(1.0, 2.0), value=Lines(["1 {}"]), raw_ref="tmp/obs/x.json")
+    ev = Evidence(value=Lines(["1 {}"]), raw_ref="tmp/obs/x.json")
     for obj in (ev, config, Budget(), Response("metrics", "api/v1/query", 200, {"a": 1})):
         json.loads(to_json(obj))
     d = to_dict(ev)
     assert isinstance(d, dict)
-    assert d["window"] == {"start": 1.0, "end": 2.0, "baseline": None}
     assert d["value"] == {"lines": ["1 {}"]}
     with pytest.raises(TypeError):
         to_dict(object())
@@ -511,14 +510,3 @@ def test_doctor_without_token_skips_probes(config: Config, base_env: dict[str, s
     assert not rep.ok
     assert not t.calls
     assert all(not p.ok and "토큰 없음" in p.detail for p in rep.probes)
-
-
-def test_evidence_queries_default_to_empty() -> None:
-    """기존 꼴로 만든 Evidence 의 queries 는 빈 목록이고 직렬화에 "queries": [] 로 실린다."""
-    # given · when
-    ev = Evidence(backend="metrics", query="up", window=Window(1.0, 2.0), value=Lines(["1 {}"]))
-    # then
-    assert ev.queries == []
-    d = to_dict(ev)
-    assert isinstance(d, dict)
-    assert d["queries"] == []

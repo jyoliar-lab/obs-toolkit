@@ -352,26 +352,12 @@ V = TypeVar("V")
 
 
 @dataclass(frozen=True)
-class Query:
-    """한 백엔드에 보낸 질의 하나 — 호출이 둘 이상인 연산의 Evidence 가 재실행용으로 담는다."""
-    backend: str
-    query: str
-    window: Window | None
-
-
-@dataclass(frozen=True)
 class Evidence(Generic[V]):
-    """한 질의의 결과 — 질의 · 창 · 백엔드(논리) · 환원물 · 원본 포인터. 재실행 가능해야 한다.
+    """한 연산의 결과 — 환원물 · 원본 포인터.
 
-    `V` 는 환원물 dataclass(Lines · 후속의 SeriesSummary …) — JSON 직렬화 가능해야 한다.
-    `queries` 는 보낸 질의 전부(호출 순서). 비면 `backend` · `query`(주 질의) 하나가 전부이고, 비어 있지 않으면
-    주 질의 `(backend, query)` 와 같은 원소를 반드시 포함한다 — 재실행은 이 목록을 읽는다."""
-    backend: str
-    query: str
-    window: Window | None
+    `V` 는 환원물 dataclass(Lines · Summary …) — JSON 직렬화 가능해야 한다."""
     value: V
     raw_ref: str | None = None  # 어댑터가 정한다 — 파일 경로(CLI) / bundle_id(MCP)
-    queries: list[Query] = field(default_factory=list[Query])   # [] = 주 질의 하나뿐
 
 
 # ── spill — 원본은 파일로, 컨텍스트에는 포인터만 ─────────────────────────────────

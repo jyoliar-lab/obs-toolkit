@@ -171,16 +171,14 @@ def test_histogram_sends_one_metric_range_query(make_client: ClientFactory) -> N
     assert "limit" not in params
 
 
-def test_histogram_evidence_carries_assembled_query_window_and_step(make_client: ClientFactory) -> None:
-    """histogram 의 Evidence.query 는 조립 질의, window 는 받은 창, step 은 자동값이다."""
+def test_histogram_sends_assembled_query_with_auto_step(make_client: ClientFactory) -> None:
+    """histogram 은 자동 step 으로 조립한 질의를 보내고 Histogram 의 step 은 그 자동값이다."""
     # given
     client, _ = make_client({("logs", RANGE): (200, _matrix())})
     # when
-    ev, _ = logs.histogram(client, SEL, W)
+    ev, raw = logs.histogram(client, SEL, W)
     # then
-    assert ev.backend == "logs"
-    assert ev.query == logs.histogram_query(SEL, ["detected_level"], "60s")
-    assert ev.window == W
+    assert raw[0].params["query"] == logs.histogram_query(SEL, ["detected_level"], "60s")
     assert ev.value.step == "60s"
 
 
@@ -339,7 +337,7 @@ EXAMPLE: dict[str, JSON] = _streams(({"pod": "p"}, [(100_000_000_000, "example l
 
 
 def test_templates_clusters_with_examples(make_client: ClientFactory) -> None:
-    """군집마다 count · ratio 와 예시 응답의 첫 줄이 실리고 Evidence.query 는 selector 다."""
+    """군집마다 count · ratio 와 예시 응답의 첫 줄이 실린다."""
     # given — 패턴 셋 · 예시 응답
     client, _ = make_client({("logs", PATTERNS): (200, THREE), ("logs", RANGE): (200, EXAMPLE)})
     # when
@@ -351,7 +349,6 @@ def test_templates_clusters_with_examples(make_client: ClientFactory) -> None:
     for c in t.clusters:
         assert c.ratio == pytest.approx(c.count / 10)
         assert c.example == "example line"
-    assert ev.query == SEL
 
 
 def test_templates_requests_patterns_then_one_example_per_cluster(make_client: ClientFactory) -> None:
@@ -607,17 +604,15 @@ def test_around_raw_carries_count_and_both_sides(make_client: ClientFactory) -> 
     assert [r.body for r in raw] == [count, lines, lines]
 
 
-def test_around_evidence_window_is_ts_plus_minus_span(make_client: ClientFactory) -> None:
-    """Evidence.window 는 ts±span 이고 center 는 ts, Evidence.query 는 selector 다."""
+def test_around_center_is_ts(make_client: ClientFactory) -> None:
+    """Context 의 center 는 받은 ts 이고 span 은 받은 span 이다."""
     # given
     client, _ = make_client({("logs", INSTANT): (200, _vector(({}, "0"))), ("logs", RANGE): (200, _streams())})
     # when
     ev, _ = logs.around(client, SEL, TS, 60)
     # then
-    assert ev.backend == "logs"
-    assert ev.window == Window(TS - 60, TS + 60)
     assert ev.value.center == TS
-    assert ev.query == SEL
+    assert ev.value.span == 60
 
 
 def test_around_empty_window(make_loki: LokiFactory) -> None:
@@ -699,18 +694,6 @@ def test_first_seen_asks_forward_first_line_with_pattern_filter(make_client: Cli
     assert params["direction"] == "forward"
     assert params["limit"] == "1"
     assert params["query"] == logs.pattern_filter(SEL, TEMPLATE)
-
-
-def test_first_seen_evidence_carries_pattern_query_and_window(make_client: ClientFactory) -> None:
-    """Evidence.query 는 pattern_filter 질의이고 window 는 받은 창이다."""
-    # given
-    client, _ = make_client({("logs", RANGE): (200, _streams())})
-    # when
-    ev, _ = logs.first_seen(client, SEL, TEMPLATE, W)
-    # then
-    assert ev.backend == "logs"
-    assert ev.query == logs.pattern_filter(SEL, TEMPLATE)
-    assert ev.window == W
 
 
 def test_first_seen_picks_earliest_across_streams(make_client: ClientFactory) -> None:
@@ -798,22 +781,45 @@ def test_logs_run_dispatches_by_subcommand(make_client: ClientFactory, cmd: str)
                              ("logs", PATTERNS): (200, _patterns(("a <_>", [(100, 1)]))),
                              ("logs", INSTANT): (200, _vector(({}, "1")))})
     # when
-    ev, _, kind = cli.logs_run(client, ARGS[cmd], at=AT)
+    ev, _, kind, _ = cli.logs_run(client, ARGS[cmd], at=AT)
     # then
     assert kind == "logql-%s" % cmd
-    assert ev.backend == "logs"
     assert ev.value.lines
+
+
+def test_logs_run_around_window_is_ts_plus_minus_span(make_client: ClientFactory) -> None:
+    """around 의 RunResult 넷째 자리는 --ts ± --span 이다 — --since 창이 아니다."""
+    # given — --since 는 기본 1h · 빈 응답
+    client, _ = make_client({("logs", INSTANT): (200, _vector()), ("logs", RANGE): (200, _streams())})
+    # when
+    _, _, _, window = cli.logs_run(client, cli.LogsArgs(cmd="around", selector=SEL, ts="-30m", span="60s"), at=AT)
+    # then
+    assert window == Window(AT - 30 * MINUTE - 60, AT - 30 * MINUTE + 60)
+
+
+def test_logs_run_around_empty_lines_show_ts_plus_minus_span(make_client: ClientFactory) -> None:
+    """창 안에 로그가 없는 around 의 출력 줄("데이터 없음")은 --ts ± --span 의 창을 말하고 --since 창의 표기가 없다."""
+    # given — --since 는 기본 1h · 빈 응답
+    client, _ = make_client({("logs", INSTANT): (200, _vector()), ("logs", RANGE): (200, _streams())})
+    # when
+    ev, _, _, _ = cli.logs_run(client, cli.LogsArgs(cmd="around", selector=SEL, ts="-30m", span="60s"), at=AT)
+    # then
+    lines = ev.value.lines
+    assert len(lines) == 1
+    assert lines[0].startswith("(데이터 없음")
+    assert cli.window_str(Window(AT - 30 * MINUTE - 60, AT - 30 * MINUTE + 60)) in lines[0]
+    assert cli.window_str(Window.last("1h", None, AT)) not in lines[0]
 
 
 # ── 단일 호출 연산의 원본 — histogram · first_seen ─────────────────────────────────
 
 def _raw(client: Client, op: str) -> tuple[str, list[Response]]:
-    """단일 호출 연산 둘을 같은 창으로 부르고 (Evidence.query, 원본) 을 돌려준다."""
+    """단일 호출 연산 둘을 같은 창으로 부르고 (조립 질의, 원본) 을 돌려준다 — 조립 질의는 질의 조립 함수로 만든다."""
     if op == "histogram":
-        ev_h, raw = logs.histogram(client, SEL, W)
-        return ev_h.query, raw
-    ev_f, raw = logs.first_seen(client, SEL, TEMPLATE, W)
-    return ev_f.query, raw
+        raw = logs.histogram(client, SEL, W)[1]
+        return logs.histogram_query(SEL, ["detected_level"], "60s"), raw
+    raw = logs.first_seen(client, SEL, TEMPLATE, W)[1]
+    return logs.pattern_filter(SEL, TEMPLATE), raw
 
 
 SINGLE_CALL_BODIES: dict[str, dict[str, JSON]] = {

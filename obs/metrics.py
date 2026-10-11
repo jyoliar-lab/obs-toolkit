@@ -313,14 +313,14 @@ def _instant(client: Client, query: str, at: float) -> tuple[dict[str, JSON], Re
 
 def summarize(client: Client, query: str, window: Window, step: str | None = None) -> tuple[Evidence[Summary], list[Response]]:
     """창 안의 시계열별 n · min · p50 · p95 · max · last · 기울기 — 전부 서버가 서브쿼리 위에서 계산한다. GET 1 회.
-    Evidence.query 는 조립된 질의(그대로 재실행 가능), window 는 받은 창."""
+    보낸 조립 질의는 원본(Response.params)에 있다."""
     if not query.strip():
         raise ObsError("PromQL 이 필요하다")
     step = step or auto_step(window.seconds)
     q = summarize_query(query, window, step)
     body, resp = _instant(client, q, window.end)
     value = Summary(step=step, series=summaries_of(parse_metric(body)))
-    return Evidence(backend="metrics", query=q, window=window, value=value), [resp]
+    return Evidence(value=value), [resp]
 
 
 def baseline_offset(window: Window) -> tuple[Window, str]:
@@ -350,13 +350,13 @@ def compare(client: Client, query: str, window: Window, step: str | None = None)
         now_empty=not any("now" in st for st in stats.values()),
         baseline_empty=not any("base" in st for st in stats.values()),
     )
-    return Evidence(backend="metrics", query=q, window=w, value=value), [resp]
+    return Evidence(value=value), [resp]
 
 
 def top(client: Client, query: str, window: Window, k: int = DEFAULT_TOP_K, by: Sequence[str] = ("pod",),
         agg: str = DEFAULT_TOP_AGG) -> tuple[Evidence[Top], list[Response]]:
     """레이블 축 상위 k — `window.end` 시각의 즉시 조회. 질의를 `topk(k, agg by (by) (query))` 로 감싸 서버가 k 개만
-    돌려주게 한다. Evidence.query 는 감싼 질의(그대로 재실행 가능), window 는 평가 시각(start = end)."""
+    돌려주게 한다. 감싼 질의는 원본(Response.params)에 있다."""
     if not query.strip():
         raise ObsError("PromQL 이 필요하다")
     wrapped = top_query(query, k, by, agg)
@@ -368,4 +368,4 @@ def top(client: Client, query: str, window: Window, k: int = DEFAULT_TOP_K, by: 
             entries.append(TopEntry(labels=dict(s.labels), value=v))
     entries.sort(key=lambda e: -e.value)
     value = Top(k=k, by=[a.strip() for a in by if a.strip()], agg=agg, entries=entries[:k])
-    return Evidence(backend="metrics", query=wrapped, window=Window(start=window.end, end=window.end), value=value), [resp]
+    return Evidence(value=value), [resp]

@@ -167,15 +167,15 @@ def test_each_operation_makes_one_get(make_client: ClientFactory, op: str) -> No
 
 
 def _raw(client: Client, op: str) -> tuple[str, list[Response]]:
-    """세 연산을 같은 창으로 부르고 (Evidence.query, 원본) 을 돌려준다 — 원본 검사의 공통 입구."""
+    """세 연산을 같은 창으로 부르고 (조립 질의, 원본) 을 돌려준다 — 원본 검사의 공통 입구. 조립 질의는 질의 조립 함수로 만든다."""
     if op == "summarize":
-        ev_s, raw = metrics.summarize(client, CPU_QUERY, W)
-        return ev_s.query, raw
+        raw = metrics.summarize(client, CPU_QUERY, W)[1]
+        return metrics.summarize_query(CPU_QUERY, W, "60s"), raw
     if op == "compare":
-        ev_c, raw = metrics.compare(client, CPU_QUERY, W.with_baseline("1d"))
-        return ev_c.query, raw
-    ev_t, raw = metrics.top(client, "up", W, k=3, by=["pod"])
-    return ev_t.query, raw
+        raw = metrics.compare(client, CPU_QUERY, W.with_baseline("1d"))[1]
+        return metrics.compare_query(CPU_QUERY, W, "60s", "%ds" % DAY), raw
+    raw = metrics.top(client, "up", W, k=3, by=["pod"])[1]
+    return metrics.top_query("up", 3, ["pod"], "sum"), raw
 
 
 @pytest.mark.parametrize("op", ["summarize", "compare", "top"])
@@ -215,13 +215,11 @@ def test_each_operation_serializes_to_json(make_client: ClientFactory, op: str) 
     json.loads(to_json(_run(client, op)))
 
 
-def test_summarize_evidence_carries_assembled_query_window_and_step(make_client: ClientFactory) -> None:
-    """summarize 의 Evidence.query 는 조립 질의(재실행 가능)이고 window 는 받은 창, step 은 자동값이다."""
+def test_summarize_sends_assembled_query_with_auto_step(make_client: ClientFactory) -> None:
+    """summarize 는 자동 step 으로 조립한 질의를 보내고 Summary 의 step 은 그 자동값이다."""
     client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
-    ev, _ = metrics.summarize(client, CPU_QUERY, W)
-    assert ev.backend == "metrics"
-    assert ev.query == metrics.summarize_query(CPU_QUERY, W, "60s")
-    assert ev.window == W
+    ev, raw = metrics.summarize(client, CPU_QUERY, W)
+    assert raw[0].params["query"] == metrics.summarize_query(CPU_QUERY, W, "60s")
     assert ev.value.step == "60s"
 
 
@@ -240,11 +238,9 @@ def test_summarize_empty_response_has_no_series(make_client: ClientFactory) -> N
 
 
 def test_compare_default_baseline_is_one_day(make_client: ClientFactory) -> None:
-    """기준선 없는 Window 를 주면 DEFAULT_BASELINE(1d) — Evidence.window 에 하루 앞 창이 달리고 offset 86400s 가 나간다."""
+    """기준선 없는 Window 를 주면 DEFAULT_BASELINE(1d) — offset 86400s 가 나간다."""
     client, t = make_client({("metrics", "api/v1/query"): (200, _vector())})
     ev, _ = metrics.compare(client, CPU_QUERY, W)
-    assert ev.window is not None
-    assert ev.window.baseline == Window(ev.window.start - DAY, ev.window.end - DAY)
     assert ev.value.offset == "%ds" % DAY
     assert "offset+%ds" % DAY in t.calls[0].url
 
@@ -253,10 +249,8 @@ def test_compare_prev_baseline(make_client: ClientFactory) -> None:
     """--baseline prev 는 직전 창 — offset 이 창 길이(3600s)다."""
     client, t = make_client({("metrics", "api/v1/query"): (200, _vector())})
     ev, _ = metrics.compare(client, CPU_QUERY, W.with_baseline("prev"))
-    assert ev.window is not None
-    assert ev.window.baseline == Window(ev.window.start - ev.window.seconds, ev.window.end - ev.window.seconds)
-    assert ev.value.offset == "%ds" % ev.window.seconds
-    assert "offset+%ds" % ev.window.seconds in t.calls[0].url
+    assert ev.value.offset == "%ds" % W.seconds
+    assert "offset+%ds" % W.seconds in t.calls[0].url
 
 
 def test_compare_both_empty(make_client: ClientFactory) -> None:
@@ -269,11 +263,11 @@ def test_compare_both_empty(make_client: ClientFactory) -> None:
 
 
 def test_top_wraps_query_and_uses_window_end(make_client: ClientFactory) -> None:
-    """top 의 Evidence.query 는 topk 로 감싼 질의이고 창은 끝 시각 한 점이다."""
+    """top 은 topk 로 감싼 질의를 창의 끝 시각에 보낸다."""
     client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
-    ev, _ = metrics.top(client, "up", W, k=10, by=["pod"])
-    assert ev.query == "topk(10, sum by (pod) (up))"
-    assert ev.window == Window(AT, AT)
+    ev, raw = metrics.top(client, "up", W, k=10, by=["pod"])
+    assert raw[0].params["query"] == "topk(10, sum by (pod) (up))"
+    assert raw[0].params["time"] == W.end
     assert (ev.value.k, ev.value.by, ev.value.agg) == (10, ["pod"], "sum")
 
 
@@ -304,11 +298,32 @@ def test_metrics_run_dispatches_by_subcommand(make_client: ClientFactory) -> Non
     """metrics_run 은 세 서브커맨드를 Evidence[Lines] 와 kind 로 내고 모르는 서브커맨드는 ObsError 다."""
     client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
     for cmd, kind in (("summarize", "promql-summarize"), ("compare", "promql-compare"), ("top", "promql-top")):
-        ev, _, got = cli.metrics_run(client, cli.MetricsArgs(cmd=cmd, query="up"), at=AT)
+        ev, _, got, _ = cli.metrics_run(client, cli.MetricsArgs(cmd=cmd, query="up"), at=AT)
         assert got == kind
         assert isinstance(ev.value, Lines)
     with pytest.raises(ObsError):
         cli.metrics_run(client, cli.MetricsArgs(cmd="red", query="x"), at=AT)
+
+
+def test_metrics_run_compare_window_has_baseline(make_client: ClientFactory) -> None:
+    """compare 의 RunResult 넷째 자리는 --since · --end 의 창에 --baseline 의 기준선이 달린 창이다."""
+    # given — 빈 응답
+    client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
+    # when
+    _, _, _, window = cli.metrics_run(client, cli.MetricsArgs(cmd="compare", query="up", since="1h", baseline="prev"), at=AT)
+    # then
+    assert window == Window.last("1h", None, AT).with_baseline("prev")
+    assert window.baseline is not None
+
+
+def test_metrics_run_top_window_is_end_instant(make_client: ClientFactory) -> None:
+    """top 의 RunResult 넷째 자리는 --end 시각 한 점(start = end)이다 — --since 창이 아니다."""
+    # given — 빈 응답 · --end 는 10분 전
+    client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
+    # when
+    _, _, _, window = cli.metrics_run(client, cli.MetricsArgs(cmd="top", query="up", end="-10m"), at=AT)
+    # then
+    assert window == Window(AT - 10 * MINUTE, AT - 10 * MINUTE)
 
 
 # ── 경계값 — check_status · 명시 step · 비유한 값 · 기준선만 있는 시계열 ───────────────
@@ -333,9 +348,9 @@ def test_check_status_rejects_non_object_body() -> None:
 def test_summarize_explicit_step_overrides_auto(make_client: ClientFactory) -> None:
     """summarize 에 step 을 주면 자동값 대신 그 step 이 Summary 와 서브쿼리에 쓰인다."""
     client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
-    ev, _ = metrics.summarize(client, CPU_QUERY, W, step="5m")
+    ev, raw = metrics.summarize(client, CPU_QUERY, W, step="5m")
     assert ev.value.step == "5m"
-    assert ev.query == metrics.summarize_query(CPU_QUERY, W, "5m")
+    assert raw[0].params["query"] == metrics.summarize_query(CPU_QUERY, W, "5m")
 
 
 def test_top_drops_non_finite_values(make_client: ClientFactory) -> None:

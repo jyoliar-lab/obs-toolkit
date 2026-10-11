@@ -1,4 +1,4 @@
-"""트레이스 환원 연산의 약속 — 파서 · 질의 조립 · 임계 폴백 · 분류 · CRISP · 엣지 조인 · 짝짓기 · 나간 요청 · Evidence.queries · 디스패치.
+"""트레이스 환원 연산의 약속 — 파서 · 질의 조립 · 임계 폴백 · 분류 · CRISP · 엣지 조인 · 짝짓기 · 나간 요청 · 디스패치.
 손 입력(OTLP · 검색 · vector 응답, 명시 라우트 FakeTransport)과 성질 단언만. 렌더링의 모양은 format/test_traces_lines.py."""
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 
 from obs import traces
 from obs.adapters import cli
-from obs.core import JSON, Lines, ObsError, Query, Window, to_dict
+from obs.core import JSON, Lines, ObsError, Window, to_dict
 from obs.metrics import parse_metric
 from obs.traces import (
     THRESHOLD_BASELINE, THRESHOLD_SAMPLE, THRESHOLD_WINDOW, Bucket, ClientRow, CriticalPath, Edge, Endpoint, EndpointQuantiles, Exemplar,
@@ -516,17 +516,15 @@ def test_exemplars_sends_threshold_then_candidates_and_returns_both_raw(make_cli
     assert [r.backend for r in raw] == ["metrics", "traces"]
 
 
-def test_exemplars_evidence_carries_both_queries(make_client: ClientFactory) -> None:
-    """Evidence 는 traces 의 후보 TraceQL 이 주 질의이고 queries 에 metrics 질의와 traces 질의가 순서대로 — 주 질의를 포함해 — 담긴다. 창은 둘 다 조사 창이다."""
+def test_exemplars_sends_threshold_then_candidates_queries(make_client: ClientFactory) -> None:
+    """원본의 첫 요청은 조사 창의 임계 질의(metrics)이고 둘째는 후보 TraceQL(traces)이다."""
     # given
     client, _ = make_client(_exemplar_routes())
     # when
-    ev, _ = traces.exemplars(client, "", W)
+    _, raw = traces.exemplars(client, "", W)
     # then
-    assert ev.backend == "traces"
-    assert ev.query == traces.candidates_query("")
-    assert ev.queries == [Query("metrics", traces.threshold_query(0.95, W, "7d"), W), Query("traces", traces.candidates_query(""), W)]
-    assert (ev.backend, ev.query) in [(q.backend, q.query) for q in ev.queries]
+    assert raw[0].params["query"] == traces.threshold_query(0.95, W, "7d")
+    assert raw[1].params["q"] == traces.candidates_query("")
 
 
 def test_exemplars_classifies_with_server_thresholds(make_client: ClientFactory) -> None:
@@ -757,7 +755,7 @@ def test_critical_path_without_root_has_no_path_and_counts_orphans() -> None:
 # ── critical_path — GET 1 회 ───────────────────────────────────────────────────────
 
 def test_critical_path_fetches_the_trace_once(make_client: ClientFactory) -> None:
-    """api/traces/<id> 를 한 번 부르고 raw 하나 · Evidence.query 는 critical_path(<id>) · value 는 그 트레이스의 경로다."""
+    """api/traces/<id> 를 한 번 부르고 raw 하나 · value 는 그 트레이스의 경로다."""
     # given
     body = _otlp([_span("root", "r", start_ms=0, end_ms=10), _span("child", "c", parent="r", start_ms=1, end_ms=9)])
     client, t = make_client({("traces", _trace_path("abc")): (200, body)})
@@ -767,7 +765,6 @@ def test_critical_path_fetches_the_trace_once(make_client: ClientFactory) -> Non
     assert len(t.calls) == 1
     assert _path(t.calls[0]).endswith(_trace_path("abc"))
     assert len(raw) == 1
-    assert ev.query == "critical_path(abc)"
     assert ev.value.trace_id == "abc"
     assert _names(ev.value.path) == ["root", "child"]
 
@@ -975,17 +972,14 @@ def test_service_graph_sends_edge_then_server_queries_to_metrics_only(make_clien
     assert [r.backend for r in raw] == ["metrics", "metrics"]
 
 
-def test_service_graph_evidence_carries_both_queries(make_client: ClientFactory) -> None:
-    """Evidence 는 metrics 백엔드 · edge_query 가 주 질의 · queries 는 [edge, server] 순이고 주 질의를 포함하며 value 의 quantile · baseline_range 는 인자다."""
+def test_service_graph_sends_edge_then_server_queries(make_client: ClientFactory) -> None:
+    """원본의 요청은 [edge, server] 순이고 value 의 quantile · baseline_range 는 인자다."""
     # given
     client, _ = make_client({("metrics", INSTANT): (200, _vector())})
     # when
-    ev, _ = traces.service_graph(client, W, quantile=0.9, baseline_range="3d")
+    ev, raw = traces.service_graph(client, W, quantile=0.9, baseline_range="3d")
     # then
-    assert ev.backend == "metrics"
-    assert ev.query == traces.edge_query(0.9, W, "3d")
-    assert ev.queries == [Query("metrics", traces.edge_query(0.9, W, "3d"), W), Query("metrics", traces.threshold_query(0.9, W, "3d"), W)]
-    assert (ev.backend, ev.query) in [(q.backend, q.query) for q in ev.queries]
+    assert [r.params["query"] for r in raw] == [traces.edge_query(0.9, W, "3d"), traces.threshold_query(0.9, W, "3d")]
     assert ev.value.quantile == 0.9
     assert ev.value.baseline_range == "3d"
 
@@ -1099,7 +1093,7 @@ def test_diff_rejects_trace_without_root(slow: list[Span]) -> None:
 # ── diff — GET 2 회 ────────────────────────────────────────────────────────────────
 
 def test_diff_fetches_slow_then_normal(make_client: ClientFactory) -> None:
-    """api/traces/<slow> → api/traces/<normal> 순으로 두 번 부르고 raw 둘 · Evidence.query diff(<s>, <n>) · queries 는 주 질의 + 두 GET 이다."""
+    """api/traces/<slow> → api/traces/<normal> 순으로 두 번 부르고 raw 둘이다."""
     # given
     body = _otlp([_span("root", "r", "", 0, 10)])
     client, t = make_client({("traces", _trace_path("s1")): (200, body), ("traces", _trace_path("n1")): (200, body)})
@@ -1108,9 +1102,6 @@ def test_diff_fetches_slow_then_normal(make_client: ClientFactory) -> None:
     # then
     assert [_path(c).rsplit("/", 1)[1] for c in t.calls] == ["s1", "n1"]
     assert len(raw) == 2
-    assert ev.query == "diff(s1, n1)"
-    assert [q.query for q in ev.queries] == ["diff(s1, n1)", "trace(s1)", "trace(n1)"]
-    assert {q.backend for q in ev.queries} == {"traces"}
     assert (ev.value.slow_id, ev.value.normal_id) == ("s1", "n1")
 
 
@@ -1342,26 +1333,25 @@ def _args_for(cmd: str) -> cli.TracesArgs:
 
 @pytest.mark.parametrize("cmd", cli.TRACES_SUBCOMMANDS)
 def test_traces_run_dispatches_each_subcommand(make_client: ClientFactory, cmd: str) -> None:
-    """cmd 마다 kind 는 traceql-<cmd> 이고 Evidence 의 value 는 Lines 이며 backend 는 그 연산의 것(service-graph 만 metrics)이다."""
+    """cmd 마다 kind 는 traceql-<cmd> 이고 Evidence 의 value 는 Lines 다."""
     # given
     client, _ = make_client(_routes_for(cmd))
     # when
-    ev, _, kind = cli.traces_run(client, _args_for(cmd), at=AT)
+    ev, _, kind, _ = cli.traces_run(client, _args_for(cmd), at=AT)
     # then
     assert kind == "traceql-" + cmd
     assert isinstance(ev.value, Lines)
-    assert ev.backend == ("metrics" if cmd == "service-graph" else "traces")
 
 
-def test_traces_run_exemplars_keeps_both_queries(make_client: ClientFactory) -> None:
-    """exemplars 의 RunResult Evidence 는 queries 둘(metrics · traces)을 그대로 지니고 metrics 질의에 --baseline-range 의 구간이 있다."""
+def test_traces_run_exemplars_passes_baseline_range(make_client: ClientFactory) -> None:
+    """exemplars 의 RunResult 원본은 metrics · traces 순이고 metrics 질의에 --baseline-range 의 구간이 있다."""
     # given
     client, _ = make_client(_routes_for("exemplars"))
     # when
-    ev, _, _ = cli.traces_run(client, cli.TracesArgs(cmd="exemplars", baseline_range="3d"), at=AT)
+    _, raw, _, _ = cli.traces_run(client, cli.TracesArgs(cmd="exemplars", baseline_range="3d"), at=AT)
     # then
-    assert [q.backend for q in ev.queries] == ["metrics", "traces"]
-    assert "[3d] offset" in ev.queries[0].query
+    assert [r.backend for r in raw] == ["metrics", "traces"]
+    assert "[3d] offset" in str(raw[0].params["query"])
 
 
 @pytest.mark.parametrize("cmd", cli.TRACES_SUBCOMMANDS)
@@ -1370,7 +1360,7 @@ def test_traces_run_summary_carries_no_raw_trace_body(make_client: ClientFactory
     # given
     client, _ = make_client(_routes_for(cmd))
     # when
-    ev, raw, _ = cli.traces_run(client, _args_for(cmd), at=AT)
+    ev, raw, _, _ = cli.traces_run(client, _args_for(cmd), at=AT)
     text = "\n".join(ev.value.lines)
     # then
     for marker in RAW_MARKERS:
