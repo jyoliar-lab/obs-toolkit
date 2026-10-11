@@ -945,13 +945,16 @@ def exemplars_lines(value: Exemplars, window: Window) -> list[str]:
 
 
 def critical_path_lines(value: CriticalPath, window: Window) -> list[str]:
-    """헤더 + 경로 span 마다 한 줄(잘림 표시) + 병목(self 내림차순) 줄."""
+    """헤더 + 경로 span 마다 한 줄(잘림 표시) + 병목(self 내림차순) 줄. 루트가 없으면 헤더 한 줄."""
+    if value.spans and not value.roots:
+        return ["트레이스 %s  span %d개  임계경로 없음 — 루트 없음(parent 가 빈 span 이 없다), 고아 %d개" % (value.trace_id, value.spans, value.orphans)]
     incomplete = "  불완전한 트레이스 — 루트 %d개, 먼저 시작한 것을 따랐다" % value.roots if value.roots > 1 else ""
-    lines = ["트레이스 %s  총 %.1fms  span %d개  임계경로 %d개  부모 밖 서브트리 %d개 버림%s  (+시작 오프셋  길이  self  서비스 / 이름)" % (
-        value.trace_id, value.total_ms, value.spans, len(value.path), value.dropped, incomplete)]
+    orphans = "  고아 %d개 — 부모 span 유실, 경로에 없다" % value.orphans if value.orphans else ""
+    lines = ["트레이스 %s  총 %.1fms  span %d개  임계경로 %d개  부모 밖 서브트리 %d개 버림%s%s  (+시작 오프셋  길이  self  서비스 / 이름)" % (
+        value.trace_id, value.total_ms, value.spans, len(value.path), value.dropped, incomplete, orphans)]
     for p in value.path:
         lines.append("%s+%.1fms  %.1fms  self %.1fms  %s / %s%s" % (
-            "  " * p.depth, p.offset_ms, p.duration_ms, p.self_ms, p.service, p.name, "  (잘림 — 부모 끝에서 +%.1fms)" % p.clipped_ms if p.clipped_ms > 0 else ""))
+            "  " * p.depth, p.offset_ms, p.duration_ms, p.self_ms, p.service, p.name, "  (잘림 — 부모 경계 밖 +%.1fms)" % p.clipped_ms if p.clipped_ms > 0 else ""))
     top = value.bottlenecks[:3]
     lines.append("병목 — self 내림차순 상위 %d:" % len(top))
     lines += ["  self %.1fms  깊이 %d  %s / %s" % (p.self_ms, p.depth, p.service, p.name) for p in top]

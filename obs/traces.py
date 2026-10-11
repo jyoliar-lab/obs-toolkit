@@ -309,16 +309,20 @@ def candidates_query(q: str) -> str:
 def thresholds_of(quantiles: Sequence[EndpointQuantiles], sample: Sequence[SpanMatch],
                   quantile: float = DEFAULT_QUANTILE) -> dict[Endpoint, Threshold]:
     """표본의 엔드포인트마다 임계 하나 — 평소 p95 → 조사 창 p95 → 표본 p95 순 폴백."""
-    known = {q.endpoint: q for q in quantiles}
+    known: dict[Endpoint, EndpointQuantiles] = {}
+    for q in quantiles:
+        if q.endpoint in known:
+            raise ObsError("같은 엔드포인트의 분위수가 둘이다: %s / %s" % (q.endpoint.service, q.endpoint.name))
+        known[q.endpoint] = q
     durations: dict[Endpoint, list[float]] = {}
     for m in sample:
         durations.setdefault(m.endpoint, []).append(m.seconds)
     out: dict[Endpoint, Threshold] = {}
     for ep, secs in durations.items():
         q = known.get(ep)
-        if q is not None and q.base is not None:
+        if q is not None and q.base is not None and q.base > 0:
             out[ep] = Threshold(q.base, THRESHOLD_BASELINE)
-        elif q is not None and q.now is not None:
+        elif q is not None and q.now is not None and q.now > 0:
             out[ep] = Threshold(q.now, THRESHOLD_WINDOW)
         else:
             out[ep] = Threshold(_nearest_rank(secs, quantile), THRESHOLD_SAMPLE)
@@ -341,6 +345,8 @@ def exemplars_of(sample: Sequence[SpanMatch], thresholds: Mapping[Endpoint, Thre
         th = thresholds.get(m.endpoint)
         if th is None:
             raise ObsError("임계가 없는 엔드포인트 %s / %s — thresholds_of 의 결과를 넘긴다" % (m.service, m.name))
+        if th.seconds <= 0:
+            raise ObsError("임계가 0 이하인 엔드포인트 %s / %s: %s" % (m.service, m.name, th.seconds))
         duration_ms = m.duration_ns / 1e6
         threshold_ms = th.seconds * 1000
         kind = "error" if m.status == "error" else "slow" if m.seconds > th.seconds else "normal"
@@ -407,7 +413,11 @@ def critical_path_of(trace: Trace) -> CriticalPath:
     """CRISP — LFC 를 따라 임계경로 · exclusive time · 경계 규칙(드리프트 1ms · 부모 경계 절단 · 밖 서브트리 폐기)."""
     if not trace.spans:
         return CriticalPath(trace_id=trace.trace_id, spans=0, total_ms=0.0, path=[], dropped=0, roots=0, orphans=0)
-    roots = _roots(trace.spans)
+    roots, orphans = _roots(trace.spans), len(_orphans(trace.spans))
+    if not roots and not orphans:
+        raise ObsError("트레이스 %s 에 루트가 없다 — parent 가 순환한다" % trace.trace_id)
+    if not roots:
+        return CriticalPath(trace_id=trace.trace_id, spans=len(trace.spans), total_ms=0.0, path=[], dropped=0, roots=0, orphans=orphans)
     children: dict[str, list[Span]] = {}
     for s in trace.spans:
         children.setdefault(s.parent_id, []).append(s)
@@ -415,13 +425,18 @@ def critical_path_of(trace: Trace) -> CriticalPath:
     walk = _CrispWalk(children=children, origin=root.start_ns)
     walk.visit(root, root.start_ns, root.end_ns, 0)
     return CriticalPath(trace_id=trace.trace_id, spans=len(trace.spans), total_ms=root.duration_ms, path=walk.path,
-                        dropped=walk.dropped, roots=len(roots), orphans=0)
+                        dropped=walk.dropped, roots=len(roots), orphans=orphans)
 
 
 def _roots(spans: Sequence[Span]) -> list[Span]:
-    """부모가 트레이스 안에 없는 span — 정상이면 하나."""
+    """parent 가 빈 span — 정상이면 하나."""
+    return [s for s in spans if not s.parent_id]
+
+
+def _orphans(spans: Sequence[Span]) -> list[Span]:
+    """parent id 가 있으나 트레이스 안에 없는 span — 부모 유실."""
     ids = {s.span_id for s in spans}
-    return [s for s in spans if s.parent_id not in ids]
+    return [s for s in spans if s.parent_id and s.parent_id not in ids]
 
 
 @dataclass
@@ -531,6 +546,8 @@ def service_graph_of(clients: Sequence[ClientRow], servers: Sequence[EndpointQua
     """클라이언트 행 → 엣지 · span_name 으로 서버 행과 조인 · 배율 · 정렬 · 데이터 없음과 호출 0 의 구분."""
     by_name: dict[str, list[EndpointQuantiles]] = {}
     for sv in servers:
+        if any(m.endpoint == sv.endpoint for m in by_name.get(sv.endpoint.name, [])):
+            raise ObsError("같은 엔드포인트의 서버 분위수가 둘이다: %s / %s" % (sv.endpoint.service, sv.endpoint.name))
         by_name.setdefault(sv.endpoint.name, []).append(sv)
     edges: list[Edge] = []
     for row in clients:
@@ -541,7 +558,7 @@ def service_graph_of(clients: Sequence[ClientRow], servers: Sequence[EndpointQua
         edges.append(Edge(
             caller=row.caller, callee=server.endpoint.service if server is not None else None, endpoint=row.endpoint, count=row.calls,
             error_rate=row.errors / row.calls, client_p95_ms=_ms(row.now), client_base_p95_ms=_ms(row.base),
-            ratio=row.now / row.base if row.now is not None and row.base is not None else None,
+            ratio=row.now / row.base if row.now is not None and row.base is not None and row.base > 0 else None,
             server_p95_ms=_ms(server.now) if server is not None else None))
     edges.sort(key=lambda e: (e.ratio is None, -(e.ratio or 0.0), -e.count, e.caller, e.callee or "", e.endpoint))
     return ServiceGraph(quantile=quantile, baseline_range=baseline_range, edges=edges, idle=sum(1 for r in clients if r.calls == 0))
@@ -608,7 +625,10 @@ def _root(trace: Trace) -> Span:
     """부모 없는 span 중 가장 먼저 시작한 것 — span 이 없으면 ObsError."""
     if not trace.spans:
         raise ObsError("트레이스 %s 에 span 이 없다" % trace.trace_id)
-    return min(_roots(trace.spans), key=lambda s: s.start_ns)
+    roots = _roots(trace.spans)
+    if not roots:
+        raise ObsError("트레이스 %s 에 루트(parent 가 빈 span)가 없다" % trace.trace_id)
+    return min(roots, key=lambda s: s.start_ns)
 
 
 def _times(trace: Trace) -> dict[tuple[str, str], SpanTime]:
