@@ -309,11 +309,7 @@ def candidates_query(q: str) -> str:
 def thresholds_of(quantiles: Sequence[EndpointQuantiles], sample: Sequence[SpanMatch],
                   quantile: float = DEFAULT_QUANTILE) -> dict[Endpoint, Threshold]:
     """표본의 엔드포인트마다 임계 하나 — 평소 p95 → 조사 창 p95 → 표본 p95 순 폴백."""
-    known: dict[Endpoint, EndpointQuantiles] = {}
-    for q in quantiles:
-        if q.endpoint in known:
-            raise ObsError("같은 엔드포인트의 분위수가 둘이다: %s / %s" % (q.endpoint.service, q.endpoint.name))
-        known[q.endpoint] = q
+    known = _by_endpoint(quantiles)
     durations: dict[Endpoint, list[float]] = {}
     for m in sample:
         durations.setdefault(m.endpoint, []).append(m.seconds)
@@ -327,6 +323,16 @@ def thresholds_of(quantiles: Sequence[EndpointQuantiles], sample: Sequence[SpanM
         else:
             out[ep] = Threshold(_nearest_rank(secs, quantile), THRESHOLD_SAMPLE)
     return out
+
+
+def _by_endpoint(quantiles: Sequence[EndpointQuantiles]) -> dict[Endpoint, EndpointQuantiles]:
+    """엔드포인트 하나당 EndpointQuantiles 하나 — 같은 엔드포인트가 둘이면 ObsError(뒤의 것이 조용히 이기지 않는다)."""
+    known: dict[Endpoint, EndpointQuantiles] = {}
+    for q in quantiles:
+        if q.endpoint in known:
+            raise ObsError("같은 엔드포인트의 분위수가 둘이다: %s / %s" % (q.endpoint.service, q.endpoint.name))
+        known[q.endpoint] = q
+    return known
 
 
 def _nearest_rank(values: Sequence[float], quantile: float) -> float:
@@ -545,9 +551,7 @@ def service_graph_of(clients: Sequence[ClientRow], servers: Sequence[EndpointQua
                      baseline_range: str) -> ServiceGraph:
     """클라이언트 행 → 엣지 · span_name 으로 서버 행과 조인 · 배율 · 정렬 · 데이터 없음과 호출 0 의 구분."""
     by_name: dict[str, list[EndpointQuantiles]] = {}
-    for sv in servers:
-        if any(m.endpoint == sv.endpoint for m in by_name.get(sv.endpoint.name, [])):
-            raise ObsError("같은 엔드포인트의 서버 분위수가 둘이다: %s / %s" % (sv.endpoint.service, sv.endpoint.name))
+    for sv in _by_endpoint(servers).values():
         by_name.setdefault(sv.endpoint.name, []).append(sv)
     edges: list[Edge] = []
     for row in clients:
