@@ -421,6 +421,7 @@ def test_read_timeout_is_logged_with_error_message(make_client: ClientFactory) -
     logged = client.log[0]
     assert logged.status is None
     assert logged.error == str(ei.value)
+    assert logged.error is not None
     assert logged.error.startswith("logs 백엔드가 7초 안에 답하지 않았다")
 
 
