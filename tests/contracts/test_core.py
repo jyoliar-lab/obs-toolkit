@@ -409,18 +409,39 @@ def test_transport_failure_is_logged_with_error_message(make_client: ClientFacto
 
 
 def test_read_timeout_is_logged_with_error_message(make_client: ClientFactory) -> None:
-    """읽기 시간 초과도 log 에 남고 — status 는 None, error 가 "답하지 않았다" 를 말한다."""
-    # given
+    """읽기 시간 초과도 log 에 남고 — status 는 None, error 는 올라온 ObsError 의 문구와 같으며 그 문구가 Given 의 제한 시간이 지나 답이 없었다고 말한다."""
+    # given — 읽기 시간 초과(hang: 닿았지만 답이 없다) · 제한 시간은 기본값이 아닌 7초
     client, _ = make_client(hang=True)
+    client.timeout = 7.0
     # when
-    with pytest.raises(ObsError):
+    with pytest.raises(ObsError) as ei:
         client.get("logs", "loki/api/v1/query_range")
     # then
     assert len(client.log) == 1
     logged = client.log[0]
     assert logged.status is None
-    assert logged.error is not None
-    assert "답하지 않았다" in logged.error
+    assert logged.error == str(ei.value)
+    assert logged.error.startswith("logs 백엔드가 7초 안에 답하지 않았다")
+
+
+@pytest.mark.parametrize("status", [400, 500])
+def test_over_budget_http_error_is_logged_truncated_with_its_status(make_client: ClientFactory, status: int) -> None:
+    """HTTP 400 이상 본문이 응답 총량 상한을 넘기면 예외는 BudgetExceeded(예산이 먼저)이고, log 에는 그 status · truncated · size 가 남으며 error 는 없다."""
+    # given — 상한(150 bytes)보다 큰 오류 본문
+    body: dict[str, JSON] = {"status": "error", "error": "e" * (2 * SPILL_HEAD_CHARS)}
+    full = json.dumps(body)
+    client, _ = make_client({("metrics", "api/v1/query"): (status, body)})
+    client.budget = Budget(max_response_bytes=150)
+    # when
+    with pytest.raises(BudgetExceeded):
+        client.get("metrics", "api/v1/query")
+    # then
+    assert len(client.log) == 1
+    logged = client.log[0]
+    assert logged.status == status
+    assert logged.truncated is True
+    assert logged.size == len(full.encode("utf-8"))
+    assert logged.error is None
 
 
 def test_log_keeps_successes_before_a_failure(make_client: ClientFactory) -> None:

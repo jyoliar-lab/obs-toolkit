@@ -220,6 +220,22 @@ def test_finish_without_sent_calls_leaves_no_directory(make_client: ClientFactor
     assert not (tmp_path / "tmp" / "obs").exists()
 
 
+def test_finish_without_sent_calls_reraises_other_exceptions_silently(make_client: ClientFactory, tmp_path: Path) -> None:
+    """보낸 호출이 없는 비-ObsError 예외(버그)는 같은 객체로 그대로 올라오고, err 로 아무것도 찍지 않으며, 디렉터리도 만들지 않는다."""
+    # given — 호출 없이 ValueError
+    env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+    client, _ = make_client()
+    err: list[str] = []
+    bug = ValueError("bug")
+    # when
+    with pytest.raises(ValueError) as ei:
+        cli.finish(client, _run_after(client, 0, bug), "promql-failed", 40, False, env=env, out=lambda _: None, err=err.append)
+    # then
+    assert ei.value is bug
+    assert err == []
+    assert not (tmp_path / "tmp" / "obs").exists()
+
+
 # ── 인터페이스 — 물리 인자가 없다 ────────────────────────────────────────────────
 
 HELP_SCREENS: tuple[tuple[Callable[[list[str]], None], list[str]], ...] = (
