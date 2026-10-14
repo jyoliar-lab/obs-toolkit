@@ -7,6 +7,7 @@ logql.py around '<selector>' --ts <시각> [--span 5m] [--limit 50]
 
 계산은 백엔드(Loki)가 한다 — count_over_time · Patterns API 의 환원 결과만 받고, 원본 로그 줄은 예시 · 첫 발생 · 문맥에만 온다.
 창(around 는 --ts ± --span)은 호출 디렉터리의 summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만.
+실패해도(HTTP 오류 · 전송 실패 · 예산 초과) 호출 디렉터리가 남는다 — tmp/obs/<시각>-<명령>-failed/ 에 보낸 호출 전부(실패 포함)와 오류 문구, 오류 메시지 끝이 그 경로다.
 
 positional arguments:
   selector              LogQL 스트림 selector — 예: '{namespace="x"}'
@@ -15,7 +16,7 @@ options:
   -h, --help            show this help message and exit
   --max-lines MAX_LINES
                         stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
-  --json                stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 항상 남는다)
+  --json                stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 성공 · 실패 모두 남는다)
   --ts TS               중심 시각 (--ts=-30m · unix초 · RFC3339). 필수
   --span SPAN           한 쪽 폭. 기본 5m
   --limit LIMIT         한 쪽 줄 수 상한. 기본 50

@@ -28,6 +28,8 @@ promql — 즉시 조회·구간 조회 (metrics 백엔드, GET 만).
   --max-lines <n>   stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
   --json            stdout 에 요약을 찍지 않고 경로만(파일은 항상 남는다)
 
+실패해도(HTTP 오류 · 전송 실패 · 예산 초과) 호출 디렉터리가 남는다 — tmp/obs/<시각>-<명령>-failed/ 에 보낸 호출 전부(실패 포함)와 오류 문구, 오류 메시지 끝이 그 경로다.
+
 출력은 요약이다 — 즉시 조회는 `값  {레이블}` 한 줄씩, 구간 조회는 시계열마다
 `n=점수 min max first last {레이블}` 한 줄. 원본은 호출 디렉터리의 raw.json.
 
@@ -45,4 +47,4 @@ options:
   --series SELECTOR
   --max-lines MAX_LINES
                         stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
-  --json                stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 항상 남는다)
+  --json                stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 성공 · 실패 모두 남는다)

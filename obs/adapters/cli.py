@@ -163,7 +163,7 @@ def finish(client: Client, run: Callable[[], RunResult], failed_kind: str, max_l
 def _common(ap: argparse.ArgumentParser) -> None:
     ap.add_argument("--max-lines", type=int, default=DEFAULT_MAX_LINES,
                     help="stdout 줄 수 상한. 기본 %d — 나머지는 호출 디렉터리의 summary.txt 에" % DEFAULT_MAX_LINES)
-    ap.add_argument("--json", action="store_true", help="stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 항상 남는다)")
+    ap.add_argument("--json", action="store_true", help="stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 성공 · 실패 모두 남는다)")
 
 
 def _client() -> Client:
@@ -210,6 +210,8 @@ PROMQL_DOC = """promql — 즉시 조회·구간 조회 (metrics 백엔드, GET 
   --step <기간>     구간 해상도. 기본 range/60 에 가까운 값
   --max-lines <n>   stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
   --json            stdout 에 요약을 찍지 않고 경로만(파일은 항상 남는다)
+
+실패해도(HTTP 오류 · 전송 실패 · 예산 초과) 호출 디렉터리가 남는다 — tmp/obs/<시각>-<명령>-failed/ 에 보낸 호출 전부(실패 포함)와 오류 문구, 오류 메시지 끝이 그 경로다.
 
 출력은 요약이다 — 즉시 조회는 `값  {레이블}` 한 줄씩, 구간 조회는 시계열마다
 `n=점수 min max first last {레이블}` 한 줄. 원본은 호출 디렉터리의 raw.json.
@@ -335,7 +337,8 @@ def promql_main(argv: Sequence[str] | None = None) -> None:
 METRICS_SUBCOMMANDS: tuple[str, ...] = ("summarize", "compare", "top")
 
 METRICS_COMMON_DOC = """계산은 백엔드가 한다 — 코어는 질의를 조립해 결과만 받는다(연산당 질의 1회). 창(compare 는 기준선도)은 호출 디렉터리의
-summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만."""
+summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만.
+실패해도(HTTP 오류 · 전송 실패 · 예산 초과) 호출 디렉터리가 남는다 — tmp/obs/<시각>-<명령>-failed/ 에 보낸 호출 전부(실패 포함)와 오류 문구, 오류 메시지 끝이 그 경로다."""
 
 SUMMARIZE_DOC = """promql.py summarize '<PromQL>' --since 1h [--end <시각>] [--step 60s]
 
@@ -507,6 +510,7 @@ LOGQL_DOC = """logql — 로그 조회 (logs 백엔드, GET 만).
   --max-lines <n>    stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
   --json             stdout 에 요약을 찍지 않고 경로만(파일은 항상 남는다)
 
+실패해도(HTTP 오류 · 전송 실패 · 예산 초과) 호출 디렉터리가 남는다 — tmp/obs/<시각>-<명령>-failed/ 에 보낸 호출 전부(실패 포함)와 오류 문구, 오류 메시지 끝이 그 경로다.
 테넌트는 서버가 얹는다 — 여기서 다루지 않는다.
 출력은 `시각  {스트림 레이블 차이}  줄` — 모든 스트림에 공통인 레이블은 머리에 한 번만 찍는다.
 """
@@ -730,7 +734,8 @@ def logs_run(client: Client, a: LogsArgs, at: float | None = None) -> RunResult:
 
 
 LOGS_COMMON_DOC = """계산은 백엔드(Loki)가 한다 — count_over_time · Patterns API 의 환원 결과만 받고, 원본 로그 줄은 예시 · 첫 발생 · 문맥에만 온다.
-창(around 는 --ts ± --span)은 호출 디렉터리의 summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만."""
+창(around 는 --ts ± --span)은 호출 디렉터리의 summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만.
+실패해도(HTTP 오류 · 전송 실패 · 예산 초과) 호출 디렉터리가 남는다 — tmp/obs/<시각>-<명령>-failed/ 에 보낸 호출 전부(실패 포함)와 오류 문구, 오류 메시지 끝이 그 경로다."""
 
 HISTOGRAM_DOC = """logql.py histogram '<selector>' [--by detected_level] [--since 1h] [--end <시각>] [--step 60s]
 
@@ -827,6 +832,7 @@ TRACEQL_DOC = """traceql — 트레이스 검색·조회 (traces 백엔드, GET 
   --max-lines <n>    stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
   --json             stdout 에 요약을 찍지 않고 경로만(파일은 항상 남는다)
 
+실패해도(HTTP 오류 · 전송 실패 · 예산 초과) 호출 디렉터리가 남는다 — tmp/obs/<시각>-<명령>-failed/ 에 보낸 호출 전부(실패 포함)와 오류 문구, 오류 메시지 끝이 그 경로다.
 trace 는 원본이 크다 — stdout 은 요약(서비스·span 수·오류·느린 span)이고 원본은 호출 디렉터리의 raw.json.
 """
 
@@ -1024,7 +1030,8 @@ def _span_time(t: SpanTime | None) -> str:
 
 
 TRACES_COMMON_DOC = """원본(span 트리 · 검색 응답)은 호출 디렉터리의 raw.json 에 남고 stdout 은 환원물이다. 창은 summary.txt 머리에
-남는다. stdout 은 --max-lines 에서 잘린다. --json 은 경로만."""
+남는다. stdout 은 --max-lines 에서 잘린다. --json 은 경로만.
+실패해도(HTTP 오류 · 전송 실패 · 예산 초과) 호출 디렉터리가 남는다 — tmp/obs/<시각>-<명령>-failed/ 에 보낸 호출 전부(실패 포함)와 오류 문구, 오류 메시지 끝이 그 경로다."""
 
 EXEMPLARS_DOC = """traceql.py exemplars [--q '<조건식>'] [--since 1h] [--k 3] [--quantile 0.95] [--baseline-range 7d] [--limit 100]
 
