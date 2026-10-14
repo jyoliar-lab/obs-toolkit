@@ -25,7 +25,7 @@ def test_summary_lines(replay: ReplayFactory, request: pytest.FixtureRequest) ->
     """summarize 의 렌더링은 창 헤더 한 줄 뒤에 시계열마다 일곱 통계 한 줄이다 — 시계열 수는 fixture 의 pod 수이고 min ≤ p50 ≤ p95 ≤ max 다."""
     client, t = replay("promql-instant-summarize-cpu-by-pod.json")
     w = Window.last("1h", at=t.at)
-    ev, _ = metrics.summarize(client, CPU_QUERY, w)
+    ev = metrics.summarize(client, CPU_QUERY, w)
     assert len(ev.value.series) == len(_pods_in("promql-instant-summarize-cpu-by-pod.json"))
     for s in ev.value.series:
         assert s.min <= s.p50 <= s.p95 <= s.max
@@ -36,7 +36,7 @@ def test_summary_lines_empty(replay: ReplayFactory, request: pytest.FixtureReque
     """빈 응답의 summarize 렌더링은 "데이터 없음" 한 줄이다."""
     client, t = replay("promql-instant-empty.json", unchecked=UNCHECKED_SHARED_EMPTY)
     w = Window.last("1h", at=t.at)
-    ev, _ = metrics.summarize(client, CPU_QUERY, w)
+    ev = metrics.summarize(client, CPU_QUERY, w)
     assert_snapshot(request, cli.summary_lines(ev.value, w))
 
 
@@ -46,7 +46,7 @@ def test_compare_lines(replay: ReplayFactory, request: pytest.FixtureRequest) ->
     """compare 의 렌더링은 헤더 한 줄 뒤에 시계열마다 비율 · Δ · now · base 한 줄이 비율 내림차순이다 — Δ 는 now − base 다."""
     client, t = replay("promql-instant-compare-cpu-by-pod-1d.json")
     w = Window.last("1h", at=t.at).with_baseline("1d")
-    ev, _ = metrics.compare(client, CPU_QUERY, w)
+    ev = metrics.compare(client, CPU_QUERY, w)
     assert len(ev.value.deltas) == len(_pods_in("promql-instant-compare-cpu-by-pod-1d.json"))
     ratios = [d.ratio for d in ev.value.deltas]
     assert ratios == sorted((r for r in ratios if r is not None), reverse=True)
@@ -61,7 +61,7 @@ def test_compare_lines_without_baseline(replay: ReplayFactory, request: pytest.F
     """보존 밖 offset 으로 base 가 부재면 렌더링이 "기준선 없음" 을 말하고 비율은 어디에도 없다."""
     client, t = replay("promql-instant-compare-cpu-by-pod-no-baseline.json")
     w = Window.last("1h", at=t.at).with_baseline("60d")
-    ev, _ = metrics.compare(client, CPU_QUERY, w)
+    ev = metrics.compare(client, CPU_QUERY, w)
     assert ev.value.baseline_empty
     assert all(d.ratio is None for d in ev.value.deltas)
     assert_snapshot(request, cli.compare_lines(ev.value, w))
@@ -73,7 +73,7 @@ def test_compare_lines_mark_missing_baseline_zero_and_missing_now(make_client: C
                    _stat("d", "now", "3.9"), _stat("d", "base", "1"))
     client, _ = make_client({("metrics", "api/v1/query"): (200, body)})
     w = Window.last("1h", at=AT).with_baseline("1d")
-    ev, _ = metrics.compare(client, "q", w)
+    ev = metrics.compare(client, "q", w)
     assert_snapshot(request, cli.compare_lines(ev.value, w))
 
 
@@ -83,7 +83,7 @@ def test_top_lines(replay: ReplayFactory, request: pytest.FixtureRequest) -> Non
     """top 의 렌더링은 값 내림차순으로 항목마다 `값  {레이블}` 한 줄이다."""
     client, t = replay("promql-instant-topk-memory-by-pod.json")
     w = Window.last("1h", at=t.at)
-    ev, _ = metrics.top(client, "container_memory_working_set_bytes", w, k=10, by=["pod"])
+    ev = metrics.top(client, "container_memory_working_set_bytes", w, k=10, by=["pod"])
     assert [e.value for e in ev.value.entries] == sorted((e.value for e in ev.value.entries), reverse=True)
     assert_snapshot(request, cli.top_lines(ev.value, w))
 
@@ -92,7 +92,7 @@ def test_top_lines_empty(replay: ReplayFactory, request: pytest.FixtureRequest) 
     """빈 응답의 top 렌더링은 "데이터 없음" 한 줄이다."""
     client, t = replay("promql-instant-empty.json", unchecked=UNCHECKED_SHARED_EMPTY)
     w = Window.last("1h", at=t.at)
-    ev, _ = metrics.top(client, "nothing", w)
+    ev = metrics.top(client, "nothing", w)
     assert_snapshot(request, cli.top_lines(ev.value, w))
 
 

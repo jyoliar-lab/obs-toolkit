@@ -8,6 +8,7 @@ step 은 창 길이/60(최소 15s) — 긴 창(--since 7d)이면 해상도가 �
 
 계산은 백엔드가 한다 — 코어는 질의를 조립해 결과만 받는다(연산당 질의 1회). 창(compare 는 기준선도)은 호출 디렉터리의
 summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만.
+실패해도(HTTP 오류 · 전송 실패 · 예산 초과) 호출 디렉터리가 남는다 — tmp/obs/<시각>-<명령>-failed/ 에 보낸 호출 전부(실패 포함)와 오류 문구, 오류 메시지 끝이 그 경로다.
 
 positional arguments:
   query                 PromQL
@@ -18,5 +19,5 @@ options:
   --end END             창 끝 (now · -10m · unix초 · RFC3339). 기본 now
   --max-lines MAX_LINES
                         stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
-  --json                stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 항상 남는다)
+  --json                stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 성공 · 실패 모두 남는다)
   --step STEP           서브쿼리 해상도. 기본 창 길이/60 (최소 15s)

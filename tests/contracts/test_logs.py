@@ -10,7 +10,7 @@ import pytest
 
 from obs import logs
 from obs.adapters import cli
-from obs.core import JSON, Client, Config, ObsError, Response, Window
+from obs.core import JSON, Client, Config, ObsError, Window
 from obs.logs import LogEntry, Sample, Side
 from obs.metrics import auto_step
 from tests.conftest import AT, MINUTE, ClientFactory, LokiFactory, _vector
@@ -144,7 +144,7 @@ def test_histogram_groups_totals_and_times(make_client: ClientFactory) -> None:
                    ({"detected_level": "error"}, [(100.0, "5"), (220.0, "5")]))
     client, _ = make_client({("logs", RANGE): (200, body)})
     # when
-    ev, _ = logs.histogram(client, SEL, W)
+    ev = logs.histogram(client, SEL, W)
     # then
     h = ev.value
     assert h.times == [100.0, 160.0, 220.0]
@@ -174,11 +174,11 @@ def test_histogram_sends_one_metric_range_query(make_client: ClientFactory) -> N
 def test_histogram_sends_assembled_query_with_auto_step(make_client: ClientFactory) -> None:
     """histogram 은 자동 step 으로 조립한 질의를 보내고 Histogram 의 step 은 그 자동값이다."""
     # given
-    client, _ = make_client({("logs", RANGE): (200, _matrix())})
+    client, t = make_client({("logs", RANGE): (200, _matrix())})
     # when
-    ev, raw = logs.histogram(client, SEL, W)
+    ev = logs.histogram(client, SEL, W)
     # then
-    assert raw[0].params["query"] == logs.histogram_query(SEL, ["detected_level"], "60s")
+    assert _params(t.calls[0])["query"] == logs.histogram_query(SEL, ["detected_level"], "60s")
     assert ev.value.step == "60s"
 
 
@@ -188,7 +188,7 @@ def test_histogram_folds_groups_beyond_cap(make_client: ClientFactory) -> None:
     body = _matrix(*[({"pod": "p%d" % i}, [(100.0, str(i * 10))]) for i in range(1, 6)])
     client, _ = make_client({("logs", RANGE): (200, body)})
     # when
-    ev, _ = logs.histogram(client, SEL, W, by=["pod"], max_groups=3)
+    ev = logs.histogram(client, SEL, W, by=["pod"], max_groups=3)
     # then
     assert len(ev.value.groups) == 3
     assert [g.total for g in ev.value.groups] == [50, 40, 30]
@@ -200,7 +200,7 @@ def test_histogram_empty_is_no_data(make_client: ClientFactory) -> None:
     # given
     client, _ = make_client({("logs", RANGE): (200, _matrix())})
     # when
-    ev, _ = logs.histogram(client, SEL, W)
+    ev = logs.histogram(client, SEL, W)
     # then
     assert ev.value.groups == []
     assert ev.value.folded == 0
@@ -211,7 +211,7 @@ def test_histogram_zero_is_not_no_data(make_client: ClientFactory) -> None:
     # given
     client, _ = make_client({("logs", RANGE): (200, _matrix(({"detected_level": "error"}, [(100.0, "0"), (160.0, "0")])))})
     # when
-    ev, _ = logs.histogram(client, SEL, W)
+    ev = logs.histogram(client, SEL, W)
     # then
     assert len(ev.value.groups) == 1
     assert ev.value.groups[0].total == 0
@@ -341,7 +341,7 @@ def test_templates_clusters_with_examples(make_client: ClientFactory) -> None:
     # given — 패턴 셋 · 예시 응답
     client, _ = make_client({("logs", PATTERNS): (200, THREE), ("logs", RANGE): (200, EXAMPLE)})
     # when
-    ev, _ = logs.templates(client, SEL, W)
+    ev = logs.templates(client, SEL, W)
     # then
     t = ev.value
     assert len(t.clusters) == 3
@@ -376,33 +376,32 @@ def test_templates_requests_patterns_then_one_example_per_cluster(make_client: C
         assert e["limit"] == "1"
 
 
-def test_templates_raw_carries_patterns_and_examples(make_client: ClientFactory) -> None:
-    """templates 의 원본은 온 응답 전부를 출처와 함께 담은 Response 목록이다 — patterns 응답 하나 뒤에 군집마다 그 패턴의 예시 응답."""
-    # given
+def test_templates_logs_patterns_then_one_example_per_cluster(make_client: ClientFactory) -> None:
+    """templates 뒤 client.log 는 1 + k — patterns 응답 하나 뒤에 군집마다 그 패턴(pattern_filter)의 예시 요청과 응답이 순서대로."""
+    # given — 군집 셋의 patterns 응답 · 예시 응답
     client, _ = make_client({("logs", PATTERNS): (200, THREE), ("logs", RANGE): (200, EXAMPLE)})
     # when
-    ev, raw = logs.templates(client, SEL, W)
+    ev = logs.templates(client, SEL, W)
     # then
-    assert isinstance(raw, list)
-    assert all(isinstance(r, Response) for r in raw)
-    assert len(raw) == 1 + len(ev.value.clusters)
-    assert (raw[0].path, raw[0].body) == (PATTERNS, THREE)
-    assert [r.path for r in raw[1:]] == [RANGE] * len(ev.value.clusters)
-    assert [r.body for r in raw[1:]] == [EXAMPLE] * len(ev.value.clusters)
-    assert [r.params["query"] for r in raw[1:]] == [logs.pattern_filter(SEL, c.template) for c in ev.value.clusters]
+    assert len(ev.value.clusters) == 3
+    assert len(client.log) == 1 + len(ev.value.clusters)
+    assert (client.log[0].path, client.log[0].body) == (PATTERNS, THREE)
+    assert [r.path for r in client.log[1:]] == [RANGE] * len(ev.value.clusters)
+    assert [r.body for r in client.log[1:]] == [EXAMPLE] * len(ev.value.clusters)
+    assert [r.params["query"] for r in client.log[1:]] == [logs.pattern_filter(SEL, c.template) for c in ev.value.clusters]
 
 
-def test_templates_raw_is_patterns_only_when_no_clusters(make_client: ClientFactory) -> None:
-    """패턴이 없으면 templates 의 원본은 patterns 응답 하나뿐인 길이 1 목록이다."""
+def test_templates_logs_patterns_only_when_no_clusters(make_client: ClientFactory) -> None:
+    """패턴이 없으면 templates 뒤 client.log 는 patterns 응답 하나뿐이다."""
     # given
     body = _patterns()
     client, _ = make_client({("logs", PATTERNS): (200, body)})
     # when
-    _, raw = logs.templates(client, SEL, W)
+    logs.templates(client, SEL, W)
     # then
-    assert len(raw) == 1
-    assert raw[0].path == PATTERNS
-    assert raw[0].body == body
+    assert len(client.log) == 1
+    assert client.log[0].path == PATTERNS
+    assert client.log[0].body == body
 
 
 def test_templates_default_step_is_auto(make_client: ClientFactory) -> None:
@@ -410,7 +409,7 @@ def test_templates_default_step_is_auto(make_client: ClientFactory) -> None:
     # given
     client, t = make_client({("logs", PATTERNS): (200, THREE), ("logs", RANGE): (200, EXAMPLE)})
     # when
-    ev, _ = logs.templates(client, SEL, W)
+    ev = logs.templates(client, SEL, W)
     # then
     assert _params(t.calls[0])["step"] == auto_step(W.seconds)
     assert ev.value.step == auto_step(W.seconds)
@@ -421,7 +420,7 @@ def test_templates_explicit_step_overrides_auto(make_client: ClientFactory) -> N
     # given
     client, t = make_client({("logs", PATTERNS): (200, THREE), ("logs", RANGE): (200, EXAMPLE)})
     # when
-    ev, _ = logs.templates(client, SEL, W, step="30s")
+    ev = logs.templates(client, SEL, W, step="30s")
     # then
     assert _params(t.calls[0])["step"] == "30s"
     assert ev.value.step == "30s"
@@ -451,7 +450,7 @@ def test_templates_example_missing_is_none(config: Config) -> None:
 
     client = Client(config=config, token="test-token-not-real", transport=transport)
     # when
-    ev, _ = logs.templates(client, SEL, W)
+    ev = logs.templates(client, SEL, W)
     # then
     assert len(ev.value.clusters) == 3
     assert {c.template: c.example is None for c in ev.value.clusters} == {"a <_>": False, "b <_>": True, "c <_>": False}
@@ -463,7 +462,7 @@ def test_templates_backtick_pattern_still_gets_example(make_client: ClientFactor
     body = _patterns(("a <_>", [(100, 6)]), ("x`y <_>", [(100, 3)]), ("c <_>", [(100, 1)]))
     client, t = make_client({("logs", PATTERNS): (200, body), ("logs", RANGE): (200, EXAMPLE)})
     # when
-    ev, _ = logs.templates(client, SEL, W)
+    ev = logs.templates(client, SEL, W)
     # then
     assert len(t.calls) == 4
     quoted = [_params(c)["query"] for c in t.calls[1:] if "x`y" in _params(c)["query"]]
@@ -518,7 +517,7 @@ def test_around_reports_total_and_shown_per_side(make_loki: LokiFactory) -> None
     before = [_entry(-50 + i * 8, "b%d" % i) for i in range(6)]
     client, _ = make_loki([*before, _entry(10, "a0")], count=7)
     # when
-    ev, _ = logs.around(client, SEL, TS, 60, limit=2)
+    ev = logs.around(client, SEL, TS, 60, limit=2)
     # then
     v = ev.value
     assert v.before == Side(shown=2, truncated=True)
@@ -557,7 +556,7 @@ def test_around_keeps_only_lines_inside_window_in_order(make_loki: LokiFactory) 
     world = [_entry(-70, "out-before"), _entry(-20, "b0"), _entry(-10, "b1"), _entry(5, "a0"), _entry(15, "a1"), _entry(70, "out-after")]
     client, _ = make_loki(world, count=4)
     # when
-    ev, _ = logs.around(client, SEL, TS, 60)
+    ev = logs.around(client, SEL, TS, 60)
     # then
     assert [e.line for e in ev.value.entries] == ["b0", "b1", "a0", "a1"]
     assert [e.ts_ns for e in ev.value.entries] == sorted(e.ts_ns for e in ev.value.entries)
@@ -570,7 +569,7 @@ def test_around_drops_lines_outside_each_side_window(make_client: ClientFactory)
                                    (_ns(TS + 5), "a0"), (_ns(TS + 15), "a1"), (_ns(TS + 70), "out-after")]))
     client, _ = make_client({("logs", INSTANT): (200, _vector(({}, "4"))), ("logs", RANGE): (200, body)})
     # when
-    ev, _ = logs.around(client, SEL, TS, 60)
+    ev = logs.around(client, SEL, TS, 60)
     # then
     assert [e.line for e in ev.value.entries] == ["b0", "b1", "a0", "a1"]
 
@@ -581,27 +580,39 @@ def test_around_line_at_center_from_both_sides_counts_once(make_client: ClientFa
     body = _streams(({"pod": "p"}, [(_ns(TS), "at-center")]))
     client, _ = make_client({("logs", INSTANT): (200, _vector(({}, "1"))), ("logs", RANGE): (200, body)})
     # when
-    ev, _ = logs.around(client, SEL, TS, 60)
+    ev = logs.around(client, SEL, TS, 60)
     # then
     assert [e.line for e in ev.value.entries] == ["at-center"]
     assert ev.value.after.shown == 1
     assert ev.value.before.shown == 0
 
 
-def test_around_raw_carries_count_and_both_sides(make_client: ClientFactory) -> None:
-    """around 의 원본은 온 응답 셋을 출처와 함께 담은 Response 목록이다 — count · backward(before) · forward(after) 순."""
+def test_around_logs_count_then_before_then_after(make_client: ClientFactory) -> None:
+    """around 뒤 client.log 는 셋 — count(query) · backward(before) · forward(after) 순이고 body 가 각 응답이다."""
     # given
     count, lines = _vector(({}, "0")), _streams()
     client, _ = make_client({("logs", INSTANT): (200, count), ("logs", RANGE): (200, lines)})
     # when
-    _, raw = logs.around(client, SEL, TS, 60)
+    logs.around(client, SEL, TS, 60)
     # then
-    assert isinstance(raw, list)
-    assert all(isinstance(r, Response) for r in raw)
-    assert [r.path for r in raw] == [INSTANT, RANGE, RANGE]
-    assert raw[1].params["direction"] == "backward"
-    assert raw[2].params["direction"] == "forward"
-    assert [r.body for r in raw] == [count, lines, lines]
+    assert [r.path for r in client.log] == [INSTANT, RANGE, RANGE]
+    assert client.log[1].params["direction"] == "backward"
+    assert client.log[2].params["direction"] == "forward"
+    assert [r.body for r in client.log] == [count, lines, lines]
+
+
+def test_around_logs_count_before_failing_range(make_client: ClientFactory) -> None:
+    """around 의 둘째 호출(before)이 500 이면 ObsError 와 별개로 client.log 는 둘 — count 200 뒤 before 500 이고 after 는 없다."""
+    # given — count 200 · query_range 500
+    count = _vector(({}, "3"))
+    client, _ = make_client({("logs", INSTANT): (200, count), ("logs", RANGE): (500, {"message": "boom"})})
+    # when
+    with pytest.raises(ObsError):
+        logs.around(client, SEL, TS, 60)
+    # then
+    assert [r.path for r in client.log] == [INSTANT, RANGE]
+    assert [r.status for r in client.log] == [200, 500]
+    assert client.log[1].params["direction"] == "backward"
 
 
 def test_around_center_is_ts(make_client: ClientFactory) -> None:
@@ -609,7 +620,7 @@ def test_around_center_is_ts(make_client: ClientFactory) -> None:
     # given
     client, _ = make_client({("logs", INSTANT): (200, _vector(({}, "0"))), ("logs", RANGE): (200, _streams())})
     # when
-    ev, _ = logs.around(client, SEL, TS, 60)
+    ev = logs.around(client, SEL, TS, 60)
     # then
     assert ev.value.center == TS
     assert ev.value.span == 60
@@ -620,7 +631,7 @@ def test_around_empty_window(make_loki: LokiFactory) -> None:
     # given
     client, _ = make_loki([], count=0)
     # when
-    ev, _ = logs.around(client, SEL, TS, 60)
+    ev = logs.around(client, SEL, TS, 60)
     # then
     assert ev.value.entries == []
     assert ev.value.total == 0
@@ -634,7 +645,7 @@ def test_around_line_at_center_counts_once_as_after(make_loki: LokiFactory) -> N
     # given
     client, _ = make_loki([_entry(0, "at-center")], count=1)
     # when
-    ev, _ = logs.around(client, SEL, TS, 60)
+    ev = logs.around(client, SEL, TS, 60)
     # then
     assert [e.line for e in ev.value.entries] == ["at-center"]
     assert ev.value.after.shown == 1
@@ -647,7 +658,7 @@ def test_around_limit_applies_per_side(make_loki: LokiFactory) -> None:
     world = [_entry(-30, "b0"), _entry(-20, "b1"), _entry(-10, "b2"), _entry(10, "a0"), _entry(20, "a1"), _entry(30, "a2")]
     client, _ = make_loki(world, count=6)
     # when
-    ev, _ = logs.around(client, SEL, TS, 60, limit=2)
+    ev = logs.around(client, SEL, TS, 60, limit=2)
     # then
     assert ev.value.before == Side(2, True)
     assert ev.value.after == Side(2, True)
@@ -675,7 +686,7 @@ def test_first_seen_returns_first_match_timestamp(make_client: ClientFactory) ->
     # given
     client, _ = make_client({("logs", RANGE): (200, _streams(({"pod": "p"}, [(100_000_000_000_000, "first line")])))})
     # when
-    ev, _ = logs.first_seen(client, SEL, TEMPLATE, W)
+    ev = logs.first_seen(client, SEL, TEMPLATE, W)
     # then
     assert ev.value.ts == 100_000.0
     assert ev.value.line == "first line"
@@ -702,7 +713,7 @@ def test_first_seen_picks_earliest_across_streams(make_client: ClientFactory) ->
     body = _streams(({"pod": "b"}, [(200_000_000_000_000, "later")]), ({"pod": "a"}, [(100_000_000_000_000, "earlier")]))
     client, _ = make_client({("logs", RANGE): (200, body)})
     # when
-    ev, _ = logs.first_seen(client, SEL, TEMPLATE, W)
+    ev = logs.first_seen(client, SEL, TEMPLATE, W)
     # then
     assert ev.value.ts == 100_000.0
     assert ev.value.line == "earlier"
@@ -713,7 +724,7 @@ def test_first_seen_absent_in_window(make_client: ClientFactory) -> None:
     # given
     client, _ = make_client({("logs", RANGE): (200, _streams())})
     # when
-    ev, _ = logs.first_seen(client, SEL, TEMPLATE, W)
+    ev = logs.first_seen(client, SEL, TEMPLATE, W)
     # then
     assert ev.value.ts is None
     assert ev.value.line is None
@@ -781,18 +792,18 @@ def test_logs_run_dispatches_by_subcommand(make_client: ClientFactory, cmd: str)
                              ("logs", PATTERNS): (200, _patterns(("a <_>", [(100, 1)]))),
                              ("logs", INSTANT): (200, _vector(({}, "1")))})
     # when
-    ev, _, kind, _ = cli.logs_run(client, ARGS[cmd], at=AT)
+    ev, kind, _ = cli.logs_run(client, ARGS[cmd], at=AT)
     # then
     assert kind == "logql-%s" % cmd
     assert ev.value.lines
 
 
 def test_logs_run_around_window_is_ts_plus_minus_span(make_client: ClientFactory) -> None:
-    """around 의 RunResult 넷째 자리는 --ts ± --span 이다 — --since 창이 아니다."""
+    """around 의 RunResult 셋째 자리는 --ts ± --span 이다 — --since 창이 아니다."""
     # given — --since 는 기본 1h · 빈 응답
     client, _ = make_client({("logs", INSTANT): (200, _vector()), ("logs", RANGE): (200, _streams())})
     # when
-    _, _, _, window = cli.logs_run(client, cli.LogsArgs(cmd="around", selector=SEL, ts="-30m", span="60s"), at=AT)
+    _, _, window = cli.logs_run(client, cli.LogsArgs(cmd="around", selector=SEL, ts="-30m", span="60s"), at=AT)
     # then
     assert window == Window(AT - 30 * MINUTE - 60, AT - 30 * MINUTE + 60)
 
@@ -802,7 +813,7 @@ def test_logs_run_around_empty_lines_show_ts_plus_minus_span(make_client: Client
     # given — --since 는 기본 1h · 빈 응답
     client, _ = make_client({("logs", INSTANT): (200, _vector()), ("logs", RANGE): (200, _streams())})
     # when
-    ev, _, _, _ = cli.logs_run(client, cli.LogsArgs(cmd="around", selector=SEL, ts="-30m", span="60s"), at=AT)
+    ev, _, _ = cli.logs_run(client, cli.LogsArgs(cmd="around", selector=SEL, ts="-30m", span="60s"), at=AT)
     # then
     lines = ev.value.lines
     assert len(lines) == 1
@@ -811,49 +822,3 @@ def test_logs_run_around_empty_lines_show_ts_plus_minus_span(make_client: Client
     assert cli.window_str(Window.last("1h", None, AT)) not in lines[0]
 
 
-# ── 단일 호출 연산의 원본 — histogram · first_seen ─────────────────────────────────
-
-def _raw(client: Client, op: str) -> tuple[str, list[Response]]:
-    """단일 호출 연산 둘을 같은 창으로 부르고 (조립 질의, 원본) 을 돌려준다 — 조립 질의는 질의 조립 함수로 만든다."""
-    if op == "histogram":
-        raw = logs.histogram(client, SEL, W)[1]
-        return logs.histogram_query(SEL, ["detected_level"], "60s"), raw
-    raw = logs.first_seen(client, SEL, TEMPLATE, W)[1]
-    return logs.pattern_filter(SEL, TEMPLATE), raw
-
-
-SINGLE_CALL_BODIES: dict[str, dict[str, JSON]] = {
-    "histogram": _matrix(({"detected_level": "info"}, [(100.0, "1")])),
-    "first_seen": _streams(({"pod": "p"}, [(100_000_000_000_000, "first line")])),
-}
-
-
-@pytest.mark.parametrize("op", ["histogram", "first_seen"])
-def test_single_call_raw_is_one_response(make_client: ClientFactory, op: str) -> None:
-    """단일 호출 연산의 원본은 그 호출 하나의 Response 를 담은 길이 1 목록이다 — 경로 · 받은 응답 · 보낸 질의가 실린다."""
-    # given
-    body = SINGLE_CALL_BODIES[op]
-    client, _ = make_client({("logs", RANGE): (200, body)})
-    # when
-    query, raw = _raw(client, op)
-    # then
-    assert isinstance(raw, list)
-    assert len(raw) == 1
-    assert isinstance(raw[0], Response)
-    assert raw[0].path == RANGE
-    assert raw[0].body == body
-    assert raw[0].params["query"] == query
-
-
-
-@pytest.mark.parametrize("op", ["histogram", "first_seen"])
-def test_single_call_raw_is_one_response_even_when_empty(make_client: ClientFactory, op: str) -> None:
-    """응답이 "데이터 없음" 이어도 원본은 빈 목록이 아니라 그 응답 하나다 — "데이터 없음" 과 "호출 없음" 이 갈린다."""
-    # given — 시계열 · 스트림이 없는 응답
-    body = _matrix() if op == "histogram" else _streams()
-    client, _ = make_client({("logs", RANGE): (200, body)})
-    # when
-    _, raw = _raw(client, op)
-    # then
-    assert len(raw) == 1
-    assert raw[0].body == body

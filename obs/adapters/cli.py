@@ -43,8 +43,8 @@ from obs.traces import (
 DEFAULT_MAX_LINES: int = 40
 DEFAULT_LOG_LIMIT: int = 30
 
-RunResult: TypeAlias = "tuple[Evidence[Lines], list[Response], str, Window]"   # 둘째 자리(원본) — 호출 순서의 Response 목록
-"""(근거, 원본 Response 목록, spill 종류 이름, CLI 가 인자로 계산한 창)"""
+RunResult: TypeAlias = "tuple[Evidence[Lines], str, Window]"   # 원본 자리 없음 — 보낸 호출의 기록은 Client.log
+"""(근거, spill 종류 이름, CLI 가 인자로 계산한 창)"""
 
 
 # ── 응답 dataclass + 파서 — Loki 의 로그 파서(Stream · LogResult · parse_logs)는 obs.logs 에, Prometheus 형은 obs.metrics 에 ──
@@ -125,16 +125,45 @@ def window_preamble(window: Window) -> list[str]:
     return [*lines, ""]
 
 
-def _finish(ev: Evidence[Lines], raw: list[Response], kind: str, window: Window, max_lines: int, as_json: bool) -> None:
+def _finish(ev: Evidence[Lines], raw: list[Response], kind: str, window: Window, max_lines: int, as_json: bool,
+            env: Mapping[str, str] | None = None, out: Callable[[str], None] = print) -> None:
     """Evidence 를 stdout 규약으로. as_json 은 stdout 에 요약을 찍지 않고 경로만(파일은 어느 쪽이든 같다).
     summary.txt 는 머리(창) + 요약 전체다."""
-    emit(ev.value.lines, raw, kind, max_lines, quiet=as_json, preamble=window_preamble(window))
+    emit(ev.value.lines, raw, kind, max_lines, quiet=as_json, env=env, out=out, preamble=window_preamble(window))
+
+
+def _stderr(line: str) -> None:
+    print(line, file=sys.stderr)
+
+
+def _spill_failed(client: Client, failed_kind: str, error: BaseException, env: Mapping[str, str] | None) -> str:
+    """실패한 run 의 client.log 를 <failed_kind> 호출 디렉터리로 — summary.txt 는 오류 문구. 안내할 경로 문구를 돌려준다."""
+    ref = spill_ref(spill(failed_kind, client.log, [str(error)], env), env)
+    return "%s/ (%s · %s)" % (ref, SPILL_RAW, SPILL_SUMMARY)
+
+
+def finish(client: Client, run: Callable[[], RunResult], failed_kind: str, max_lines: int, as_json: bool,
+           env: Mapping[str, str] | None = None, out: Callable[[str], None] = print, err: Callable[[str], None] = _stderr) -> None:
+    """run 을 돌리고 끝낸다 — 성공이면 client.log 를 원본으로 emit(지금의 _finish). 실패(어떤 예외든)면 client.log 가 비지 않을 때
+    <failed_kind> 호출 디렉터리를 남기고(summary.txt 는 오류 문구) — ObsError 는 같은 종류로 문구 끝에 경로를 붙여 다시 올리고,
+    그 외 예외는 err 로 경로 한 줄을 찍은 뒤 그대로 올린다. 보낸 호출이 없으면 디렉터리 없이 예외 그대로."""
+    try:
+        ev, kind, window = run()
+    except ObsError as e:
+        if not client.log:
+            raise
+        raise type(e)("%s — 원본: %s" % (e, _spill_failed(client, failed_kind, e, env))) from e
+    except Exception as e:
+        if client.log:
+            err("원본: %s" % _spill_failed(client, failed_kind, e, env))
+        raise
+    _finish(ev, client.log, kind, window, max_lines, as_json, env=env, out=out)
 
 
 def _common(ap: argparse.ArgumentParser) -> None:
     ap.add_argument("--max-lines", type=int, default=DEFAULT_MAX_LINES,
                     help="stdout 줄 수 상한. 기본 %d — 나머지는 호출 디렉터리의 summary.txt 에" % DEFAULT_MAX_LINES)
-    ap.add_argument("--json", action="store_true", help="stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 항상 남는다)")
+    ap.add_argument("--json", action="store_true", help="stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 성공 · 실패 모두 남는다)")
 
 
 def _client() -> Client:
@@ -181,6 +210,8 @@ PROMQL_DOC = """promql — 즉시 조회·구간 조회 (metrics 백엔드, GET 
   --step <기간>     구간 해상도. 기본 range/60 에 가까운 값
   --max-lines <n>   stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
   --json            stdout 에 요약을 찍지 않고 경로만(파일은 항상 남는다)
+
+실패해도(HTTP 오류 · 전송 실패 · 예산 초과) 호출 디렉터리가 남는다 — tmp/obs/<시각>-<명령>-failed/ 에 보낸 호출 전부(실패 포함)와 오류 문구, 오류 메시지 끝이 그 경로다.
 
 출력은 요약이다 — 즉시 조회는 `값  {레이블}` 한 줄씩, 구간 조회는 시계열마다
 `n=점수 min max first last {레이블}` 한 줄. 원본은 호출 디렉터리의 raw.json.
@@ -275,7 +306,7 @@ def promql_run(client: Client, a: PromqlArgs, at: float | None = None) -> RunRes
         lines = instant_lines(parse_metric(body))
         kind = "promql"
 
-    return _evidence(lines), [resp], kind, window
+    return _evidence(lines), kind, window
 
 
 def promql_main(argv: Sequence[str] | None = None) -> None:
@@ -297,8 +328,8 @@ def promql_main(argv: Sequence[str] | None = None) -> None:
     a = ap.parse_args(argv)
     args = PromqlArgs(query=a.query, end=a.end, range_=a.range_, step=a.step, points=a.points,
                       labels=a.labels, label_values=a.label_values, series=a.series)
-    ev, raw, kind, window = promql_run(_client(), args)
-    _finish(ev, raw, kind, window, a.max_lines, a.json)
+    client = _client()
+    finish(client, lambda: promql_run(client, args), "promql-failed", a.max_lines, a.json)
 
 
 # ── 환원 연산 — promql.py 의 서브커맨드 (계산은 obs.metrics, 표는 여기) ─────────────────
@@ -306,7 +337,8 @@ def promql_main(argv: Sequence[str] | None = None) -> None:
 METRICS_SUBCOMMANDS: tuple[str, ...] = ("summarize", "compare", "top")
 
 METRICS_COMMON_DOC = """계산은 백엔드가 한다 — 코어는 질의를 조립해 결과만 받는다(연산당 질의 1회). 창(compare 는 기준선도)은 호출 디렉터리의
-summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만."""
+summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만.
+실패해도(HTTP 오류 · 전송 실패 · 예산 초과) 호출 디렉터리가 남는다 — tmp/obs/<시각>-<명령>-failed/ 에 보낸 호출 전부(실패 포함)와 오류 문구, 오류 메시지 끝이 그 경로다."""
 
 SUMMARIZE_DOC = """promql.py summarize '<PromQL>' --since 1h [--end <시각>] [--step 60s]
 
@@ -406,15 +438,15 @@ def metrics_run(client: Client, a: MetricsArgs, at: float | None = None) -> RunR
     base_ts = now() if at is None else at
     window = Window.last(a.since, a.end, at) if a.cmd != "top" else Window(parse_time(a.end, base_ts), parse_time(a.end, base_ts))
     if a.cmd == "summarize":
-        ev, raw = summarize(client, a.query, window, a.step)
-        return _evidence(summary_lines(ev.value, window)), raw, "promql-summarize", window
+        ev = summarize(client, a.query, window, a.step)
+        return _evidence(summary_lines(ev.value, window)), "promql-summarize", window
     if a.cmd == "compare":
         w = window.with_baseline(a.baseline)
-        ev_c, raw = compare(client, a.query, w, a.step)
-        return _evidence(compare_lines(ev_c.value, w)), raw, "promql-compare", w
+        ev_c = compare(client, a.query, w, a.step)
+        return _evidence(compare_lines(ev_c.value, w)), "promql-compare", w
     if a.cmd == "top":
-        ev_t, raw = top(client, a.query, window, k=a.k, by=a.by.split(","), agg=a.agg)
-        return _evidence(top_lines(ev_t.value, window)), raw, "promql-top", window
+        ev_t = top(client, a.query, window, k=a.k, by=a.by.split(","), agg=a.agg)
+        return _evidence(top_lines(ev_t.value, window)), "promql-top", window
     raise ObsError("알 수 없는 명령 %r — %s" % (a.cmd, " · ".join(METRICS_SUBCOMMANDS)))
 
 
@@ -448,8 +480,8 @@ def metrics_main(argv: Sequence[str]) -> None:
     args = MetricsArgs(cmd=a.cmd, query=a.query, since=getattr(a, "since", "1h"), end=a.end, step=getattr(a, "step", None),
                        baseline=getattr(a, "baseline", DEFAULT_BASELINE), k=getattr(a, "k", DEFAULT_TOP_K),
                        by=getattr(a, "by", "pod"), agg=getattr(a, "agg", DEFAULT_TOP_AGG))
-    ev, raw, kind, window = metrics_run(_client(), args)
-    _finish(ev, raw, kind, window, a.max_lines, a.json)
+    client = _client()
+    finish(client, lambda: metrics_run(client, args), "promql-%s-failed" % a.cmd, a.max_lines, a.json)
 
 
 # ── logql ────────────────────────────────────────────────────────────────────────
@@ -478,6 +510,7 @@ LOGQL_DOC = """logql — 로그 조회 (logs 백엔드, GET 만).
   --max-lines <n>    stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
   --json             stdout 에 요약을 찍지 않고 경로만(파일은 항상 남는다)
 
+실패해도(HTTP 오류 · 전송 실패 · 예산 초과) 호출 디렉터리가 남는다 — tmp/obs/<시각>-<명령>-failed/ 에 보낸 호출 전부(실패 포함)와 오류 문구, 오류 메시지 끝이 그 경로다.
 테넌트는 서버가 얹는다 — 여기서 다루지 않는다.
 출력은 `시각  {스트림 레이블 차이}  줄` — 모든 스트림에 공통인 레이블은 머리에 한 번만 찍는다.
 """
@@ -572,7 +605,7 @@ def logql_run(client: Client, a: LogqlArgs, at: float | None = None) -> RunResul
         lines = matrix_lines(res) if res.result_type == "matrix" else stream_lines(res, a.direction, a.width)
         kind = "logql"
 
-    return _evidence(lines), [resp], kind, window
+    return _evidence(lines), kind, window
 
 
 def logql_main(argv: Sequence[str] | None = None) -> None:
@@ -595,8 +628,8 @@ def logql_main(argv: Sequence[str] | None = None) -> None:
     a = ap.parse_args(argv)
     args = LogqlArgs(query=a.query, since=a.since, end=a.end, limit=a.limit, direction=a.direction,
                      width=a.width, labels=a.labels, label_values=a.label_values, series=a.series)
-    ev, raw, kind, window = logql_run(_client(), args)
-    _finish(ev, raw, kind, window, a.max_lines, a.json)
+    client = _client()
+    finish(client, lambda: logql_run(client, args), "logql-failed", a.max_lines, a.json)
 
 
 # ── 환원 연산 — logql.py 의 서브커맨드 (계산은 obs.logs, 표는 여기) ────────────────────
@@ -685,23 +718,24 @@ def logs_run(client: Client, a: LogsArgs, at: float | None = None) -> RunResult:
     a.validate()
     window = Window.last(a.since, a.end, at)
     if a.cmd == "histogram":
-        ev_h, raw = histogram(client, a.selector, window, by=a.by.split(","), step=a.step)
-        return _evidence(histogram_lines(ev_h.value, window)), raw, "logql-histogram", window
+        ev_h = histogram(client, a.selector, window, by=a.by.split(","), step=a.step)
+        return _evidence(histogram_lines(ev_h.value, window)), "logql-histogram", window
     if a.cmd == "templates":
-        ev_t, raw = templates(client, a.selector, window, k=a.k, step=a.step)
-        return _evidence(templates_lines(ev_t.value, window)), raw, "logql-templates", window
+        ev_t = templates(client, a.selector, window, k=a.k, step=a.step)
+        return _evidence(templates_lines(ev_t.value, window)), "logql-templates", window
     if a.cmd == "around":
         ts = parse_time(a.ts, now() if at is None else at)
         span = parse_duration(a.span)
-        ev_a, raw = around(client, a.selector, ts, span, limit=a.limit)
+        ev_a = around(client, a.selector, ts, span, limit=a.limit)
         w = Window(ts - span, ts + span)
-        return _evidence(around_lines(ev_a.value, w)), raw, "logql-around", w
-    ev_f, raw = first_seen(client, a.selector, a.template or "", window)
-    return _evidence(first_seen_lines(ev_f.value, window)), raw, "logql-first-seen", window
+        return _evidence(around_lines(ev_a.value, w)), "logql-around", w
+    ev_f = first_seen(client, a.selector, a.template or "", window)
+    return _evidence(first_seen_lines(ev_f.value, window)), "logql-first-seen", window
 
 
 LOGS_COMMON_DOC = """계산은 백엔드(Loki)가 한다 — count_over_time · Patterns API 의 환원 결과만 받고, 원본 로그 줄은 예시 · 첫 발생 · 문맥에만 온다.
-창(around 는 --ts ± --span)은 호출 디렉터리의 summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만."""
+창(around 는 --ts ± --span)은 호출 디렉터리의 summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만.
+실패해도(HTTP 오류 · 전송 실패 · 예산 초과) 호출 디렉터리가 남는다 — tmp/obs/<시각>-<명령>-failed/ 에 보낸 호출 전부(실패 포함)와 오류 문구, 오류 메시지 끝이 그 경로다."""
 
 HISTOGRAM_DOC = """logql.py histogram '<selector>' [--by detected_level] [--since 1h] [--end <시각>] [--step 60s]
 
@@ -768,8 +802,8 @@ def logs_main(argv: Sequence[str]) -> None:
                     by=getattr(a, "by", "detected_level"), step=getattr(a, "step", None), k=getattr(a, "k", DEFAULT_TEMPLATES_K),
                     ts=getattr(a, "ts", None), span=getattr(a, "span", DEFAULT_AROUND_SPAN), limit=getattr(a, "limit", DEFAULT_AROUND_LIMIT),
                     template=getattr(a, "template", None))
-    ev, raw, kind, window = logs_run(_client(), args)
-    _finish(ev, raw, kind, window, a.max_lines, a.json)
+    client = _client()
+    finish(client, lambda: logs_run(client, args), "logql-%s-failed" % a.cmd, a.max_lines, a.json)
 
 
 # ── traceql ──────────────────────────────────────────────────────────────────────
@@ -798,6 +832,7 @@ TRACEQL_DOC = """traceql — 트레이스 검색·조회 (traces 백엔드, GET 
   --max-lines <n>    stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
   --json             stdout 에 요약을 찍지 않고 경로만(파일은 항상 남는다)
 
+실패해도(HTTP 오류 · 전송 실패 · 예산 초과) 호출 디렉터리가 남는다 — tmp/obs/<시각>-<명령>-failed/ 에 보낸 호출 전부(실패 포함)와 오류 문구, 오류 메시지 끝이 그 경로다.
 trace 는 원본이 크다 — stdout 은 요약(서비스·span 수·오류·느린 span)이고 원본은 호출 디렉터리의 raw.json.
 """
 
@@ -889,7 +924,7 @@ def traceql_run(client: Client, a: TraceqlArgs, at: float | None = None) -> RunR
     else:
         raise ObsError("알 수 없는 명령 %r — search · trace · tags · tag-values" % a.cmd)
 
-    return _evidence(lines), [resp], kind, window
+    return _evidence(lines), kind, window
 
 
 def traceql_main(argv: Sequence[str] | None = None) -> None:
@@ -912,8 +947,8 @@ def traceql_main(argv: Sequence[str] | None = None) -> None:
     a = ap.parse_args(argv)
     args = TraceqlArgs(cmd=a.cmd, arg=a.arg, q=a.q, since=a.since, end=a.end, limit=a.limit,
                        min_duration=a.min_duration, scope=a.scope, top=a.top)
-    ev, raw, kind, window = traceql_run(_client(), args)
-    _finish(ev, raw, kind, window, a.max_lines, a.json)
+    client = _client()
+    finish(client, lambda: traceql_run(client, args), "traceql-failed", a.max_lines, a.json)
 
 
 # ── 환원 연산 — traceql.py 의 서브커맨드 (계산은 obs.traces, 표는 여기) ─────────────────
@@ -995,7 +1030,8 @@ def _span_time(t: SpanTime | None) -> str:
 
 
 TRACES_COMMON_DOC = """원본(span 트리 · 검색 응답)은 호출 디렉터리의 raw.json 에 남고 stdout 은 환원물이다. 창은 summary.txt 머리에
-남는다. stdout 은 --max-lines 에서 잘린다. --json 은 경로만."""
+남는다. stdout 은 --max-lines 에서 잘린다. --json 은 경로만.
+실패해도(HTTP 오류 · 전송 실패 · 예산 초과) 호출 디렉터리가 남는다 — tmp/obs/<시각>-<명령>-failed/ 에 보낸 호출 전부(실패 포함)와 오류 문구, 오류 메시지 끝이 그 경로다."""
 
 EXEMPLARS_DOC = """traceql.py exemplars [--q '<조건식>'] [--since 1h] [--k 3] [--quantile 0.95] [--baseline-range 7d] [--limit 100]
 
@@ -1061,16 +1097,16 @@ def traces_run(client: Client, a: TracesArgs, at: float | None = None) -> RunRes
     window = Window.last(a.since, a.end, at)
     kind = "traceql-" + a.cmd
     if a.cmd == "exemplars":
-        ev_e, raw = exemplars(client, a.q, window, k=a.k, quantile=a.quantile, baseline_range=a.baseline_range, limit=a.limit)
-        return _evidence(exemplars_lines(ev_e.value, window)), raw, kind, window
+        ev_e = exemplars(client, a.q, window, k=a.k, quantile=a.quantile, baseline_range=a.baseline_range, limit=a.limit)
+        return _evidence(exemplars_lines(ev_e.value, window)), kind, window
     if a.cmd == "critical-path":
-        ev_c, raw = critical_path(client, a.trace_id or "", window)
-        return _evidence(critical_path_lines(ev_c.value, window)), raw, kind, window
+        ev_c = critical_path(client, a.trace_id or "", window)
+        return _evidence(critical_path_lines(ev_c.value, window)), kind, window
     if a.cmd == "service-graph":
-        ev_g, raw = service_graph(client, window, quantile=a.quantile, baseline_range=a.baseline_range)
-        return _evidence(service_graph_lines(ev_g.value, window)), raw, kind, window
-    ev_d, raw = diff(client, a.slow_id or "", a.normal_id or "", window)
-    return _evidence(diff_lines(ev_d.value, window)), raw, kind, window
+        ev_g = service_graph(client, window, quantile=a.quantile, baseline_range=a.baseline_range)
+        return _evidence(service_graph_lines(ev_g.value, window)), kind, window
+    ev_d = diff(client, a.slow_id or "", a.normal_id or "", window)
+    return _evidence(diff_lines(ev_d.value, window)), kind, window
 
 
 def traces_main(argv: Sequence[str]) -> None:
@@ -1112,8 +1148,8 @@ def traces_main(argv: Sequence[str]) -> None:
                       k=getattr(a, "k", DEFAULT_EXEMPLARS_K), quantile=getattr(a, "quantile", DEFAULT_QUANTILE),
                       baseline_range=getattr(a, "baseline_range", DEFAULT_BASELINE_RANGE), limit=getattr(a, "limit", DEFAULT_SEARCH_LIMIT),
                       trace_id=getattr(a, "trace_id", None), slow_id=getattr(a, "slow_id", None), normal_id=getattr(a, "normal_id", None))
-    ev, raw, kind, w = traces_run(_client(), args)
-    _finish(ev, raw, kind, w, a.max_lines, a.json)
+    client = _client()
+    finish(client, lambda: traces_run(client, args), "traceql-%s-failed" % a.cmd, a.max_lines, a.json)
 
 
 # ── obs-doctor.py — 사람용. 물리가 보이는 유일한 출력 ───────────────────────────────

@@ -10,6 +10,7 @@ traceql.py exemplars [--q '<조건식>'] [--since 1h] [--k 3] [--quantile 0.95] 
 
 원본(span 트리 · 검색 응답)은 호출 디렉터리의 raw.json 에 남고 stdout 은 환원물이다. 창은 summary.txt 머리에
 남는다. stdout 은 --max-lines 에서 잘린다. --json 은 경로만.
+실패해도(HTTP 오류 · 전송 실패 · 예산 초과) 호출 디렉터리가 남는다 — tmp/obs/<시각>-<명령>-failed/ 에 보낸 호출 전부(실패 포함)와 오류 문구, 오류 메시지 끝이 그 경로다.
 
 options:
   -h, --help            show this help message and exit
@@ -23,4 +24,4 @@ options:
   --limit LIMIT         검색 트레이스 상한. 기본 100
   --max-lines MAX_LINES
                         stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
-  --json                stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 항상 남는다)
+  --json                stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 성공 · 실패 모두 남는다)

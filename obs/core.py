@@ -372,6 +372,7 @@ def spill_root(env: Mapping[str, str] | None = None, cwd: Path | None = None) ->
 
 SPILL_RAW: str = "raw.json"          # 호출 디렉터리 안 — 백엔드 응답 원본
 SPILL_SUMMARY: str = "summary.txt"   # 호출 디렉터리 안 — 잘리지 않은 요약 전체
+SPILL_HEAD_CHARS: int = 1_000        # 예산 초과 응답의 기록에 남기는 본문 앞부분 길이(문자)
 
 
 def spill(kind: str, payload: object, summary: Sequence[str] = (), env: Mapping[str, str] | None = None,
@@ -455,11 +456,15 @@ Transport = Callable[[str, Mapping[str, str], float], tuple[int, bytes]]
 
 @dataclass(frozen=True)
 class Response:
+    """보낸 호출 하나의 요청과 결과 — 성공 · HTTP 오류 · 전송 실패 · 예산 초과 전부 같은 꼴."""
     backend: str    # 논리 이름
     path: str       # 백엔드 네이티브 경로(api/v1/query 등) — 호스트·uid 없음
-    status: int
-    body: JSON      # 파싱된 JSON — 어댑터가 즉시 dataclass 로 옮긴다. JSON 이 아니면 str
+    status: int | None   # None = 응답 없음(전송 실패)
+    body: JSON      # 파싱된 JSON — 어댑터가 즉시 dataclass 로 옮긴다. JSON 이 아니면 str. None = 응답 없음 · 예산 초과면 앞부분 문자열
     params: dict[str, str | int | float] = field(default_factory=dict[str, str | int | float])   # 실제로 보낸 질의 파라미터(None · "" 를 뺀 뒤). {} = 파라미터 없이 보냈다
+    error: str | None = None     # None = 전송됐다 · 전송 실패의 오류 문구(Client.get 이 올리는 ObsError 와 같은 것)
+    size: int | None = None      # 받은 본문 바이트 수 — None = 받은 것 없음
+    truncated: bool = False      # True = body 가 앞부분뿐(예산 초과)
 
 
 def _scrub(text: str, secrets: tuple[str, ...]) -> str:
@@ -539,6 +544,7 @@ class Client:
     budget: Budget = field(default_factory=Budget)
     transport: Transport | None = None   # 테스트·다른 전송 주입. None 이면 urllib GET
     timeout: float = TIMEOUT_SEC
+    log: list[Response] = field(default_factory=list[Response])   # 전송을 시도한 호출 전부, 호출 순서 — 보내기 전 거부(모르는 backend · 질의 횟수 예산)는 없다
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None, budget: Budget | None = None,
@@ -550,6 +556,11 @@ class Client:
                 "%s 이 비어 있다 — 사람에게: 토큰을 .claude/settings.local.json 의 env 에 둔다(gitignored). "
                 "agent 는 값을 다루지 않는다." % ENV_TOKEN)
         return cls(config=load_config(env), token=token, budget=budget or Budget(), transport=transport)
+
+    def _unsent(self, backend: str, path: str, query: dict[str, str | int | float], err: ObsError) -> ObsError:
+        """응답을 받지 못한 호출을 log 에 남기고 그 오류를 돌려준다 — 부른 쪽이 올린다."""
+        self.log.append(Response(backend=backend, path=path, status=None, body=None, params=query, error=str(err)))
+        return err
 
     def get(self, backend: str, path: str, params: Params | None = None) -> Response:
         """GET <proxy>/<uid>/<path>?params. 오류는 ObsError 로 — 논리 이름만 말한다."""
@@ -565,20 +576,29 @@ class Client:
         try:
             status, raw = transport(url, headers, self.timeout)
         except TransportTimeout:
-            raise ObsError("%s 백엔드가 %.0f초 안에 답하지 않았다 — 무거운 질의가 흔한 원인이다: 창(--since)·구간([1d])·선택자를 좁혀 다시. "
-                           "가벼운 질의(--since 5m)도 그러면 사람에게(obs-doctor.py)." % (backend, self.timeout))
+            raise self._unsent(backend, path, query, ObsError(
+                "%s 백엔드가 %.0f초 안에 답하지 않았다 — 무거운 질의가 흔한 원인이다: 창(--since)·구간([1d])·선택자를 좁혀 다시. "
+                "가벼운 질의(--since 5m)도 그러면 사람에게(obs-doctor.py)." % (backend, self.timeout)))
         except TransportError as e:
-            raise ObsError("%s 백엔드에 닿지 못했다(%s). 사람에게: 게이트웨이·VPN 확인(obs-doctor.py)." % (backend, e))
-        self.budget.charge_bytes(len(raw))
-        if status >= 400:
-            raise ObsError(http_error_message(backend, status, raw.decode("utf-8", "replace")))
+            raise self._unsent(backend, path, query, ObsError(
+                "%s 백엔드에 닿지 못했다(%s). 사람에게: 게이트웨이·VPN 확인(obs-doctor.py)." % (backend, e)))
         text = raw.decode("utf-8", "replace")
+        try:
+            self.budget.charge_bytes(len(raw))
+        except BudgetExceeded:
+            self.log.append(Response(backend=backend, path=path, status=status, body=text[:SPILL_HEAD_CHARS], params=query,
+                                     size=len(raw), truncated=True))
+            raise
         body: JSON
         try:
             body = json.loads(text) if text else {}
         except ValueError:
             body = text
-        return Response(backend=backend, path=path, status=status, body=body, params=query)
+        resp = Response(backend=backend, path=path, status=status, body=body, params=query, size=len(raw))
+        self.log.append(resp)
+        if status >= 400:
+            raise ObsError(http_error_message(backend, status, text))
+        return resp
 
 
 # ── 진단 — 사람용. 여기서만 물리(URL·uid)가 보인다 ──────────────────────────────

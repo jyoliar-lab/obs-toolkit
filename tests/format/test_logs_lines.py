@@ -31,7 +31,7 @@ def test_histogram_lines(replay: ReplayFactory, request: pytest.FixtureRequest) 
     client, t = replay("logql-histogram-by-level.json")
     # when
     w = _hour(t.at)
-    ev, _ = logs.histogram(client, LOG_SELECTOR, w)
+    ev = logs.histogram(client, LOG_SELECTOR, w)
     lines = cli.histogram_lines(ev.value, w)
     # then
     assert len(lines) == 1 + len(ev.value.groups) + (1 if ev.value.folded else 0)
@@ -45,7 +45,7 @@ def test_histogram_lines_empty(replay: ReplayFactory, request: pytest.FixtureReq
     client, t = replay("logql-histogram-empty.json")
     # when
     w = _hour(t.at)
-    ev, _ = logs.histogram(client, EMPTY_LOG_SELECTOR, w)
+    ev = logs.histogram(client, EMPTY_LOG_SELECTOR, w)
     lines = cli.histogram_lines(ev.value, w)
     # then
     assert len(lines) == 1
@@ -61,7 +61,7 @@ def test_templates_lines(replay: ReplayFactory, request: pytest.FixtureRequest) 
     client, t = replay(TEMPLATES_FIXTURE)
     # when
     w = _hour(t.at)
-    ev, _ = logs.templates(client, LOG_SELECTOR, w, k=5)
+    ev = logs.templates(client, LOG_SELECTOR, w, k=5)
     lines = cli.templates_lines(ev.value, w)
     # then
     counted = [p for p in _recorded_patterns() if any(s.count > 0 for s in p.samples)]
@@ -77,7 +77,7 @@ def test_templates_lines_empty(replay: ReplayFactory, request: pytest.FixtureReq
     client, t = replay("logql-templates-empty.json")
     # when
     w = _hour(t.at)
-    ev, _ = logs.templates(client, EMPTY_LOG_SELECTOR, w)
+    ev = logs.templates(client, EMPTY_LOG_SELECTOR, w)
     lines = cli.templates_lines(ev.value, w)
     # then
     assert len(lines) == 1
@@ -93,7 +93,7 @@ def test_around_lines(replay: ReplayFactory, request: pytest.FixtureRequest) -> 
     client, t = replay("logql-around-careerhub-prod.json")
     ts = t.at - 30 * 60
     # when
-    ev, _ = logs.around(client, LOG_SELECTOR, ts, 60.0, limit=20)
+    ev = logs.around(client, LOG_SELECTOR, ts, 60.0, limit=20)
     w = Window(ts - 60.0, ts + 60.0)
     lines = cli.around_lines(ev.value, w)
     # then
@@ -115,7 +115,7 @@ def test_around_lines_empty(replay: ReplayFactory, request: pytest.FixtureReques
     # given
     client, t = replay("logql-around-empty.json")
     # when
-    ev, _ = logs.around(client, EMPTY_LOG_SELECTOR, t.at - 30 * 60, 60.0, limit=20)
+    ev = logs.around(client, EMPTY_LOG_SELECTOR, t.at - 30 * 60, 60.0, limit=20)
     w = Window((t.at - 30 * 60) - 60.0, (t.at - 30 * 60) + 60.0)
     lines = cli.around_lines(ev.value, w)
     # then
@@ -134,7 +134,7 @@ def test_first_seen_lines(replay: ReplayFactory, request: pytest.FixtureRequest)
     client, t = replay("logql-first-seen-careerhub-prod.json")
     # when
     w = _hour(t.at)
-    ev, _ = logs.first_seen(client, LOG_SELECTOR, first.template, w)
+    ev = logs.first_seen(client, LOG_SELECTOR, first.template, w)
     lines = cli.first_seen_lines(ev.value, w)
     # then
     assert lines[0].startswith("첫 발생")
@@ -151,7 +151,7 @@ def test_first_seen_lines_absent(replay: ReplayFactory, request: pytest.FixtureR
     client, t = replay("logql-first-seen-empty.json")
     # when
     w = _hour(t.at)
-    ev, _ = logs.first_seen(client, EMPTY_LOG_SELECTOR, FIRST_SEEN_TEMPLATE, w)
+    ev = logs.first_seen(client, EMPTY_LOG_SELECTOR, FIRST_SEEN_TEMPLATE, w)
     lines = cli.first_seen_lines(ev.value, w)
     # then
     assert lines[0].startswith("창 안에 없음")
