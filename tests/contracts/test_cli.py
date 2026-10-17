@@ -506,7 +506,7 @@ def test_promql_main_routes_red_to_metrics_run(monkeypatch: pytest.MonkeyPatch, 
     monkeypatch.setattr(cli, "_client", lambda: client)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     # when
-    cli.promql_main(["red", "svc", "--since", "6h", "--baseline", "prev", "--end", "-10m"])
+    cli.promql_main(["red", "svc", "--since", "6h", "--baseline", "prev", "--end=-10m"])
     # then
     assert seen == [cli.MetricsArgs(cmd="red", service="svc", since="6h", baseline="prev", end="-10m")]
 
