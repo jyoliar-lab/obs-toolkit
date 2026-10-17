@@ -1,6 +1,6 @@
 {
   "name": "obs-toolkit",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "홈랩 관측 스택(Prometheus·Loki·Tempo) 조회 코어 · 환원 연산(metrics: summarize·compare·top / logs: histogram·templates·around·first-seen / traces: exemplars·critical-path·service-graph·diff) · obs-query 스킬 — 원본은 코어가 받고 요약만 돌려준다",
   "author": {
     "name": "jyoliar-lab",
