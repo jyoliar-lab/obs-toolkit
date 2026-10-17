@@ -137,6 +137,31 @@ def test_red_lines_baseline_states(make_client: ClientFactory, request: pytest.F
     assert_snapshot(request, lines)
 
 
+RED_REPLAY: dict[str, str] = {
+    "value": "promql-instant-red-posting-service-24h.json", "idle": "promql-instant-red-api-composer-24h.json",
+    "missing": "promql-instant-red-no-such-service-24h.json",
+}
+"""실환경 녹화 — 24h 창의 세 상태: 값(posting-service) · 양쪽 호출 0(api-composer) · 시계열 없음(없는 서비스)."""
+
+
+@pytest.mark.parametrize("state", sorted(RED_REPLAY))
+def test_red_lines_replay(replay: ReplayFactory, request: pytest.FixtureRequest, state: str) -> None:
+    """실환경 녹화의 red 렌더링은 헤더 한 줄 뒤에 R · E · D 세 줄이다 — 녹화 요청과 같은 질의가 나간다."""
+    # given — 녹화 fixture · 24h 창 · 1d 기준선 · 녹화 시점의 at
+    client, t = replay(RED_REPLAY[state])
+    service = RED_REPLAY[state].removeprefix("promql-instant-red-").removesuffix("-24h.json")
+    w = Window.last("24h", at=t.at).with_baseline("1d")
+    # when
+    ev = metrics.red(client, service, w)
+    lines = cli.red_lines(ev.value, w)
+    # then
+    t.assert_exhausted()
+    assert len(lines) == 1 + len(metrics.RED_SIGNALS)
+    for line, name in zip(lines[1:], metrics.RED_SIGNALS):
+        assert line.startswith(name)
+    assert_snapshot(request, lines)
+
+
 # ── top ──────────────────────────────────────────────────────────────────────────
 
 def test_top_lines(replay: ReplayFactory, request: pytest.FixtureRequest) -> None:
