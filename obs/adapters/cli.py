@@ -8,7 +8,7 @@
 `Any` 는 쓰지 않는다. 접근자(`json_obj` …)는 obs.core 에, Prometheus 형 파서(`parse_metric` · `check_status`)는
 obs.metrics 에 있다 — 환원 연산이 코어에서 같은 파서를 쓴다.
 
-환원 연산(summarize · compare · top — obs.metrics)은 promql.py 의 서브커맨드다: `promql.py compare '<PromQL>' --since 1h`.
+환원 연산(summarize · compare · top · red — obs.metrics)은 promql.py 의 서브커맨드다: `promql.py compare '<PromQL>' --since 1h`.
 `metrics_run` 이 Evidence[…] 를 받아 줄로 렌더링한다 — 계산은 코어, 표는 여기.
 
 agent 인터페이스에 물리(URL · uid · 토큰)가 없다. `--uid` 같은 인자를 두지 않는다 — 논리 이름은 명령 자체가 정한다
@@ -33,7 +33,7 @@ from obs.logs import (
 )
 from obs.metrics import (
     DEFAULT_BASELINE, DEFAULT_TOP_AGG, DEFAULT_TOP_K, RED_IDLE, RED_MISSING, RED_QUANTILE, TOP_AGGS, Comparison, MetricResult, Red,
-    Summary, Top, auto_step, check_status, compare, parse_metric, red, summarize, top,
+    Signal, Summary, Top, auto_step, check_status, compare, parse_metric, red, summarize, top,
 )
 from obs.traces import (
     DEFAULT_BASELINE_RANGE, DEFAULT_EXEMPLARS_K, DEFAULT_QUANTILE, DEFAULT_SEARCH_LIMIT, CriticalPath, Edge, Exemplars, ServiceGraph, Span, SpanTime, TagScope,
@@ -432,25 +432,26 @@ def red_lines(value: Red, window: Window) -> list[str]:
     lines = ["%s  지금 %s  기준선 %s (offset %s)  (R=창 안 호출 수 · E=오류율 · D=p%d 초)" % (
         value.service, window_str(window), base_label, value.offset, round(RED_QUANTILE * 100))]
     for s in value.signals:
-        parts = [s.name]
-        if s.ratio is not None:
-            parts.append("×%s" % fmt_ratio(s.ratio))
-        if s.now_state == RED_MISSING:
-            parts.append("지금 시계열 없음")
-        elif s.now_state == RED_IDLE:
-            parts.append("now=%s (호출 0)" % (fmt_val(s.now) if s.now is not None else "—"))
-        else:
-            parts.append("now=%s" % fmt_val(s.now) if s.now is not None else "now 없음")
-        if s.base_state == RED_MISSING:
-            parts.append("기준선 없음")
-        elif s.base_state == RED_IDLE:
-            parts.append("기준선 0 (호출 0)")
-        elif s.base == 0:
-            parts.append("기준선 0")
-        else:
-            parts.append("base=%s" % fmt_val(s.base) if s.base is not None else "base 없음")
-        lines.append("  ".join(parts))
+        ratio = ["×%s" % fmt_ratio(s.ratio)] if s.ratio is not None else []
+        lines.append("  ".join([s.name, *ratio, _red_now_cell(s), _red_base_cell(s)]))
     return lines
+
+
+def _red_now_cell(s: Signal) -> str:
+    """지금 창 칸 — "시계열 없음"(missing)과 "호출 0"(idle)을 가른다. D 의 idle 은 값이 없어 — 로."""
+    if s.now_state == RED_MISSING:
+        return "지금 시계열 없음"
+    shown = fmt_val(s.now) if s.now is not None else "—"
+    return "now=%s (호출 0)" % shown if s.now_state == RED_IDLE else "now=%s" % shown
+
+
+def _red_base_cell(s: Signal) -> str:
+    """기준선 칸 — "기준선 없음"(missing) · "기준선 0"(idle, 또는 값이 0) · 값."""
+    if s.base_state == RED_MISSING:
+        return "기준선 없음"
+    if s.base_state == RED_IDLE:
+        return "기준선 0 (호출 0)"
+    return "기준선 0" if s.base == 0 else "base=%s" % (fmt_val(s.base) if s.base is not None else "—")
 
 
 def top_lines(value: Top, window: Window) -> list[str]:

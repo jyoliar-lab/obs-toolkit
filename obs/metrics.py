@@ -1,4 +1,4 @@
-"""obs.metrics — 메트릭 환원 연산: summarize · compare · top (metrics 백엔드, GET 만).
+"""obs.metrics — 메트릭 환원 연산: summarize · compare · top · red (metrics 백엔드, GET 만).
 
 계산은 백엔드(PromQL)가 한다 — 코어는 질의를 조립하고 응답을 계약(dataclass)에 담으며 "데이터 없음" · "기준선 없음" · 0 을
 가른다. 원본(시계열)은 서버를 떠나지 않고, 부른 쪽은 시계열당 값 몇 개만 받는다: "now p95=0.42, base p95=0.05, ×8.4".
@@ -256,16 +256,14 @@ def red_query(service: str, window: Window, offset: str) -> str:
         raise ObsError("서비스 이름이 필요하다 — 공백 · 따옴표 · 개행은 받지 않는다: %r" % service)
     length = duration_literal(window.seconds)
     selector = '%s, service_name="%s"' % (SERVER_KIND, service)
-    error_selector = '%s, status_code="STATUS_CODE_ERROR"' % selector
     parts: list[str] = []
     for stat in RED_STATS:
         rng = "[%s]%s" % (length, " offset %s" % offset if stat.endswith("_base") else "")
-        if stat.startswith("calls_"):
-            expr = "sum by (service_name) (increase(%s{%s}%s))" % (CALLS_METRIC, selector, rng)
-        elif stat.startswith("errors_"):
-            expr = "sum by (service_name) (increase(%s{%s}%s))" % (CALLS_METRIC, error_selector, rng)
-        else:
+        if stat.startswith("p95_"):
             expr = "histogram_quantile(%s, sum by (service_name) (rate(%s{%s}%s)))" % (RED_QUANTILE, SPAN_METRIC, selector, rng)
+        else:
+            errors_only = ', status_code="STATUS_CODE_ERROR"' if stat.startswith("errors_") else ""
+            expr = "sum by (service_name) (increase(%s{%s%s}%s))" % (CALLS_METRIC, selector, errors_only, rng)
         parts.append(tagged(expr, stat))
     return " or ".join(parts)
 
