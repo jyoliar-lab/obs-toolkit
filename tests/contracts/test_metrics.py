@@ -322,6 +322,38 @@ def test_signals_of_empty_response_is_three_missing_rows() -> None:
         assert s.base_state == metrics.RED_MISSING
 
 
+@pytest.mark.parametrize("p95", [None, "NaN"], ids=["absent", "nan"])
+def test_signals_of_missing_baseline_histogram_marks_only_d_base_missing(p95: str | None) -> None:
+    """기준선 창에 호출 · 오류는 있는데 분위수 시계열이 없거나 NaN 이면 D 만 기준선 없음(missing) 이고 R · E 의 기준선은 value 이며 비율이 있다."""
+    # given — 지금 셋 · calls_base 100 · errors_base 5 · p95_base 부재/NaN
+    stats = dict(calls_base="100", errors_base="5", **RED_NOW_ONLY)
+    if p95 is not None:
+        stats["p95_base"] = p95
+    out = _signals(**stats)
+    # when
+    r, e, d = out
+    # then
+    assert d.base is None
+    assert d.base_state == metrics.RED_MISSING
+    assert d.ratio is None
+    for s in (r, e):
+        assert s.base_state == metrics.RED_VALUE
+        assert s.ratio is not None
+
+
+def test_signals_of_zero_baseline_quantile_has_no_d_ratio() -> None:
+    """기준선의 분위수가 정확히 0 이면 D 의 기준선은 0(value)이고 D 의 비율만 없다 — R 의 비율은 있다."""
+    # given — 지금 셋 · calls_base 100 · errors_base 5 · p95_base 0
+    out = _signals(calls_base="100", errors_base="5", p95_base="0", **RED_NOW_ONLY)
+    # when
+    r, _, d = out
+    # then
+    assert d.base == 0
+    assert d.base_state == metrics.RED_VALUE
+    assert d.ratio is None
+    assert r.ratio is not None
+
+
 # ── 거부 · 판정 ──────────────────────────────────────────────────────────────────
 
 def test_summarize_requires_query(make_client: ClientFactory) -> None:
