@@ -17,17 +17,17 @@ from typing import Mapping, Sequence
 from obs.core import (
     JSON, Client, Evidence, ObsError, Window, json_int, json_list, json_obj, json_str, json_strs, parse_duration,
 )
-from obs.metrics import STAT_LABEL, MetricResult, check_status, duration_literal, finite_value, parse_metric, tagged
+from obs.metrics import (
+    CALLS_METRIC, CLIENT_KIND, SERVER_KIND, SPAN_METRIC, STAT_LABEL, MetricResult, check_status, duration_literal, finite_value,
+    parse_metric, tagged,
+)
 
 DEFAULT_QUANTILE: float = 0.95
 DEFAULT_EXEMPLARS_K: int = 3
 DEFAULT_SEARCH_LIMIT: int = 100         # exemplars 후보 검색의 limit — k 보다 넉넉히
 DEFAULT_BASELINE_RANGE: str = "7d"      # 평소 분포의 구간 — 조사 창 직전 7일(compare 의 이동 창 기준선과 다르다 — 의도)
 DRIFT_NS: int = 1_000_000               # CRISP happensBefore 완화 — 1ms
-SPAN_METRIC: str = "traces_span_metrics_duration_seconds"   # spanmetrics native histogram
-CALLS_METRIC: str = "traces_span_metrics_calls_total"
-SERVER_KIND: str = 'span_kind="SPAN_KIND_SERVER"'      # spanmetrics 의 서버 span 행 — 임계 · callee
-CLIENT_KIND: str = 'span_kind="SPAN_KIND_CLIENT"'      # spanmetrics 의 클라이언트 span 행 — 엣지
+# SPAN_METRIC · CALLS_METRIC · SERVER_KIND · CLIENT_KIND 는 obs.metrics 의 것 — red 와 같이 쓴다(이름 하나). 위에서 import
 THRESHOLD_BASELINE: str = "baseline"    # 평소 p95 — 조사 창 직전 baseline_range 분포
 THRESHOLD_WINDOW: str = "window"        # 조사 창 p95
 THRESHOLD_SAMPLE: str = "sample"        # 검색 표본 p95 — 같은 엔드포인트의 표본

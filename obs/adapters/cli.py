@@ -32,7 +32,7 @@ from obs.logs import (
     Side, Templates, around, first_seen, histogram, parse_logs, templates,
 )
 from obs.metrics import (
-    DEFAULT_BASELINE, DEFAULT_TOP_AGG, DEFAULT_TOP_K, TOP_AGGS, Comparison, MetricResult, Summary, Top,
+    DEFAULT_BASELINE, DEFAULT_TOP_AGG, DEFAULT_TOP_K, TOP_AGGS, Comparison, MetricResult, Red, Summary, Top,
     auto_step, check_status, compare, parse_metric, summarize, top,
 )
 from obs.traces import (
@@ -334,7 +334,7 @@ def promql_main(argv: Sequence[str] | None = None) -> None:
 
 # ── 환원 연산 — promql.py 의 서브커맨드 (계산은 obs.metrics, 표는 여기) ─────────────────
 
-METRICS_SUBCOMMANDS: tuple[str, ...] = ("summarize", "compare", "top")
+METRICS_SUBCOMMANDS: tuple[str, ...] = ("summarize", "compare", "top", "red")
 
 METRICS_COMMON_DOC = """계산은 백엔드가 한다 — 코어는 질의를 조립해 결과만 받는다(연산당 질의 1회). 창(compare 는 기준선도)은 호출 디렉터리의
 summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만.
@@ -413,6 +413,11 @@ def compare_lines(value: Comparison, window: Window) -> list[str]:
     return lines
 
 
+def red_lines(value: Red, window: Window) -> list[str]:
+    """헤더 한 줄 + R · E · D 세 줄 — 상태(시계열 없음 · 호출 0 · 기준선 없음 · 기준선 0)의 문구."""
+    raise NotImplementedError("red_lines")
+
+
 def top_lines(value: Top, window: Window) -> list[str]:
     if not value.entries:
         return ["(데이터 없음 — %s 시각에 %s 축의 시계열이 없다)" % (fmt_ts(window.end), ",".join(value.by))]
@@ -421,8 +426,9 @@ def top_lines(value: Top, window: Window) -> list[str]:
 
 @dataclass
 class MetricsArgs:
-    cmd: str                    # summarize · compare · top
-    query: str
+    cmd: str                    # summarize · compare · top · red
+    query: str = ""             # summarize · compare · top 의 PromQL
+    service: str = ""           # red 의 서비스 이름
     since: str = "1h"
     end: str | None = None
     step: str | None = None

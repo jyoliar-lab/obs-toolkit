@@ -43,6 +43,20 @@ DEFAULT_TOP_AGG: str = "sum"
 TOP_AGGS: tuple[str, ...] = ("sum", "max", "min", "avg", "count")
 MIN_STEP_SEC: int = 15
 
+# spanmetrics(Alloy spanmetrics connector → Prometheus) 의 메트릭 · 라벨 이름 — obs.traces(exemplars · service_graph)와 red 가 같이 쓴다.
+# 이름은 한 벌이다 — traces 가 metrics 를 import 하므로 자리는 여기(아래층).
+SPAN_METRIC: str = "traces_span_metrics_duration_seconds"   # spanmetrics native histogram
+CALLS_METRIC: str = "traces_span_metrics_calls_total"
+SERVER_KIND: str = 'span_kind="SPAN_KIND_SERVER"'      # spanmetrics 의 서버 span 행 — 임계 · callee · red
+CLIENT_KIND: str = 'span_kind="SPAN_KIND_CLIENT"'      # spanmetrics 의 클라이언트 span 행 — 엣지
+
+RED_QUANTILE: float = 0.95                          # D 의 분위수 — 고정
+RED_STATS: tuple[str, ...] = ("calls_now", "calls_base", "errors_now", "errors_base", "p95_now", "p95_base")
+RED_SIGNALS: tuple[str, ...] = ("R", "E", "D")      # 행 순서 — 항상 셋
+RED_MISSING: str = "missing"                        # 그 창에 호출 카운터 시계열이 없다
+RED_IDLE: str = "idle"                              # 시계열은 있고 창 안 호출 0 — R·E 는 값 0, D 는 산출 불가(None)
+RED_VALUE: str = "value"
+
 
 # ── 응답 dataclass + 파서 — Prometheus 형 ────────────────────────────────────────
 
@@ -157,6 +171,25 @@ class Comparison:
 
 
 @dataclass(frozen=True)
+class Signal:
+    """R · E · D 한 행. 값이 None 이면 산출이 없고 이유는 *_state 다."""
+    name: str                 # R · E · D
+    now: float | None         # None = missing, 또는 D 의 idle
+    base: float | None        # None = missing, 또는 D 의 idle
+    ratio: float | None       # now / base — 둘 다 value 이고 base ≠ 0 일 때만. 0 으로 나누지 않는다
+    now_state: str            # RED_MISSING · RED_IDLE · RED_VALUE
+    base_state: str           # 같은 셋 — "기준선 없음" = missing · "기준선 0" = idle, 또는 value 이되 0
+
+
+@dataclass(frozen=True)
+class Red:
+    """`red` 의 값 — 서비스 하나의 R · E · D. `signals` 는 항상 세 행, 이 순서. 시계열이 없어도 비지 않는다(각 행이 missing)."""
+    service: str
+    offset: str               # 기준선 offset(PromQL 기간) — Comparison.offset 과 같다
+    signals: list[Signal]
+
+
+@dataclass(frozen=True)
 class TopEntry:
     labels: dict[str, str]
     value: float
@@ -215,6 +248,11 @@ def compare_query(query: str, window: Window, step: str, offset: str) -> str:
         tagged("quantile_over_time(0.95, %s)" % sq, "now"),
         tagged("quantile_over_time(0.95, %s offset %s)" % (sq, offset), "base"),
     ])
+
+
+def red_query(service: str, window: Window, offset: str) -> str:
+    """서비스 하나의 여섯 통계(calls · errors · p95 × 지금 · 기준선)를 서버 span 행 위에서 한 질의로."""
+    raise NotImplementedError("red_query")
 
 
 def top_query(query: str, k: int, by: Sequence[str], agg: str) -> str:
@@ -303,6 +341,11 @@ def deltas_of(res: MetricResult) -> list[Delta]:
     return deltas
 
 
+def signals_of(res: MetricResult) -> list[Signal]:
+    """여섯 통계 → R · E · D 세 행의 상태(missing · idle · value)와 비율. 0 으로 나누지 않는다."""
+    raise NotImplementedError("signals_of")
+
+
 # ── 연산 — Client 주입, Window 를 받고 Evidence 를 돌려준다. 연산당 GET 1 회 ─────────
 
 def _instant(client: Client, query: str, at: float) -> dict[str, JSON]:
@@ -368,3 +411,8 @@ def top(client: Client, query: str, window: Window, k: int = DEFAULT_TOP_K, by: 
     entries.sort(key=lambda e: -e.value)
     value = Top(k=k, by=[a.strip() for a in by if a.strip()], agg=agg, entries=entries[:k])
     return Evidence(value=value)
+
+
+def red(client: Client, service: str, window: Window) -> Evidence[Red]:
+    """서비스 하나의 R · E · D 를 지금 창과 기준선 창(같은 식의 offset)에서 한 질의로. GET 1 회."""
+    raise NotImplementedError("red")

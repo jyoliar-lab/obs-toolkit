@@ -11,6 +11,7 @@ from tests.conftest import assert_snapshot
 HELP_SCREENS: dict[str, tuple[Callable[[list[str]], None], list[str]]] = {
     "promql": (cli.promql_main, ["--help"]), "promql-summarize": (cli.promql_main, ["summarize", "--help"]),
     "promql-compare": (cli.promql_main, ["compare", "--help"]), "promql-top": (cli.promql_main, ["top", "--help"]),
+    "promql-red": (cli.promql_main, ["red", "--help"]),
     "logql": (cli.logql_main, ["--help"]), "traceql": (cli.traceql_main, ["--help"]),
     "logql-histogram": (cli.logql_main, ["histogram", "--help"]), "logql-templates": (cli.logql_main, ["templates", "--help"]),
     "logql-around": (cli.logql_main, ["around", "--help"]), "logql-first-seen": (cli.logql_main, ["first-seen", "--help"]),

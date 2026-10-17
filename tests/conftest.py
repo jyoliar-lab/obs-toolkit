@@ -16,7 +16,7 @@ from obs.logs import LogEntry
 from tests.record import FIXTURES, ROOT, read_fixture, response_of, strip_physical
 from tests.replay import Call, FixtureSpec, Loaded, ReplayTransport, load_call, load_fixture_calls
 
-__all__ = ["FIXTURES", "ROOT", "Call", "Loaded", "load_call", "_no_physical", "_vector", "_stat", "AT", "MINUTE", "HOUR", "DAY", "WEEK"]   # 재수출 · 공용 헬퍼 — 테스트가 여기서 가져온다
+__all__ = ["FIXTURES", "ROOT", "Call", "Loaded", "load_call", "_no_physical", "_vector", "_stat", "_red_body", "AT", "MINUTE", "HOUR", "DAY", "WEEK"]   # 재수출 · 공용 헬퍼 — 테스트가 여기서 가져온다
 
 
 # ── 물리 비노출 — 단어 목록은 여기 한 곳 ─────────────────────────────────────────
@@ -54,6 +54,19 @@ def _vector(*items: tuple[dict[str, str], str]) -> dict[str, JSON]:
 def _stat(pod: str, stat: str, v: str) -> tuple[dict[str, str], str]:
     """환원 응답의 한 항목 — pod · stat 이름표와 값."""
     return {"pod": pod, "stat": stat}, v
+
+
+RED_SERVICE: str = "svc"
+"""red 손 입력의 서비스 이름 — 응답의 service_name 이름표."""
+RED_FULL: dict[str, str] = {"calls_now": "200", "calls_base": "100", "errors_now": "10", "errors_base": "5", "p95_now": "0.4", "p95_base": "0.2"}
+"""지금 · 기준선 모두 호출 · 오류 · 분위수가 있는 red 응답 — R ×2 · E ×1 · D ×2."""
+RED_BASE_ONLY: dict[str, str] = {k: v for k, v in RED_FULL.items() if k.endswith("_base")}
+RED_NOW_ONLY: dict[str, str] = {k: v for k, v in RED_FULL.items() if k.endswith("_now")}
+
+
+def _red_body(**stats: str) -> dict[str, JSON]:
+    """red 질의의 응답을 손으로 — stat 이름(RED_STATS) → 값 문자열. 빠진 이름은 그 시계열의 부재, "NaN" 은 값 없는 시계열."""
+    return _vector(*(({"service_name": RED_SERVICE, "stat": stat}, v) for stat, v in stats.items()))
 
 
 # ── 녹화 fixture ─────────────────────────────────────────────────────────────────

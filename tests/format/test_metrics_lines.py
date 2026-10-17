@@ -9,7 +9,10 @@ import pytest
 from obs import metrics
 from obs.adapters import cli
 from obs.core import Window, fmt_rfc3339, json_list, json_obj
-from tests.conftest import AT, UNCHECKED_SHARED_EMPTY, ClientFactory, ReplayFactory, _stat, _vector, assert_snapshot, load_response
+from tests.conftest import (
+    AT, RED_BASE_ONLY, RED_FULL, RED_NOW_ONLY, UNCHECKED_SHARED_EMPTY, ClientFactory, ReplayFactory, _red_body, _stat, _vector, assert_snapshot,
+    load_response,
+)
 from tests.record import CPU_QUERY
 
 
@@ -75,6 +78,62 @@ def test_compare_lines_mark_missing_baseline_zero_and_missing_now(make_client: C
     w = Window.last("1h", at=AT).with_baseline("1d")
     ev = metrics.compare(client, "q", w)
     assert_snapshot(request, cli.compare_lines(ev.value, w))
+
+
+# ── red — 손 입력 스냅샷(실환경 fixture 는 구현 뒤 녹화 — 머지 직전 커밋) ─────────────────
+
+RED_W: Window = Window.last("1h", at=AT).with_baseline("1d")
+
+
+def _red_lines(make_client: ClientFactory, **stats: str) -> list[str]:
+    client, _ = make_client({("metrics", "api/v1/query"): (200, _red_body(**stats))})
+    return cli.red_lines(metrics.red(client, "svc", RED_W).value, RED_W)
+
+
+def test_red_lines(make_client: ClientFactory, request: pytest.FixtureRequest) -> None:
+    """red 의 렌더링은 헤더 한 줄 뒤에 R · E · D 세 줄이다 — 각 줄이 그 이름으로 시작한다."""
+    # given — 양쪽 창에 값이 있는 응답
+    client, _ = make_client({("metrics", "api/v1/query"): (200, _red_body(**RED_FULL))})
+    # when
+    ev = metrics.red(client, "svc", RED_W)
+    lines = cli.red_lines(ev.value, RED_W)
+    # then
+    assert len(lines) == 1 + len(ev.value.signals)
+    for line, name in zip(lines[1:], ["R", "E", "D"]):
+        assert line.startswith(name)
+    assert_snapshot(request, lines)
+
+
+def test_red_lines_missing_series(make_client: ClientFactory, request: pytest.FixtureRequest) -> None:
+    """지금 창에 호출 카운터 시계열이 없는 서비스의 렌더링."""
+    # given — 기준선만 있는 응답
+    # when
+    lines = _red_lines(make_client, **RED_BASE_ONLY)
+    # then
+    assert_snapshot(request, lines)
+
+
+def test_red_lines_idle(make_client: ClientFactory, request: pytest.FixtureRequest) -> None:
+    """시계열은 있되 창 안 호출이 0 인 서비스의 렌더링."""
+    # given — calls_now 0 · p95_now NaN · 기준선 있음
+    # when
+    lines = _red_lines(make_client, calls_now="0", p95_now="NaN", **RED_BASE_ONLY)
+    # then
+    assert_snapshot(request, lines)
+
+
+@pytest.mark.parametrize("stats", [
+    RED_NOW_ONLY,
+    dict(calls_base="0", p95_base="NaN", **RED_NOW_ONLY),
+    dict(calls_now="200", errors_now="10", p95_now="0.4", calls_base="100", p95_base="0.2"),
+], ids=["missing", "idle", "e-zero"])
+def test_red_lines_baseline_states(make_client: ClientFactory, request: pytest.FixtureRequest, stats: dict[str, str]) -> None:
+    """기준선 없음 · 기준선 호출 0 · 오류 기준선 0 의 렌더링."""
+    # given — 9 · 10 · 11 의 응답
+    # when
+    lines = _red_lines(make_client, **stats)
+    # then
+    assert_snapshot(request, lines)
 
 
 # ── top ──────────────────────────────────────────────────────────────────────────
