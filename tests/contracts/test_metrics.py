@@ -337,6 +337,7 @@ def test_signals_of_missing_baseline_histogram_marks_only_d_base_missing(p95: st
     assert d.base_state == metrics.RED_MISSING
     assert d.ratio is None
     for s in (r, e):
+        assert s.base is not None
         assert s.base_state == metrics.RED_VALUE
         assert s.ratio is not None
 
