@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.parse
 from pathlib import Path
 from typing import Callable
@@ -289,6 +290,7 @@ def test_promql_help_lists_metrics_subcommands(capsys: pytest.CaptureFixture[str
     text = capsys.readouterr().out
     for name in cli.METRICS_SUBCOMMANDS:
         assert name in text
+        assert re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(name), text)
 
 
 def test_logql_help_lists_logs_subcommands(capsys: pytest.CaptureFixture[str]) -> None:

@@ -209,8 +209,8 @@ def test_signals_of_error_rise_moves_only_e_ratio() -> None:
 
 def test_signals_of_missing_calls_series_marks_all_three_missing() -> None:
     """지금 창에 호출 카운터 시계열이 없으면(오류 행만 있어도) 세 행의 지금 값이 없고 상태가 missing 이며 비율이 없다 — 기준선 값은 있다."""
-    # given — calls_now 없음 · errors_now 는 있음 · 기준선 셋은 있음
-    out = _signals(errors_now="3", **RED_BASE_ONLY)
+    # given — calls_now 없음 · errors_now · p95_now 는 있음(제 시계열이 있어도 호출 카운터가 없으면 missing) · 기준선 셋은 있음
+    out = _signals(errors_now="3", p95_now="0.3", **RED_BASE_ONLY)
     # when
     r, e, d = out
     # then
@@ -480,6 +480,7 @@ def test_red_returns_red_with_service_offset_and_signals(make_client: ClientFact
     assert ev.value.offset == RED_OFFSET
     assert [s.name for s in ev.value.signals] == ["R", "E", "D"]
     assert [s.now for s in ev.value.signals] == [200, pytest.approx(0.05), pytest.approx(0.4)]
+    assert ev.value.signals == metrics.signals_of(metrics.parse_metric(_red_body(**RED_FULL)))
 
 
 def test_red_default_baseline_is_one_day(make_client: ClientFactory) -> None:

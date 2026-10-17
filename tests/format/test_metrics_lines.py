@@ -99,6 +99,7 @@ def test_red_lines(make_client: ClientFactory, request: pytest.FixtureRequest) -
     lines = cli.red_lines(ev.value, RED_W)
     # then
     assert len(lines) == 1 + len(ev.value.signals)
+    assert len(lines) == 1 + len(metrics.RED_SIGNALS)
     for line, name in zip(lines[1:], ["R", "E", "D"]):
         assert line.startswith(name)
     assert_snapshot(request, lines)
