@@ -1,0 +1,25 @@
+usage: promql.py red [-h] [--since SINCE] [--end END] [--max-lines MAX_LINES] [--json] [--baseline BASELINE] service
+
+promql.py red <서비스> --since 1h [--end <시각>] [--baseline 1d]
+
+서비스 하나의 R · E · D — spanmetrics 의 서버 span 행 위에서 지금 창과 같은 식의 `offset <기준선>` 을 한 질의로.
+첫 줄은 서비스 · 창 · 기준선 헤더, 그 뒤 세 줄: R(창 안 호출 수) · E(오류율 = 오류 호출 / 호출) · D(p95 초, native histogram).
+각 줄은 `×비율  now=…  base=…` — 비율은 두 창 모두 값이 있고 기준선이 0 이 아닐 때만(0 으로 나누지 않는다).
+"시계열 없음"(그 창에 호출 카운터가 없다)과 "호출 0"(시계열은 있고 창 안 호출 0)은 다르다. 기준선 쪽은 "기준선 없음" · "기준선 0".
+--baseline: 1d(기본 — 1일 전 같은 시각) · 1w(1주 전) · prev(직전 창).
+
+계산은 백엔드가 한다 — 코어는 질의를 조립해 결과만 받는다(연산당 질의 1회). 창(compare 는 기준선도)은 호출 디렉터리의
+summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만.
+실패해도(HTTP 오류 · 전송 실패 · 예산 초과) 호출 디렉터리가 남는다 — tmp/obs/<시각>-<명령>-failed/ 에 보낸 호출 전부(실패 포함)와 오류 문구, 오류 메시지 끝이 그 경로다.
+
+positional arguments:
+  service               서비스 이름(spanmetrics 의 service_name)
+
+options:
+  -h, --help            show this help message and exit
+  --since SINCE         창 길이. 기본 1h
+  --end END             창 끝 (now · -10m · unix초 · RFC3339). 기본 now
+  --max-lines MAX_LINES
+                        stdout 줄 수 상한. 기본 40 — 나머지는 호출 디렉터리의 summary.txt 에
+  --json                stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 성공 · 실패 모두 남는다)
+  --baseline BASELINE   기준선 창 — 같은 식의 offset: 1d(기본 — 1일 전 같은 시각) · 1w · prev(직전 창)

@@ -32,8 +32,8 @@ from obs.logs import (
     Side, Templates, around, first_seen, histogram, parse_logs, templates,
 )
 from obs.metrics import (
-    DEFAULT_BASELINE, DEFAULT_TOP_AGG, DEFAULT_TOP_K, TOP_AGGS, Comparison, MetricResult, Red, Summary, Top,
-    auto_step, check_status, compare, parse_metric, summarize, top,
+    DEFAULT_BASELINE, DEFAULT_TOP_AGG, DEFAULT_TOP_K, RED_IDLE, RED_MISSING, RED_QUANTILE, TOP_AGGS, Comparison, MetricResult, Red,
+    Summary, Top, auto_step, check_status, compare, parse_metric, red, summarize, top,
 )
 from obs.traces import (
     DEFAULT_BASELINE_RANGE, DEFAULT_EXEMPLARS_K, DEFAULT_QUANTILE, DEFAULT_SEARCH_LIMIT, CriticalPath, Edge, Exemplars, ServiceGraph, Span, SpanTime, TagScope,
@@ -201,7 +201,8 @@ PROMQL_DOC = """promql — 즉시 조회·구간 조회 (metrics 백엔드, GET 
                                                          --baseline: 1d(기본 — 1일 전 같은 시각) · 1w · prev(직전 창)
   promql.py top '<PromQL>' --by pod [--k 10] [--agg sum]  레이블 축 상위 k — topk 로 감싸 서버가 k 개만 돌려준다.
                                                          --end 시각의 즉시 조회(창이 없다 — --since 를 받지 않는다)
-  summarize · compare 의 시간은 --since/--end (logql 과 같다). 연산당 질의 1회. 창(compare 는 기준선도)은 호출 디렉터리의
+  promql.py red <서비스> --since 1h [--baseline 1d]      서비스 하나의 R(호출 수) · E(오류율) · D(p95) — 지금 창 vs 기준선 창(spanmetrics 서버 span)
+  summarize · compare · red 의 시간은 --since/--end (logql 과 같다). 연산당 질의 1회. 창(compare 는 기준선도)은 호출 디렉터리의
   summary.txt 머리에 남는다. 각 서브커맨드의 설명·옵션 전부는 `promql.py <서브커맨드> --help`.
 
 옵션:
@@ -366,6 +367,17 @@ TOP_DOC = """promql.py top '<PromQL>' --by pod [--k 10] [--agg sum] [--end <시�
 """ + METRICS_COMMON_DOC
 
 
+RED_DOC = """promql.py red <서비스> --since 1h [--end <시각>] [--baseline 1d]
+
+서비스 하나의 R · E · D — spanmetrics 의 서버 span 행 위에서 지금 창과 같은 식의 `offset <기준선>` 을 한 질의로.
+첫 줄은 서비스 · 창 · 기준선 헤더, 그 뒤 세 줄: R(창 안 호출 수) · E(오류율 = 오류 호출 / 호출) · D(p95 초, native histogram).
+각 줄은 `×비율  now=…  base=…` — 비율은 두 창 모두 값이 있고 기준선이 0 이 아닐 때만(0 으로 나누지 않는다).
+"시계열 없음"(그 창에 호출 카운터가 없다)과 "호출 0"(시계열은 있고 창 안 호출 0)은 다르다. 기준선 쪽은 "기준선 없음" · "기준선 0".
+--baseline: 1d(기본 — 1일 전 같은 시각) · 1w(1주 전) · prev(직전 창).
+
+""" + METRICS_COMMON_DOC
+
+
 def fmt_ratio(r: float) -> str:
     return "%.3g" % r
 
@@ -415,7 +427,30 @@ def compare_lines(value: Comparison, window: Window) -> list[str]:
 
 def red_lines(value: Red, window: Window) -> list[str]:
     """헤더 한 줄 + R · E · D 세 줄 — 상태(시계열 없음 · 호출 0 · 기준선 없음 · 기준선 0)의 문구."""
-    raise NotImplementedError("red_lines")
+    base = window.baseline
+    base_label = window_str(base) if base is not None else "?"
+    lines = ["%s  지금 %s  기준선 %s (offset %s)  (R=창 안 호출 수 · E=오류율 · D=p%d 초)" % (
+        value.service, window_str(window), base_label, value.offset, round(RED_QUANTILE * 100))]
+    for s in value.signals:
+        parts = [s.name]
+        if s.ratio is not None:
+            parts.append("×%s" % fmt_ratio(s.ratio))
+        if s.now_state == RED_MISSING:
+            parts.append("지금 시계열 없음")
+        elif s.now_state == RED_IDLE:
+            parts.append("now=%s (호출 0)" % (fmt_val(s.now) if s.now is not None else "—"))
+        else:
+            parts.append("now=%s" % fmt_val(s.now) if s.now is not None else "now 없음")
+        if s.base_state == RED_MISSING:
+            parts.append("기준선 없음")
+        elif s.base_state == RED_IDLE:
+            parts.append("기준선 0 (호출 0)")
+        elif s.base == 0:
+            parts.append("기준선 0")
+        else:
+            parts.append("base=%s" % fmt_val(s.base) if s.base is not None else "base 없음")
+        lines.append("  ".join(parts))
+    return lines
 
 
 def top_lines(value: Top, window: Window) -> list[str]:
@@ -453,13 +488,17 @@ def metrics_run(client: Client, a: MetricsArgs, at: float | None = None) -> RunR
     if a.cmd == "top":
         ev_t = top(client, a.query, window, k=a.k, by=a.by.split(","), agg=a.agg)
         return _evidence(top_lines(ev_t.value, window)), "promql-top", window
+    if a.cmd == "red":
+        w = window.with_baseline(a.baseline)
+        ev_r = red(client, a.service, w)
+        return _evidence(red_lines(ev_r.value, w)), "promql-red", w
     raise ObsError("알 수 없는 명령 %r — %s" % (a.cmd, " · ".join(METRICS_SUBCOMMANDS)))
 
 
 def metrics_main(argv: Sequence[str]) -> None:
-    ap = argparse.ArgumentParser(prog="promql.py", description="메트릭 환원 연산 — summarize · compare · top. 각 서브커맨드의 --help 에 설명 전부.",
+    ap = argparse.ArgumentParser(prog="promql.py", description="메트릭 환원 연산 — summarize · compare · top · red. 각 서브커맨드의 --help 에 설명 전부.",
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", required=True, metavar="<summarize|compare|top>")
+    sub = ap.add_subparsers(dest="cmd", required=True, metavar="<%s>" % "|".join(METRICS_SUBCOMMANDS))
     fmt = argparse.RawDescriptionHelpFormatter
 
     def common(sp: argparse.ArgumentParser, end_help: str) -> None:
@@ -482,8 +521,15 @@ def metrics_main(argv: Sequence[str]) -> None:
     sp_top.add_argument("--by", default="pod", help="레이블 축. 쉼표로 여러 개. 기본 pod")
     sp_top.add_argument("--k", type=int, default=DEFAULT_TOP_K, help="상위 k. 기본 %d" % DEFAULT_TOP_K)
     sp_top.add_argument("--agg", choices=TOP_AGGS, default=DEFAULT_TOP_AGG, help="축으로 접는 집계. 기본 sum")
+    sp_red = sub.add_parser("red", help="서비스 하나의 R · E · D — 지금 창 vs 기준선 창", description=RED_DOC, formatter_class=fmt)
+    sp_red.add_argument("service", help="서비스 이름(spanmetrics 의 service_name)")
+    sp_red.add_argument("--since", default="1h", help="창 길이. 기본 1h")
+    sp_red.add_argument("--end", default=None, help="창 끝 (now · -10m · unix초 · RFC3339). 기본 now")
+    _common(sp_red)
+    sp_red.add_argument("--baseline", default=DEFAULT_BASELINE,
+                        help="기준선 창 — 같은 식의 offset: 1d(기본 — 1일 전 같은 시각) · 1w · prev(직전 창)")
     a = ap.parse_args(argv)
-    args = MetricsArgs(cmd=a.cmd, query=a.query, since=getattr(a, "since", "1h"), end=a.end, step=getattr(a, "step", None),
+    args = MetricsArgs(cmd=a.cmd, query=getattr(a, "query", ""), service=getattr(a, "service", ""), since=getattr(a, "since", "1h"), end=a.end, step=getattr(a, "step", None),
                        baseline=getattr(a, "baseline", DEFAULT_BASELINE), k=getattr(a, "k", DEFAULT_TOP_K),
                        by=getattr(a, "by", "pod"), agg=getattr(a, "agg", DEFAULT_TOP_AGG))
     client = _client()

@@ -252,7 +252,22 @@ def compare_query(query: str, window: Window, step: str, offset: str) -> str:
 
 def red_query(service: str, window: Window, offset: str) -> str:
     """서비스 하나의 여섯 통계(calls · errors · p95 × 지금 · 기준선)를 서버 span 행 위에서 한 질의로."""
-    raise NotImplementedError("red_query")
+    if not service.strip() or '"' in service or "\n" in service:
+        raise ObsError("서비스 이름이 필요하다 — 공백 · 따옴표 · 개행은 받지 않는다: %r" % service)
+    length = duration_literal(window.seconds)
+    selector = '%s, service_name="%s"' % (SERVER_KIND, service)
+    error_selector = '%s, status_code="STATUS_CODE_ERROR"' % selector
+    parts: list[str] = []
+    for stat in RED_STATS:
+        rng = "[%s]%s" % (length, " offset %s" % offset if stat.endswith("_base") else "")
+        if stat.startswith("calls_"):
+            expr = "sum by (service_name) (increase(%s{%s}%s))" % (CALLS_METRIC, selector, rng)
+        elif stat.startswith("errors_"):
+            expr = "sum by (service_name) (increase(%s{%s}%s))" % (CALLS_METRIC, error_selector, rng)
+        else:
+            expr = "histogram_quantile(%s, sum by (service_name) (rate(%s{%s}%s)))" % (RED_QUANTILE, SPAN_METRIC, selector, rng)
+        parts.append(tagged(expr, stat))
+    return " or ".join(parts)
 
 
 def top_query(query: str, k: int, by: Sequence[str], agg: str) -> str:
@@ -343,7 +358,34 @@ def deltas_of(res: MetricResult) -> list[Delta]:
 
 def signals_of(res: MetricResult) -> list[Signal]:
     """여섯 통계 → R · E · D 세 행의 상태(missing · idle · value)와 비율. 0 으로 나누지 않는다."""
-    raise NotImplementedError("signals_of")
+    stats: dict[str, float] = {}
+    for per_series in split_stats(res).values():
+        stats.update(per_series)
+    now = _side_rows(stats, "now")
+    base = _side_rows(stats, "base")
+    signals: list[Signal] = []
+    for name in RED_SIGNALS:
+        (n, n_state), (b, b_state) = now[name], base[name]
+        ratio: float | None = None
+        if n is not None and b is not None and n_state == RED_VALUE and b_state == RED_VALUE and b != 0:
+            ratio = n / b
+        signals.append(Signal(name=name, now=n, base=b, ratio=ratio, now_state=n_state, base_state=b_state))
+    return signals
+
+
+def _side_rows(stats: dict[str, float], side: str) -> dict[str, tuple[float | None, str]]:
+    """한 창(now · base)의 R · E · D 값과 상태. 호출 카운터가 없으면 셋 다 missing, 0 이면 셋 다 idle(R·E 는 0)."""
+    calls = stats.get("calls_%s" % side)
+    if calls is None:
+        return {name: (None, RED_MISSING) for name in RED_SIGNALS}
+    if calls == 0:
+        return {"R": (0.0, RED_IDLE), "E": (0.0, RED_IDLE), "D": (None, RED_IDLE)}
+    p95 = stats.get("p95_%s" % side)
+    return {
+        "R": (calls, RED_VALUE),
+        "E": (stats.get("errors_%s" % side, 0.0) / calls, RED_VALUE),
+        "D": (p95, RED_VALUE if p95 is not None else RED_MISSING),
+    }
 
 
 # ── 연산 — Client 주입, Window 를 받고 Evidence 를 돌려준다. 연산당 GET 1 회 ─────────
@@ -415,4 +457,7 @@ def top(client: Client, query: str, window: Window, k: int = DEFAULT_TOP_K, by: 
 
 def red(client: Client, service: str, window: Window) -> Evidence[Red]:
     """서비스 하나의 R · E · D 를 지금 창과 기준선 창(같은 식의 offset)에서 한 질의로. GET 1 회."""
-    raise NotImplementedError("red")
+    w, offset = baseline_offset(window)
+    q = red_query(service, w, offset)
+    body = _instant(client, q, w.end)
+    return Evidence(value=Red(service=service, offset=offset, signals=signals_of(parse_metric(body))))
