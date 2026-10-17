@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.parse
 from pathlib import Path
 from typing import Callable
@@ -9,7 +10,7 @@ from typing import Callable
 import pytest
 
 from obs.adapters import cli
-from obs.core import JSON, BudgetExceeded, Client, Evidence, Lines, ObsError, Response, Window
+from obs.core import JSON, BudgetExceeded, Client, Evidence, Lines, ObsError, Response, Window, json_list
 from tests.conftest import AT, HOUR, MINUTE, ClientFactory, RouteKey, _no_physical, _vector
 
 
@@ -244,13 +245,14 @@ HELP_SCREENS: tuple[tuple[Callable[[list[str]], None], list[str]], ...] = (
     (cli.logql_main, ["histogram", "--help"]), (cli.logql_main, ["templates", "--help"]), (cli.logql_main, ["around", "--help"]),
     (cli.logql_main, ["first-seen", "--help"]),
     (cli.traceql_main, ["exemplars", "--help"]), (cli.traceql_main, ["critical-path", "--help"]), (cli.traceql_main, ["service-graph", "--help"]),
-    (cli.traceql_main, ["diff", "--help"]),
+    (cli.traceql_main, ["diff", "--help"]), (cli.promql_main, ["red", "--help"]),
 )
 
 
 @pytest.mark.parametrize("main,argv", HELP_SCREENS, ids=["promql", "promql-summarize", "promql-compare", "promql-top", "logql", "traceql",
                                                          "logql-histogram", "logql-templates", "logql-around", "logql-first-seen",
-                                                         "traceql-exemplars", "traceql-critical-path", "traceql-service-graph", "traceql-diff"])
+                                                         "traceql-exemplars", "traceql-critical-path", "traceql-service-graph", "traceql-diff",
+                                                         "promql-red"])
 def test_help_has_no_physical_flags_or_strings(main: Callable[[list[str]], None], argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
     """모든 --help 화면에 --uid · --url · --token · --host 가 없고 물리 문자열도 없다."""
     with pytest.raises(SystemExit) as ei:
@@ -274,6 +276,21 @@ def test_traceql_help_lists_traces_subcommands(capsys: pytest.CaptureFixture[str
     text = capsys.readouterr().out
     for name in cli.TRACES_SUBCOMMANDS:
         assert name in text
+
+
+def test_promql_help_lists_metrics_subcommands(capsys: pytest.CaptureFixture[str]) -> None:
+    """상위 promql --help 에 메트릭 환원 서브커맨드 넷의 이름이 전부 있다 — 상위 화면에서 서브커맨드를 안다."""
+    # given — 상위 화면
+    argv = ["--help"]
+    # when
+    with pytest.raises(SystemExit) as ei:
+        cli.promql_main(argv)
+    # then
+    assert ei.value.code == 0
+    text = capsys.readouterr().out
+    for name in cli.METRICS_SUBCOMMANDS:
+        assert name in text
+        assert re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(name), text)
 
 
 def test_logql_help_lists_logs_subcommands(capsys: pytest.CaptureFixture[str]) -> None:
@@ -448,6 +465,50 @@ def test_promql_main_summarize_writes_no_assembled_query(monkeypatch: pytest.Mon
     assert [line for line in summary.splitlines() if line.startswith("# 창")]
     assert sent not in summary
     assert sent not in capsys.readouterr().out
+
+
+def test_promql_main_red_writes_no_query_and_raw_has_one_element_per_call(monkeypatch: pytest.MonkeyPatch, make_client: ClientFactory, tmp_path: Path,
+                                                                           capsys: pytest.CaptureFixture[str]) -> None:
+    """promql.py red 의 stdout · summary.txt 어디에도 보낸 조립 질의가 없고, raw.json 의 원소 수가 보낸 호출 수(1)와 같다."""
+    # given — 빈 응답 · spill 은 tmp
+    client, t = make_client({("metrics", "api/v1/query"): (200, _vector())})
+    monkeypatch.setattr(cli, "_client", lambda: client)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    # when
+    cli.promql_main(["red", "svc", "--since", "1h"])
+    # then — 호출 1회 · 그 질의는 서비스 이름 그대로가 아니다
+    assert len(t.calls) == 1
+    sent = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(t.calls[0].url).query))["query"]
+    assert sent != "svc"
+    out = capsys.readouterr().out.splitlines()
+    assert out[-1].startswith("원본·요약: tmp/obs/")
+    assert out[-1].endswith("-promql-red/ (raw.json · summary.txt)")
+    assert not any(sent in line for line in out)
+    summary = _summary_text(tmp_path)
+    assert [line for line in summary.splitlines() if line.startswith("# 창")]
+    assert sent not in summary
+    raw_body: JSON = json.loads((tmp_path / out[-1].split()[1].rstrip("/") / "raw.json").read_text(encoding="utf-8"))
+    assert isinstance(raw_body, list)
+    assert len(json_list(raw_body)) == len(t.calls)
+
+
+def test_promql_main_routes_red_to_metrics_run(monkeypatch: pytest.MonkeyPatch, make_client: ClientFactory, tmp_path: Path) -> None:
+    """promql.py red <service> 는 metrics_run 으로 간다 — service · --since · --baseline · --end 가 MetricsArgs 로 들어가고 나머지는 기본값이다."""
+    # given — metrics_run 대역이 받은 Args 를 기록한다
+    seen: list[cli.MetricsArgs] = []
+
+    def fake_run(client: Client, a: cli.MetricsArgs, at: float | None = None) -> cli.RunResult:
+        seen.append(a)
+        return Evidence(value=Lines(["x"])), "promql-red", Window(AT - MINUTE, AT)
+
+    client, _ = make_client()
+    monkeypatch.setattr(cli, "metrics_run", fake_run)
+    monkeypatch.setattr(cli, "_client", lambda: client)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    # when
+    cli.promql_main(["red", "svc", "--since", "6h", "--baseline", "prev", "--end=-10m"])
+    # then
+    assert seen == [cli.MetricsArgs(cmd="red", service="svc", since="6h", baseline="prev", end="-10m")]
 
 
 def test_promql_main_top_rejects_since() -> None:

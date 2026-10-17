@@ -27,7 +27,7 @@ def _fixture(name: str) -> Fixture:
 def test_every_fixture_has_a_recipe_and_vice_versa() -> None:
     """fixtures/ 의 파일 집합과 녹화기가 만드는 이름(실행 + 파생)의 집합이 같다."""
     assert NAMES == fixture_names()
-    assert len(NAMES) == 34
+    assert len(NAMES) == 37
     assert not set(RECIPES) & set(DERIVED)
     assert DERIVED == {"traceql-search.json": ("traceql-trace.json", 0),
                        "logql-first-seen-careerhub-prod.json": ("logql-templates-careerhub-prod.json", 1)}

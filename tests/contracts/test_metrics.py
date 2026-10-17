@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import urllib.parse
 
 import pytest
@@ -10,7 +11,7 @@ import pytest
 from obs import metrics
 from obs.adapters import cli
 from obs.core import JSON, Client, Evidence, Lines, ObsError, Window, to_json
-from tests.conftest import AT, DAY, HOUR, MINUTE, WEEK, ClientFactory, _stat, _vector
+from tests.conftest import AT, DAY, HOUR, MINUTE, RED_BASE_ONLY, RED_FULL, RED_NOW_ONLY, WEEK, ClientFactory, _no_physical, _red_body, _stat, _vector
 from tests.record import CPU_QUERY
 from tests.replay import Call
 
@@ -20,6 +21,14 @@ def _params(call: Call) -> dict[str, str]:
 
 
 SQ: str = "(%s)[%ds:%ds]" % (CPU_QUERY, HOUR, MINUTE)   # 1h 창 · 60s step 의 서브쿼리
+RED_W: Window = Window.last("1h", at=AT).with_baseline("1d")   # red 의 창 — 1h · 기준선 1d
+RED_OFFSET: str = "%ds" % DAY
+INSTANT: tuple[str, str] = ("metrics", "api/v1/query")
+
+
+def _red_value(**stats: str) -> metrics.Red:
+    """손 입력 응답에서 만든 Red — 렌더러의 성질 검사용."""
+    return metrics.Red(service="svc", offset=RED_OFFSET, signals=metrics.signals_of(metrics.parse_metric(_red_body(**stats))))
 
 
 
@@ -45,6 +54,66 @@ def test_compare_query_uses_offset_of_same_expression() -> None:
     q = metrics.compare_query(CPU_QUERY, Window.last("1h", at=AT), "60s", "%ds" % DAY)
     assert q == ('label_replace(quantile_over_time(0.95, %s), "stat", "now", "", "") or '
                  'label_replace(quantile_over_time(0.95, %s offset %ds), "stat", "base", "", "")' % (SQ, SQ, DAY))
+
+
+def test_red_query_is_six_stats_in_one_expression() -> None:
+    """red_query 는 여섯 통계를 stat 이름표로 달아 or 로 한 식이다 — 기준선 셋에만 offset 이 붙고 구간은 창 길이다."""
+    # given — 1h 창 · 1d offset
+    w = Window.last("1h", at=AT)
+    # when
+    q = metrics.red_query("svc", w, RED_OFFSET)
+    # then
+    parts = q.split(" or ")
+    assert len(parts) == 6
+    for part, stat in zip(parts, metrics.RED_STATS):
+        assert part.startswith("label_replace(")
+        assert part.endswith('"stat", "%s", "", "")' % stat)
+        assert "[%ds]" % HOUR in part
+        assert ("offset %s" % RED_OFFSET in part) == stat.endswith("_base")
+
+
+def test_red_query_selects_server_rows_of_one_service_on_native_histogram() -> None:
+    """red_query 의 여섯 부분은 전부 서버 span 행 · 한 서비스 · service_name 합산이고, errors 둘만 오류 status, p95 둘은 native histogram 분위수다."""
+    # given
+    w = Window.last("1h", at=AT)
+    # when
+    q = metrics.red_query("svc", w, RED_OFFSET)
+    parts = q.split(" or ")
+    # then — 공통 선택자
+    for part in parts:
+        assert metrics.SERVER_KIND in part
+        assert 'service_name="svc"' in part
+        assert "sum by (service_name)" in part
+        assert "SPAN_KIND_CLIENT" not in part
+    # then — calls · errors 는 호출 카운터의 increase, errors 만 오류 status
+    calls = [p for p in parts if '"stat", "calls_' in p]
+    errors = [p for p in parts if '"stat", "errors_' in p]
+    assert len(calls) == 2
+    assert len(errors) == 2
+    for part in calls + errors:
+        assert "increase(%s{" % metrics.CALLS_METRIC in part
+    for part in errors:
+        assert 'status_code="STATUS_CODE_ERROR"' in part
+    for part in calls:
+        assert "status_code" not in part
+    # then — p95 는 native histogram 위의 histogram_quantile(rate) — _bucket · le 없음
+    p95 = [p for p in parts if '"stat", "p95_' in p]
+    assert len(p95) == 2
+    for part in p95:
+        assert part.startswith("label_replace(histogram_quantile(%s, sum by (service_name) (rate(%s{" % (metrics.RED_QUANTILE, metrics.SPAN_METRIC))
+        assert "status_code" not in part
+    assert "_bucket" not in q
+    assert re.search(r"\ble\b", q) is None
+
+
+@pytest.mark.parametrize("service", ["  ", 'a"b', "a\nb"], ids=["blank", "quote", "newline"])
+def test_red_query_rejects_blank_or_unsafe_service(service: str) -> None:
+    """공백 · 따옴표 · 개행이 든 서비스 이름은 질의 조립 전에 거부한다."""
+    # given — 1h 창
+    w = Window.last("1h", at=AT)
+    # when · then
+    with pytest.raises(ObsError):
+        metrics.red_query(service, w, RED_OFFSET)
 
 
 def test_auto_step_is_window_over_sixty_with_floor() -> None:
@@ -94,6 +163,196 @@ def test_summaries_of_requires_n_and_marks_missing_as_nan() -> None:
     assert out[0].p95 == 0.4
     assert math.isnan(out[0].min)
     assert math.isnan(out[0].slope)
+
+
+# ── signals_of — 여섯 통계 → 세 행의 상태 · 비율. 0 으로 나누지 않는다 ───────────────────
+
+def _signals(**stats: str) -> list[metrics.Signal]:
+    return metrics.signals_of(metrics.parse_metric(_red_body(**stats)))
+
+
+def test_signals_of_three_rows_with_now_base_ratio() -> None:
+    """양쪽 창에 호출 · 오류 · 분위수가 있으면 R · E · D 세 행 순으로 지금 값 · 기준선 값 · 비율이 있고 두 상태 모두 value 다."""
+    # given — 지금 200/10 건 · 0.4s, 기준선 100/5 건 · 0.2s
+    res = metrics.parse_metric(_red_body(**RED_FULL))
+    # when
+    out = metrics.signals_of(res)
+    # then
+    assert [s.name for s in out] == ["R", "E", "D"]
+    r, e, d = out
+    assert r.now == 200
+    assert r.base == 100
+    assert r.ratio == pytest.approx(2)
+    assert e.now == pytest.approx(0.05)
+    assert e.base == pytest.approx(0.05)
+    assert e.ratio == pytest.approx(1)
+    assert d.now == pytest.approx(0.4)
+    assert d.base == pytest.approx(0.2)
+    assert d.ratio == pytest.approx(2)
+    for s in out:
+        assert s.now_state == metrics.RED_VALUE
+        assert s.base_state == metrics.RED_VALUE
+
+
+def test_signals_of_error_rise_moves_only_e_ratio() -> None:
+    """호출 수 · 분위수가 두 창에 같고 오류 행만 늘면 E 의 비율만 1 을 넘고 R · D 의 비율은 1 이다."""
+    # given — 호출 100 · p95 0.3 양쪽 같음, 오류 20 vs 5
+    out = _signals(calls_now="100", calls_base="100", errors_now="20", errors_base="5", p95_now="0.3", p95_base="0.3")
+    # when
+    r, e, d = out
+    # then
+    assert e.ratio is not None
+    assert e.ratio > 1
+    assert r.ratio == pytest.approx(1)
+    assert d.ratio == pytest.approx(1)
+
+
+def test_signals_of_missing_calls_series_marks_all_three_missing() -> None:
+    """지금 창에 호출 카운터 시계열이 없으면(오류 행만 있어도) 세 행의 지금 값이 없고 상태가 missing 이며 비율이 없다 — 기준선 값은 있다."""
+    # given — calls_now 없음 · errors_now · p95_now 는 있음(제 시계열이 있어도 호출 카운터가 없으면 missing) · 기준선 셋은 있음
+    out = _signals(errors_now="3", p95_now="0.3", **RED_BASE_ONLY)
+    # when
+    r, e, d = out
+    # then
+    for s in (r, e, d):
+        assert s.now is None
+        assert s.now_state == metrics.RED_MISSING
+        assert s.ratio is None
+        assert s.base is not None
+
+
+def test_signals_of_zero_calls_is_idle_not_missing() -> None:
+    """시계열은 있되 창 안 증가분이 0 이면 R 은 0 · E 는 0 · D 는 값 없음이고 상태는 idle 이다 — missing 과 다르다."""
+    # given — calls_now 0 · errors_now 없음 · p95_now NaN · 기준선 셋은 있음
+    out = _signals(calls_now="0", p95_now="NaN", **RED_BASE_ONLY)
+    # when
+    r, e, d = out
+    # then
+    assert r.now == 0
+    assert e.now == 0
+    assert d.now is None
+    for s in (r, e, d):
+        assert s.now_state == metrics.RED_IDLE
+        assert s.now_state != metrics.RED_MISSING
+        assert s.ratio is None
+
+
+def test_signals_of_no_error_rows_means_zero_errors() -> None:
+    """전체 호출 행은 있고 오류 status 행이 없으면 E 의 지금 값은 0 이고 상태는 value 다."""
+    # given — calls_now 100 · errors_now 없음 · p95_now 있음 · 기준선 셋은 있음
+    out = _signals(calls_now="100", p95_now="0.3", **RED_BASE_ONLY)
+    # when
+    _, e, _ = out
+    # then
+    assert e.now == 0
+    assert e.now_state == metrics.RED_VALUE
+
+
+def test_signals_of_missing_baseline_marks_base_missing_without_ratio() -> None:
+    """기준선 창에 시계열이 없으면 세 행의 기준선 값이 없고 상태가 missing 이며 비율이 없다 — 지금 값은 있다."""
+    # given — 지금 셋은 있음 · 기준선 셋 없음
+    out = _signals(**RED_NOW_ONLY)
+    # when
+    r, e, d = out
+    # then
+    for s in (r, e, d):
+        assert s.base is None
+        assert s.base_state == metrics.RED_MISSING
+        assert s.ratio is None
+        assert s.now is not None
+
+
+def test_signals_of_zero_baseline_has_no_ratio() -> None:
+    """기준선 창의 호출이 0 이면 R · E 의 기준선 값은 0, D 는 값 없음이고 상태는 idle 이며 비율은 없다 — 0 으로 나누지 않는다."""
+    # given — 지금 셋은 있음 · calls_base 0 · errors_base 없음 · p95_base NaN
+    out = _signals(calls_base="0", p95_base="NaN", **RED_NOW_ONLY)
+    # when
+    r, e, d = out
+    # then
+    assert r.base == 0
+    assert e.base == 0
+    assert d.base is None
+    for s in (r, e, d):
+        assert s.base_state == metrics.RED_IDLE
+        assert s.ratio is None
+
+
+def test_signals_of_zero_error_baseline_has_no_e_ratio() -> None:
+    """기준선에 호출은 있고 오류 행이 없으면 E 의 기준선은 0(value)이고 E 의 비율만 없다 — R 의 비율은 있다."""
+    # given — 기준선 calls 100 · errors_base 없음 · 지금 errors 10
+    out = _signals(calls_now="200", errors_now="10", p95_now="0.4", calls_base="100", p95_base="0.2")
+    # when
+    r, e, _ = out
+    # then
+    assert e.base == 0
+    assert e.base_state == metrics.RED_VALUE
+    assert e.ratio is None
+    assert r.ratio is not None
+
+
+@pytest.mark.parametrize("p95", [None, "NaN"], ids=["absent", "nan"])
+def test_signals_of_missing_histogram_marks_only_d_missing(p95: str | None) -> None:
+    """호출은 있는데 분위수 시계열이 없거나 NaN 이면 D 만 값 없음 · missing 이고 R · E 는 value 다."""
+    # given — calls_now 100 · errors_now 1 · p95_now 부재/NaN · 기준선 셋은 있음
+    stats = dict(calls_now="100", errors_now="1", **RED_BASE_ONLY)
+    if p95 is not None:
+        stats["p95_now"] = p95
+    out = _signals(**stats)
+    # when
+    r, e, d = out
+    # then
+    assert d.now is None
+    assert d.now_state == metrics.RED_MISSING
+    assert r.now_state == metrics.RED_VALUE
+    assert e.now_state == metrics.RED_VALUE
+
+
+def test_signals_of_empty_response_is_three_missing_rows() -> None:
+    """빈 응답이면 세 행이 모두 양쪽 missing 이다 — 목록은 비지 않는다."""
+    # given — 빈 vector
+    res = metrics.parse_metric(_vector())
+    # when
+    out = metrics.signals_of(res)
+    # then
+    assert [s.name for s in out] == ["R", "E", "D"]
+    for s in out:
+        assert s.now is None
+        assert s.base is None
+        assert s.now_state == metrics.RED_MISSING
+        assert s.base_state == metrics.RED_MISSING
+
+
+@pytest.mark.parametrize("p95", [None, "NaN"], ids=["absent", "nan"])
+def test_signals_of_missing_baseline_histogram_marks_only_d_base_missing(p95: str | None) -> None:
+    """기준선 창에 호출 · 오류는 있는데 분위수 시계열이 없거나 NaN 이면 D 만 기준선 없음(missing) 이고 R · E 의 기준선은 value 이며 비율이 있다."""
+    # given — 지금 셋 · calls_base 100 · errors_base 5 · p95_base 부재/NaN
+    stats = dict(calls_base="100", errors_base="5", **RED_NOW_ONLY)
+    if p95 is not None:
+        stats["p95_base"] = p95
+    out = _signals(**stats)
+    # when
+    r, e, d = out
+    # then
+    assert d.base is None
+    assert d.base_state == metrics.RED_MISSING
+    assert d.ratio is None
+    for s in (r, e):
+        assert s.base is not None
+        assert s.base_state == metrics.RED_VALUE
+        assert s.ratio is not None
+
+
+def test_signals_of_zero_baseline_quantile_has_no_d_ratio() -> None:
+    """기준선의 분위수가 정확히 0 이면 D 의 기준선은 0(value)이고 D 의 비율만 없다 — R 의 비율은 있다."""
+    # given — 지금 셋 · calls_base 100 · errors_base 5 · p95_base 0
+    out = _signals(calls_base="100", errors_base="5", p95_base="0", **RED_NOW_ONLY)
+    # when
+    r, _, d = out
+    # then
+    assert d.base == 0
+    assert d.base_state == metrics.RED_VALUE
+    assert d.ratio is None
+    assert r.ratio is not None
 
 
 # ── 거부 · 판정 ──────────────────────────────────────────────────────────────────
@@ -155,16 +414,18 @@ def test_top_query_rejects_bad_k_agg_or_empty_axis(k: int, by: list[str], agg: s
 W: Window = Window.last("1h", at=AT)
 
 
-def _run(client: Client, op: str) -> Evidence[metrics.Summary] | Evidence[metrics.Comparison] | Evidence[metrics.Top]:
-    """세 연산을 같은 창으로 부른다 — 약속 검사의 공통 입구."""
+def _run(client: Client, op: str) -> Evidence[metrics.Summary] | Evidence[metrics.Comparison] | Evidence[metrics.Top] | Evidence[metrics.Red]:
+    """네 연산을 같은 창으로 부른다 — 약속 검사의 공통 입구."""
     if op == "summarize":
         return metrics.summarize(client, CPU_QUERY, W)
     if op == "compare":
         return metrics.compare(client, CPU_QUERY, W.with_baseline("1d"))
+    if op == "red":
+        return metrics.red(client, "svc", W.with_baseline("1d"))
     return metrics.top(client, "up", W, k=3, by=["pod"])
 
 
-@pytest.mark.parametrize("op", ["summarize", "compare", "top"])
+@pytest.mark.parametrize("op", ["summarize", "compare", "top", "red"])
 def test_each_operation_makes_one_get(make_client: ClientFactory, op: str) -> None:
     """연산당 GET 은 1회다 — 계산은 서버가 한다."""
     client, t = make_client({("metrics", "api/v1/query"): (200, _vector())})
@@ -172,7 +433,7 @@ def test_each_operation_makes_one_get(make_client: ClientFactory, op: str) -> No
     assert len(t.calls) == 1
 
 
-@pytest.mark.parametrize("op", ["summarize", "compare", "top"])
+@pytest.mark.parametrize("op", ["summarize", "compare", "top", "red"])
 def test_each_operation_serializes_to_json(make_client: ClientFactory, op: str) -> None:
     """환원물이 든 Evidence 는 to_json 으로 직렬화된다."""
     client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
@@ -226,6 +487,77 @@ def test_compare_both_empty(make_client: ClientFactory) -> None:
     assert ev.value.deltas == []
 
 
+def test_red_sends_assembled_query_once_at_window_end(make_client: ClientFactory) -> None:
+    """red 는 metrics 즉시 조회를 한 번 보내고, 그 query 는 red_query 가 조립한 것이며 time 은 창 끝이다."""
+    # given — 빈 응답
+    client, t = make_client({INSTANT: (200, _vector())})
+    # when
+    metrics.red(client, "svc", RED_W)
+    # then
+    assert len(t.calls) == 1
+    assert "/api/v1/query?" in t.calls[0].url
+    params = _params(t.calls[0])
+    assert params["query"] == metrics.red_query("svc", RED_W, RED_OFFSET)
+    assert float(params["time"]) == RED_W.end
+
+
+def test_red_returns_red_with_service_offset_and_signals(make_client: ClientFactory) -> None:
+    """red 의 Evidence 값은 서비스 · 기준선 offset · R · E · D 세 행을 담은 Red 다."""
+    # given — 양쪽 창에 값이 있는 응답
+    client, _ = make_client({INSTANT: (200, _red_body(**RED_FULL))})
+    # when
+    ev = metrics.red(client, "svc", RED_W)
+    # then
+    assert isinstance(ev.value, metrics.Red)
+    assert ev.value.service == "svc"
+    assert ev.value.offset == RED_OFFSET
+    assert [s.name for s in ev.value.signals] == ["R", "E", "D"]
+    assert [s.now for s in ev.value.signals] == [200, pytest.approx(0.05), pytest.approx(0.4)]
+    assert ev.value.signals == metrics.signals_of(metrics.parse_metric(_red_body(**RED_FULL)))
+
+
+def test_red_default_baseline_is_one_day(make_client: ClientFactory) -> None:
+    """기준선 없는 Window 를 주면 DEFAULT_BASELINE(1d) — offset 86400s 가 나간다."""
+    # given — 기준선 없는 창 · 빈 응답
+    client, t = make_client({INSTANT: (200, _vector())})
+    # when
+    ev = metrics.red(client, "svc", W)
+    # then
+    assert ev.value.offset == "%ds" % DAY
+    assert "offset+%ds" % DAY in t.calls[0].url
+
+
+def test_red_prev_baseline_offset_is_window_length(make_client: ClientFactory) -> None:
+    """--baseline prev 는 직전 창 — offset 이 창 길이(3600s)다."""
+    # given — prev 기준선 · 빈 응답
+    client, t = make_client({INSTANT: (200, _vector())})
+    # when
+    ev = metrics.red(client, "svc", W.with_baseline("prev"))
+    # then
+    assert ev.value.offset == "%ds" % W.seconds
+    assert "offset+%ds" % W.seconds in t.calls[0].url
+
+
+def test_red_rejects_baseline_not_expressible_as_offset(make_client: ClientFactory) -> None:
+    """길이가 다른 기준선은 offset 으로 표현할 수 없어 질의 전에 거부한다."""
+    # given — 30분짜리 기준선
+    client, t = make_client()
+    # when · then
+    with pytest.raises(ObsError):
+        metrics.red(client, "svc", Window(AT - HOUR, AT, baseline=Window(AT - HOUR, AT - 30 * MINUTE)))
+    assert t.calls == []
+
+
+def test_red_requires_service(make_client: ClientFactory) -> None:
+    """공백 서비스 이름은 red 가 질의 전에 거부한다 — transport 는 불리지 않는다."""
+    # given
+    client, t = make_client()
+    # when · then
+    with pytest.raises(ObsError):
+        metrics.red(client, "  ", RED_W)
+    assert t.calls == []
+
+
 def test_top_wraps_query_and_uses_window_end(make_client: ClientFactory) -> None:
     """top 은 topk 로 감싼 질의를 창의 끝 시각에 보낸다."""
     client, t = make_client({("metrics", "api/v1/query"): (200, _vector())})
@@ -259,14 +591,16 @@ def test_top_empty_response_has_no_entries(make_client: ClientFactory) -> None:
 
 
 def test_metrics_run_dispatches_by_subcommand(make_client: ClientFactory) -> None:
-    """metrics_run 은 세 서브커맨드를 Evidence[Lines] 와 kind 로 내고 모르는 서브커맨드는 ObsError 다."""
+    """metrics_run 은 네 서브커맨드를 Evidence[Lines] 와 kind 로 내고(red 의 창에는 --baseline 의 기준선이 달린다) 모르는 서브커맨드는 ObsError 다."""
     client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
-    for cmd, kind in (("summarize", "promql-summarize"), ("compare", "promql-compare"), ("top", "promql-top")):
-        ev, got, _ = cli.metrics_run(client, cli.MetricsArgs(cmd=cmd, query="up"), at=AT)
+    for cmd, kind in (("summarize", "promql-summarize"), ("compare", "promql-compare"), ("top", "promql-top"), ("red", "promql-red")):
+        ev, got, _ = cli.metrics_run(client, cli.MetricsArgs(cmd=cmd, query="up", service="svc"), at=AT)
         assert got == kind
         assert isinstance(ev.value, Lines)
+    _, _, window = cli.metrics_run(client, cli.MetricsArgs(cmd="red", service="svc", since="1h", baseline="prev"), at=AT)
+    assert window == Window.last("1h", None, AT).with_baseline("prev")
     with pytest.raises(ObsError):
-        cli.metrics_run(client, cli.MetricsArgs(cmd="red", query="x"), at=AT)
+        cli.metrics_run(client, cli.MetricsArgs(cmd="nope", query="x"), at=AT)
 
 
 def test_metrics_run_compare_window_has_baseline(make_client: ClientFactory) -> None:
@@ -332,3 +666,64 @@ def test_compare_baseline_only_series_marks_now_empty(make_client: ClientFactory
     assert ev.value.now_empty
     assert not ev.value.baseline_empty
     assert [(d.now, d.base) for d in ev.value.deltas] == [(None, 1.0)]
+
+
+# ── red_lines — 성질: 시계열 없음 vs 호출 0 · 기준선 없음 · 기준선 0 · 물리 비노출 (모양은 format/test_metrics_lines.py) ────
+
+def test_red_lines_distinguish_missing_from_idle() -> None:
+    """지금 창의 시계열 없음과 호출 0 은 다른 문구다 — missing 은 세 행에 "시계열 없음", idle 은 어느 행에도 없고 D 행에 "호출 0" 이다."""
+    # given — 6 의 Red(지금 missing) · 7 의 Red(지금 idle)
+    missing = cli.red_lines(_red_value(**RED_BASE_ONLY), RED_W)
+    idle = cli.red_lines(_red_value(calls_now="0", p95_now="NaN", **RED_BASE_ONLY), RED_W)
+    # when
+    rows_missing, rows_idle = missing[1:], idle[1:]
+    # then
+    assert len(rows_missing) == 3
+    assert len(rows_idle) == 3
+    for line in rows_missing:
+        assert "시계열 없음" in line
+    for line in rows_idle:
+        assert "시계열 없음" not in line
+    d_rows = [line for line in rows_idle if line.startswith("D")]
+    assert len(d_rows) == 1
+    assert "호출 0" in d_rows[0]
+    for m, i in zip(rows_missing, rows_idle):
+        assert m != i
+
+
+def test_red_lines_say_baseline_missing_without_ratio() -> None:
+    """기준선 창에 시계열이 없으면 세 행에 "기준선 없음" 이 있고 어느 행에도 × 비율이 없다."""
+    # given — 9 의 Red
+    lines = cli.red_lines(_red_value(**RED_NOW_ONLY), RED_W)
+    # when
+    rows = lines[1:]
+    # then
+    assert len(rows) == 3
+    for line in rows:
+        assert "기준선 없음" in line
+        assert "×" not in line
+
+
+@pytest.mark.parametrize("stats,expected_rows", [
+    (dict(calls_base="0", p95_base="NaN", **RED_NOW_ONLY), ["R", "E", "D"]),
+    (dict(calls_now="200", errors_now="10", p95_now="0.4", calls_base="100", p95_base="0.2"), ["E"]),
+], ids=["idle", "e-zero"])
+def test_red_lines_say_baseline_zero_without_ratio(stats: dict[str, str], expected_rows: list[str]) -> None:
+    """기준선 값이 0 인 행(기준선 호출 0 이면 셋 · 오류 행만 없으면 E)에 "기준선 0" 이 있고 그 행에 × 비율이 없다."""
+    # given — 10 · 11 의 Red
+    lines = cli.red_lines(_red_value(**stats), RED_W)
+    # when
+    zero_rows = [line for line in lines[1:] if "기준선 0" in line]
+    # then
+    assert [line[0] for line in zero_rows] == expected_rows
+    for line in zero_rows:
+        assert "×" not in line
+
+
+def test_red_lines_carry_no_physical() -> None:
+    """red 의 렌더링 어디에도 물리 문자열이 없다."""
+    # given — 4 의 Red
+    lines = cli.red_lines(_red_value(**RED_FULL), RED_W)
+    # when · then
+    assert len(lines) == 4
+    _no_physical("\n".join(lines))

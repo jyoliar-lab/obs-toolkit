@@ -1,0 +1,90 @@
+{
+ "format": "obs-fixture/1",
+ "recorded": "tests/record.py",
+ "calls": [
+  {
+   "request": {
+    "at": 1792231622.725451,
+    "at_rfc3339": "2026-10-17T10:07:02Z",
+    "backend": "metrics",
+    "path": "api/v1/query",
+    "query_string": "query=label_replace%28sum+by+%28service_name%29+%28increase%28traces_span_metrics_calls_total%7Bspan_kind%3D%22SPAN_KIND_SERVER%22%2C+service_name%3D%22posting-service%22%7D%5B86400s%5D%29%29%2C+%22stat%22%2C+%22calls_now%22%2C+%22%22%2C+%22%22%29+or+label_replace%28sum+by+%28service_name%29+%28increase%28traces_span_metrics_calls_total%7Bspan_kind%3D%22SPAN_KIND_SERVER%22%2C+service_name%3D%22posting-service%22%7D%5B86400s%5D+offset+86400s%29%29%2C+%22stat%22%2C+%22calls_base%22%2C+%22%22%2C+%22%22%29+or+label_replace%28sum+by+%28service_name%29+%28increase%28traces_span_metrics_calls_total%7Bspan_kind%3D%22SPAN_KIND_SERVER%22%2C+service_name%3D%22posting-service%22%2C+status_code%3D%22STATUS_CODE_ERROR%22%7D%5B86400s%5D%29%29%2C+%22stat%22%2C+%22errors_now%22%2C+%22%22%2C+%22%22%29+or+label_replace%28sum+by+%28service_name%29+%28increase%28traces_span_metrics_calls_total%7Bspan_kind%3D%22SPAN_KIND_SERVER%22%2C+service_name%3D%22posting-service%22%2C+status_code%3D%22STATUS_CODE_ERROR%22%7D%5B86400s%5D+offset+86400s%29%29%2C+%22stat%22%2C+%22errors_base%22%2C+%22%22%2C+%22%22%29+or+label_replace%28histogram_quantile%280.95%2C+sum+by+%28service_name%29+%28rate%28traces_span_metrics_duration_seconds%7Bspan_kind%3D%22SPAN_KIND_SERVER%22%2C+service_name%3D%22posting-service%22%7D%5B86400s%5D%29%29%29%2C+%22stat%22%2C+%22p95_now%22%2C+%22%22%2C+%22%22%29+or+label_replace%28histogram_quantile%280.95%2C+sum+by+%28service_name%29+%28rate%28traces_span_metrics_duration_seconds%7Bspan_kind%3D%22SPAN_KIND_SERVER%22%2C+service_name%3D%22posting-service%22%7D%5B86400s%5D+offset+86400s%29%29%29%2C+%22stat%22%2C+%22p95_base%22%2C+%22%22%2C+%22%22%29&time=1792231622.725451",
+    "params": {
+     "query": "label_replace(sum by (service_name) (increase(traces_span_metrics_calls_total{span_kind=\"SPAN_KIND_SERVER\", service_name=\"posting-service\"}[86400s])), \"stat\", \"calls_now\", \"\", \"\") or label_replace(sum by (service_name) (increase(traces_span_metrics_calls_total{span_kind=\"SPAN_KIND_SERVER\", service_name=\"posting-service\"}[86400s] offset 86400s)), \"stat\", \"calls_base\", \"\", \"\") or label_replace(sum by (service_name) (increase(traces_span_metrics_calls_total{span_kind=\"SPAN_KIND_SERVER\", service_name=\"posting-service\", status_code=\"STATUS_CODE_ERROR\"}[86400s])), \"stat\", \"errors_now\", \"\", \"\") or label_replace(sum by (service_name) (increase(traces_span_metrics_calls_total{span_kind=\"SPAN_KIND_SERVER\", service_name=\"posting-service\", status_code=\"STATUS_CODE_ERROR\"}[86400s] offset 86400s)), \"stat\", \"errors_base\", \"\", \"\") or label_replace(histogram_quantile(0.95, sum by (service_name) (rate(traces_span_metrics_duration_seconds{span_kind=\"SPAN_KIND_SERVER\", service_name=\"posting-service\"}[86400s]))), \"stat\", \"p95_now\", \"\", \"\") or label_replace(histogram_quantile(0.95, sum by (service_name) (rate(traces_span_metrics_duration_seconds{span_kind=\"SPAN_KIND_SERVER\", service_name=\"posting-service\"}[86400s] offset 86400s))), \"stat\", \"p95_base\", \"\", \"\")",
+     "time": "1792231622.725451"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "status": "success",
+     "data": {
+      "resultType": "vector",
+      "result": [
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "stat": "calls_now"
+        },
+        "value": [
+         1792231622.725,
+         "220.15288267226728"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "stat": "calls_base"
+        },
+        "value": [
+         1792231622.725,
+         "221.15357895534936"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "stat": "errors_now"
+        },
+        "value": [
+         1792231622.725,
+         "0"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "stat": "errors_base"
+        },
+        "value": [
+         1792231622.725,
+         "0"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "stat": "p95_now"
+        },
+        "value": [
+         1792231622.725,
+         "0.009290680592951251"
+        ]
+       },
+       {
+        "metric": {
+         "service_name": "posting-service",
+         "stat": "p95_base"
+        },
+        "value": [
+         1792231622.725,
+         "0.009691512162842746"
+        ]
+       }
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

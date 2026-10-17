@@ -397,6 +397,10 @@ RECIPES: dict[str, Recipe] = {
     "promql-instant-compare-cpu-by-pod-no-baseline.json": _metrics(cli.MetricsArgs(cmd="compare", query=CPU_QUERY, baseline="60d")),   # 보존 밖 offset
     "promql-instant-empty.json": _metrics(cli.MetricsArgs(cmd="summarize", query=EMPTY_QUERY)),
     "promql-instant-topk-memory-by-pod.json": _metrics(cli.MetricsArgs(cmd="top", query="container_memory_working_set_bytes", by="pod", k=10)),
+    # red — 24h 창(1h 창은 cron 시각이 아니면 전 서비스가 호출 0). 값 · 호출 0(시계열은 있음) · 시계열 없음(없는 서비스)의 세 상태
+    "promql-instant-red-posting-service-24h.json": _metrics(cli.MetricsArgs(cmd="red", service="posting-service", since="24h")),
+    "promql-instant-red-api-composer-24h.json": _metrics(cli.MetricsArgs(cmd="red", service="api-composer", since="24h")),
+    "promql-instant-red-no-such-service-24h.json": _metrics(cli.MetricsArgs(cmd="red", service="no-such-service", since="24h")),
     "logql-matrix-count-over-time.json": _logql(cli.LogqlArgs(query=LOG_METRIC_QUERY)),
     "logql-streams-careerhub-prod.json": _logql(cli.LogqlArgs(query=LOG_SELECTOR, limit=5)),
     "traceql-trace.json": _search_then_trace,

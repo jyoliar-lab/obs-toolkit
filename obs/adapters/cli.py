@@ -8,7 +8,7 @@
 `Any` 는 쓰지 않는다. 접근자(`json_obj` …)는 obs.core 에, Prometheus 형 파서(`parse_metric` · `check_status`)는
 obs.metrics 에 있다 — 환원 연산이 코어에서 같은 파서를 쓴다.
 
-환원 연산(summarize · compare · top — obs.metrics)은 promql.py 의 서브커맨드다: `promql.py compare '<PromQL>' --since 1h`.
+환원 연산(summarize · compare · top · red — obs.metrics)은 promql.py 의 서브커맨드다: `promql.py compare '<PromQL>' --since 1h`.
 `metrics_run` 이 Evidence[…] 를 받아 줄로 렌더링한다 — 계산은 코어, 표는 여기.
 
 agent 인터페이스에 물리(URL · uid · 토큰)가 없다. `--uid` 같은 인자를 두지 않는다 — 논리 이름은 명령 자체가 정한다
@@ -32,8 +32,8 @@ from obs.logs import (
     Side, Templates, around, first_seen, histogram, parse_logs, templates,
 )
 from obs.metrics import (
-    DEFAULT_BASELINE, DEFAULT_TOP_AGG, DEFAULT_TOP_K, TOP_AGGS, Comparison, MetricResult, Summary, Top,
-    auto_step, check_status, compare, parse_metric, summarize, top,
+    DEFAULT_BASELINE, DEFAULT_TOP_AGG, DEFAULT_TOP_K, RED_IDLE, RED_MISSING, RED_QUANTILE, TOP_AGGS, Comparison, MetricResult, Red,
+    Signal, Summary, Top, auto_step, check_status, compare, parse_metric, red, summarize, top,
 )
 from obs.traces import (
     DEFAULT_BASELINE_RANGE, DEFAULT_EXEMPLARS_K, DEFAULT_QUANTILE, DEFAULT_SEARCH_LIMIT, CriticalPath, Edge, Exemplars, ServiceGraph, Span, SpanTime, TagScope,
@@ -201,7 +201,8 @@ PROMQL_DOC = """promql — 즉시 조회·구간 조회 (metrics 백엔드, GET 
                                                          --baseline: 1d(기본 — 1일 전 같은 시각) · 1w · prev(직전 창)
   promql.py top '<PromQL>' --by pod [--k 10] [--agg sum]  레이블 축 상위 k — topk 로 감싸 서버가 k 개만 돌려준다.
                                                          --end 시각의 즉시 조회(창이 없다 — --since 를 받지 않는다)
-  summarize · compare 의 시간은 --since/--end (logql 과 같다). 연산당 질의 1회. 창(compare 는 기준선도)은 호출 디렉터리의
+  promql.py red <서비스> --since 1h [--baseline 1d]      서비스 하나의 R(호출 수) · E(오류율) · D(p95) — 지금 창 vs 기준선 창(spanmetrics 서버 span)
+  summarize · compare · red 의 시간은 --since/--end (logql 과 같다). 연산당 질의 1회. 창(compare 는 기준선도)은 호출 디렉터리의
   summary.txt 머리에 남는다. 각 서브커맨드의 설명·옵션 전부는 `promql.py <서브커맨드> --help`.
 
 옵션:
@@ -334,7 +335,7 @@ def promql_main(argv: Sequence[str] | None = None) -> None:
 
 # ── 환원 연산 — promql.py 의 서브커맨드 (계산은 obs.metrics, 표는 여기) ─────────────────
 
-METRICS_SUBCOMMANDS: tuple[str, ...] = ("summarize", "compare", "top")
+METRICS_SUBCOMMANDS: tuple[str, ...] = ("summarize", "compare", "top", "red")
 
 METRICS_COMMON_DOC = """계산은 백엔드가 한다 — 코어는 질의를 조립해 결과만 받는다(연산당 질의 1회). 창(compare 는 기준선도)은 호출 디렉터리의
 summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만.
@@ -362,6 +363,17 @@ TOP_DOC = """promql.py top '<PromQL>' --by pod [--k 10] [--agg sum] [--end <시�
 레이블 축 상위 k — `topk(k, agg by (by) (query))` 로 감싸 --end 시각에 즉시 조회한다. 창이 없다(--since 를 받지 않는다).
 서버가 k 개만 돌려주므로 카디널리티 폭발이 없고, 출력은 k 줄 이하(헤더 없음).
 --by 는 쉼표로 여러 축(namespace,pod). --agg: sum(기본) · max · min · avg · count — 축으로 접는 집계.
+
+""" + METRICS_COMMON_DOC
+
+
+RED_DOC = """promql.py red <서비스> --since 1h [--end <시각>] [--baseline 1d]
+
+서비스 하나의 R · E · D — spanmetrics 의 서버 span 행 위에서 지금 창과 같은 식의 `offset <기준선>` 을 한 질의로.
+첫 줄은 서비스 · 창 · 기준선 헤더, 그 뒤 세 줄: R(창 안 호출 수) · E(오류율 = 오류 호출 / 호출) · D(p95 초, native histogram).
+각 줄은 `×비율  now=…  base=…` — 비율은 두 창 모두 값이 있고 기준선이 0 이 아닐 때만(0 으로 나누지 않는다).
+"시계열 없음"(그 창에 호출 카운터가 없다)과 "호출 0"(시계열은 있고 창 안 호출 0)은 다르다. 기준선 쪽은 "기준선 없음" · "기준선 0".
+--baseline: 1d(기본 — 1일 전 같은 시각) · 1w(1주 전) · prev(직전 창).
 
 """ + METRICS_COMMON_DOC
 
@@ -413,6 +425,35 @@ def compare_lines(value: Comparison, window: Window) -> list[str]:
     return lines
 
 
+def red_lines(value: Red, window: Window) -> list[str]:
+    """헤더 한 줄 + R · E · D 세 줄 — 상태(시계열 없음 · 호출 0 · 기준선 없음 · 기준선 0)의 문구."""
+    base = window.baseline
+    base_label = window_str(base) if base is not None else "?"
+    lines = ["%s  지금 %s  기준선 %s (offset %s)  (R=창 안 호출 수 · E=오류율 · D=p%d 초)" % (
+        value.service, window_str(window), base_label, value.offset, round(RED_QUANTILE * 100))]
+    for s in value.signals:
+        ratio = ["×%s" % fmt_ratio(s.ratio)] if s.ratio is not None else []
+        lines.append("  ".join([s.name, *ratio, _red_now_cell(s), _red_base_cell(s)]))
+    return lines
+
+
+def _red_now_cell(s: Signal) -> str:
+    """지금 창 칸 — "시계열 없음"(missing)과 "호출 0"(idle)을 가른다. D 의 idle 은 값이 없어 — 로."""
+    if s.now_state == RED_MISSING:
+        return "지금 시계열 없음"
+    shown = fmt_val(s.now) if s.now is not None else "—"
+    return "now=%s (호출 0)" % shown if s.now_state == RED_IDLE else "now=%s" % shown
+
+
+def _red_base_cell(s: Signal) -> str:
+    """기준선 칸 — "기준선 없음"(missing) · "기준선 0"(idle, 또는 값이 0) · 값."""
+    if s.base_state == RED_MISSING:
+        return "기준선 없음"
+    if s.base_state == RED_IDLE:
+        return "기준선 0 (호출 0)"
+    return "기준선 0" if s.base == 0 else "base=%s" % (fmt_val(s.base) if s.base is not None else "—")
+
+
 def top_lines(value: Top, window: Window) -> list[str]:
     if not value.entries:
         return ["(데이터 없음 — %s 시각에 %s 축의 시계열이 없다)" % (fmt_ts(window.end), ",".join(value.by))]
@@ -421,8 +462,9 @@ def top_lines(value: Top, window: Window) -> list[str]:
 
 @dataclass
 class MetricsArgs:
-    cmd: str                    # summarize · compare · top
-    query: str
+    cmd: str                    # summarize · compare · top · red
+    query: str = ""             # summarize · compare · top 의 PromQL
+    service: str = ""           # red 의 서비스 이름
     since: str = "1h"
     end: str | None = None
     step: str | None = None
@@ -447,13 +489,17 @@ def metrics_run(client: Client, a: MetricsArgs, at: float | None = None) -> RunR
     if a.cmd == "top":
         ev_t = top(client, a.query, window, k=a.k, by=a.by.split(","), agg=a.agg)
         return _evidence(top_lines(ev_t.value, window)), "promql-top", window
+    if a.cmd == "red":
+        w = window.with_baseline(a.baseline)
+        ev_r = red(client, a.service, w)
+        return _evidence(red_lines(ev_r.value, w)), "promql-red", w
     raise ObsError("알 수 없는 명령 %r — %s" % (a.cmd, " · ".join(METRICS_SUBCOMMANDS)))
 
 
 def metrics_main(argv: Sequence[str]) -> None:
-    ap = argparse.ArgumentParser(prog="promql.py", description="메트릭 환원 연산 — summarize · compare · top. 각 서브커맨드의 --help 에 설명 전부.",
+    ap = argparse.ArgumentParser(prog="promql.py", description="메트릭 환원 연산 — summarize · compare · top · red. 각 서브커맨드의 --help 에 설명 전부.",
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", required=True, metavar="<summarize|compare|top>")
+    sub = ap.add_subparsers(dest="cmd", required=True, metavar="<%s>" % "|".join(METRICS_SUBCOMMANDS))
     fmt = argparse.RawDescriptionHelpFormatter
 
     def common(sp: argparse.ArgumentParser, end_help: str) -> None:
@@ -476,8 +522,15 @@ def metrics_main(argv: Sequence[str]) -> None:
     sp_top.add_argument("--by", default="pod", help="레이블 축. 쉼표로 여러 개. 기본 pod")
     sp_top.add_argument("--k", type=int, default=DEFAULT_TOP_K, help="상위 k. 기본 %d" % DEFAULT_TOP_K)
     sp_top.add_argument("--agg", choices=TOP_AGGS, default=DEFAULT_TOP_AGG, help="축으로 접는 집계. 기본 sum")
+    sp_red = sub.add_parser("red", help="서비스 하나의 R · E · D — 지금 창 vs 기준선 창", description=RED_DOC, formatter_class=fmt)
+    sp_red.add_argument("service", help="서비스 이름(spanmetrics 의 service_name)")
+    sp_red.add_argument("--since", default="1h", help="창 길이. 기본 1h")
+    sp_red.add_argument("--end", default=None, help="창 끝 (now · -10m · unix초 · RFC3339). 기본 now")
+    _common(sp_red)
+    sp_red.add_argument("--baseline", default=DEFAULT_BASELINE,
+                        help="기준선 창 — 같은 식의 offset: 1d(기본 — 1일 전 같은 시각) · 1w · prev(직전 창)")
     a = ap.parse_args(argv)
-    args = MetricsArgs(cmd=a.cmd, query=a.query, since=getattr(a, "since", "1h"), end=a.end, step=getattr(a, "step", None),
+    args = MetricsArgs(cmd=a.cmd, query=getattr(a, "query", ""), service=getattr(a, "service", ""), since=getattr(a, "since", "1h"), end=a.end, step=getattr(a, "step", None),
                        baseline=getattr(a, "baseline", DEFAULT_BASELINE), k=getattr(a, "k", DEFAULT_TOP_K),
                        by=getattr(a, "by", "pod"), agg=getattr(a, "agg", DEFAULT_TOP_AGG))
     client = _client()

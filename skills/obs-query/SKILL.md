@@ -38,6 +38,7 @@ agent 는 이 값을 읽지도 옮기지도 않는다 — 어디에도 적지 �
 | `promql.py '<PromQL>'` | metrics | 즉시 조회. `--range 1h [--step]` 구간 조회(시계열별 요약). `--labels` · `--label-values <name>` · `--series` 로 탐색 |
 | `promql.py summarize '<PromQL>' --since 1h` | metrics | **환원** — 시계열별 n · min · p50 · p95 · max · last · 기울기. 계산은 백엔드(서브쿼리 위 `*_over_time` · `deriv`), 질의 1회 |
 | `promql.py compare '<PromQL>' --since 1h [--baseline 1d]` | metrics | **환원** — 같은 식의 p95 를 지금 창과 `offset` 기준선 창에서 한 질의로 받아 시계열별 차이(×비율 · Δ)만. 기준선 `1d`(기본 — 1일 전 같은 시각) · `1w` · `prev`(직전 창). 기준선에 없으면 "기준선 없음" |
+| `promql.py red <service> --since 24h [--baseline 1d]` | metrics | **환원** — 서비스 하나의 R · E · D 삼각측량: 창 안 호출 수 · 오류율 · p95(초)를 지금 창과 기준선 창에서 한 질의로 받아 행마다 `×비율 · now · base`. 기준선은 `compare` 와 같다(`1d` 기본 · `1w` · `prev`). 세 상태를 가른다 — "시계열 없음"(그 서비스가 span 을 낸 적이 없다) · "호출 0"(시계열은 있고 창 안 호출이 없다 — D 는 산출 불가) · 값. "기준선 없음" · "기준선 0" 이면 비율이 없다. **창은 24h 이상으로** — 홈랩 트래픽은 하루 한 번 도는 cron 이 거의 전부라 1h 창은 전 서비스가 호출 0 이다 |
 | `promql.py top '<PromQL>' --by pod [--k 10] [--agg sum]` | metrics | **환원** — 레이블 축 상위 k, `--end` 시각의 즉시 조회(창 없음). `--by` 는 쉼표로 여러 축(`namespace,pod`), `--agg` 는 `sum`(기본) · `max` · `min` · `avg` · `count`. `topk` 로 감싸 서버가 k 개만 돌려준다(카디널리티 폭발 없음) |
 | `logql.py '<LogQL>'` | logs | 로그 줄. `--since 1h` `--limit 30`(기본 — 낮다). 메트릭 질의면 시계열 요약. `--labels` · `--label-values` · `--series` |
 | `traceql.py search [--q '<TraceQL>']` | traces | 최근 트레이스 목록. `--min-duration 500ms` |
@@ -56,6 +57,7 @@ promql.py 'up == 0'
 promql.py 'sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="careerhub-prod"}[5m]))' --range 1h
 promql.py compare 'sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="careerhub-prod"}[5m]))' --since 1h --baseline 1d
 promql.py top 'container_memory_working_set_bytes' --by pod --k 10
+promql.py red posting-service --since 24h --baseline 1d
 logql.py '{namespace="careerhub-prod"} |= "error"' --since 30m
 logql.py 'sum by (app) (count_over_time({namespace="careerhub-prod"} |= "error" [5m]))' --since 2h
 traceql.py search --q '{ status = error }' --since 1h
@@ -74,7 +76,7 @@ traceql.py service-graph --since 6h
 
 ## 출력 규약 — 원본을 주 컨텍스트에 쏟지 않는다
 
-- **"높은가" 는 절대값이 아니라 기준선 대비로 판단한다.** 시계열을 두 번 조회해 눈으로 비교하지 말고 `promql.py compare` 를 쓴다 — 차이(×비율 · Δ)만 돌아온다. "데이터 없음" 과 `0` 은 다르다 — 시계열이 없으면 그렇게 표시된다.
+- **"높은가" 는 절대값이 아니라 기준선 대비로 판단한다.** 시계열을 두 번 조회해 눈으로 비교하지 말고 `promql.py compare` 를 쓴다 — 차이(×비율 · Δ)만 돌아온다. "데이터 없음" 과 `0` 은 다르다 — 시계열이 없으면 그렇게 표시된다. 서비스 하나가 "이상한가" 는 `promql.py red <service>` 가 표준 진입이다 — R · E · D 세 행을 기준선 대비로 한 번에.
 - **"느린가" 도 같다 — 엔드포인트의 평소 p95 대비다.** `exemplars` 의 느림 묶음은 그 기준으로 골라진 것이고, 건마다 붙은 `×배율 · 임계(출처)` 가 근거다. 읽을 때 셋을 본다: (1) 출처 — `baseline` 이 평소 분포, `window` 는 조사 창 자신(창 전체가 느려졌으면 못 잡는다), `sample` 은 검색 표본(가장 약하다) (2) 요약 줄의 "표본 N 중 초과 M(평소 기대 5%)" — M/N 이 5% 를 얼마나 넘는가가 신호의 크기 (3) **평소 p95 가 아주 작은 값(1ms 미만)이면 배율이 수백 배로 부풀 수 있다** — 홈랩은 호출이 드물어 7일 분포가 몇 건으로 만들어진다. 그때는 배율이 아니라 지속시간 절대값과 `service-graph` 의 건수로 읽고, 열화의 측정은 `promql.py compare` 의 것이다.
 - **병목은 self 시간이다.** 트레이스에서 "제일 긴 span" 은 루트다 — 자식을 포함하기 때문. `critical-path` 의 병목 줄(self 내림차순)을 인용하고, 잘림(`+Nms`) · 고아 · 루트 없음 표시가 있으면 그 트레이스는 불완전하다고 함께 적는다.
 - 요약 줄의 시각은 **UTC** 이고 `Z` 를 붙여 표기한다(`09-15 05:20:11Z`). 코멘트에 옮길 때 그대로 적는다.
