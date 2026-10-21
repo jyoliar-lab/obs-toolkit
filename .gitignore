@@ -10,5 +10,8 @@ __pycache__/
 .pytest_cache/
 .venv/
 
-# 측정 산출물 — mutmut 의 변이 사본 · 결과
+# 측정 산출물 — mutmut 의 변이 사본 · 결과 / coverage 의 데이터 · HTML 보고서
 mutants/
+.coverage
+.coverage.*
+htmlcov/

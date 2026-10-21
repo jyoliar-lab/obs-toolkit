@@ -46,9 +46,11 @@ python -m tests.record traceql-trace.json           # 하나만. 재현 불가(�
 
 fixture 에 `recorded: manual` 표시가 있는 것은 재현할 수 없는 조건의 손 기록이고 `reason` 이 이유를 말한다 — 표시 없는 파일은 전부 녹화기가 만든 것이다. 물리(호스트 · 프록시 경로 · uid · 토큰)는 fixture 에 실리지 않는다(`tests/test_fixtures.py` 가 파일 전체를 검사한다).
 
-## 측정 — mutation testing
+## 측정 — mutation testing · 커버리지
 
-`tests/` 가 약속 위반을 잡는지 재는 척도다. CI 밖이다 — 로컬에서 돌리고 산출물(`mutants/`)은 커밋하지 않는다(gitignore). 설정은 `pyproject.toml` 의 `[tool.mutmut]` — `obs/` 를 변이하고, 테스트는 contracts · format 두 티어만 고른다(infra 티어는 하네스 검사라 obs 함수를 지나지 않고, `test_core_never_sets_http_method` 는 소스를 AST 로 읽어 변이 사본과 양립하지 않아 `--deselect`). 소스 · 테스트는 바꾸지 않는다.
+`tests/` 가 약속 위반을 잡는지 재는 척도 둘이다. 커버리지는 "어느 줄이 한 번도 안 돌았나", mutation 은 "돈 줄의 결과를 테스트가 검사하나" — 서로를 대체하지 못한다. 둘 다 CI 밖이다 — 로컬에서 돌리고 산출물(`mutants/` · `.coverage` · `htmlcov/`)은 커밋하지 않는다(gitignore). 설정은 `pyproject.toml` 의 `[tool.mutmut]` · `[tool.coverage.*]`, 핀은 `[dependency-groups] measure`. **두 측정은 같은 테스트 선택 위에서 돈다** — contracts · format 두 티어(infra 티어는 하네스 검사라 obs 함수를 지나지 않고, `test_core_never_sets_http_method` 는 소스를 AST 로 읽어 변이 사본과 양립하지 않아 `--deselect`). mutmut 쪽은 `pytest_add_cli_args_test_selection` 에, 커버리지 쪽은 아래 명령에 같은 인자가 있다 — 한쪽을 바꾸면 다른 쪽도 바꾼다. 소스 · 테스트는 바꾸지 않는다.
+
+### mutation testing (mutmut)
 
 ```bash
 python -m pip install mutmut==3.8.0          # 또는 python -m pip install --group measure (pip ≥ 25.1 · 핀은 pyproject 의 [dependency-groups])
@@ -61,3 +63,15 @@ mutmut print-time-estimates                  # 예상 시간 — 첫 실행 뒤(
 ```
 
 `python -m mutmut` 이 아니라 **`mutmut run`** 이다. 워커는 fork 라 macOS · Linux 에서 돈다(Windows 는 WSL). 상태의 뜻 — **killed**(테스트가 변이를 잡았다) · **survived**(테스트 전부 통과 — 그 결과를 검사하는 테스트가 없다) · **no tests**(그 함수를 지나는 테스트가 없다 — 함수 단위 미실행) · **timeout** · **suspicious**(측정 자체의 문제 — 설정 · 테스트를 먼저 본다). 점수는 `killed / total` 이고 `no tests` 를 뺀 분모도 함께 적는다. 측정 조건(Python 버전 · 워커 수 · 실행 시간)을 결과와 같이 남긴다 — 수치는 기록이지 목표가 아니다. 생존 mutant 는 고칠 목록이 아니라 읽고 분류할 목록이다.
+
+### 커버리지 (coverage.py)
+
+```bash
+python -m pip install coverage==7.16.2       # mutmut 이 이미 끌어온 것과 같은 버전 — 또는 --group measure
+unset OBS_TEST_UPDATE
+coverage erase && coverage run -m pytest tests/contracts tests/format --deselect tests/contracts/test_get_only.py::test_core_never_sets_http_method
+coverage report                              # 모듈별 문장(Stmts · Miss) · 분기(Branch · BrPart) 커버리지와 미실행 줄(Missing)
+coverage html                                # htmlcov/index.html — 줄 단위로 볼 때
+```
+
+`coverage run` 은 pytest 플러그인이 아니라 pytest 호출을 밖에서 감싼다 — `addopts` · CI · mutmut 의 mutant 당 pytest 에 영향이 없다. 분기 커버리지(`branch = true`)가 켜져 있어 문장 · 분기가 한 표에 나온다 — 둘 다 적는다. 미실행 줄은 "테스트가 비어 있는 자리" 의 목록이고, mutmut 의 `no tests` 함수와 같은 자리를 가리키는지 대조한다. 수치는 기록이지 목표가 아니다.

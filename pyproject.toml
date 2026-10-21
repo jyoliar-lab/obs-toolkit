@@ -16,7 +16,7 @@ typeCheckingMode = "strict"
 
 # 측정 도구 — CI 밖. 설치: python -m pip install --group measure (pip ≥ 25.1)
 [dependency-groups]
-measure = ["mutmut==3.8.0"]
+measure = ["mutmut==3.8.0", "coverage==7.16.2"]   # mutmut 이 coverage 를 요구한다 — 같은 버전을 핀해 두 도구가 한 coverage 를 쓴다
 
 [tool.mutmut]
 source_paths = ["obs"]
@@ -28,3 +28,12 @@ pytest_add_cli_args_test_selection = [
   "tests/contracts", "tests/format",
   "--deselect", "tests/contracts/test_get_only.py::test_core_never_sets_http_method",
 ]
+
+[tool.coverage.run]
+source = ["obs"]
+branch = true          # 문장 + 분기 — 같은 명령에서 둘 다 나온다
+data_file = ".coverage"
+
+[tool.coverage.report]
+show_missing = true    # 모듈별 % 와 미실행 줄 목록이 한 표에
+precision = 1
