@@ -64,6 +64,8 @@ mutmut print-time-estimates                  # 예상 시간 — 첫 실행 뒤(
 
 `python -m mutmut` 이 아니라 **`mutmut run`** 이다. 워커는 fork 라 macOS · Linux 에서 돈다(Windows 는 WSL). 상태의 뜻 — **killed**(테스트가 변이를 잡았다) · **survived**(테스트 전부 통과 — 그 결과를 검사하는 테스트가 없다) · **no tests**(그 함수를 지나는 테스트가 없다 — 함수 단위 미실행) · **timeout** · **suspicious**(측정 자체의 문제 — 설정 · 테스트를 먼저 본다). 점수는 `killed / total` 이고 `no tests` 를 뺀 분모도 함께 적는다. 측정 조건(Python 버전 · 워커 수 · 실행 시간)을 결과와 같이 남긴다 — 수치는 기록이지 목표가 아니다. 생존 mutant 는 고칠 목록이 아니라 읽고 분류할 목록이다.
 
+**워커 수와 결정론.** 병렬 실행(워커 = CPU 수)은 killed 에 변이와 무관한 가짜가 실행당 1 ~ 4개 섞인다 — 뒤집힌 mutant 를 단독으로 돌리면 전부 survived 였다. survived · no tests 목록은 결정론적이다. 그래서 **일상 실행은 병렬로 하고 결과는 survived · no tests 목록으로 읽는다**. 점수나 killed 수를 전 · 후로 비교할 때는 `mutmut run --max-children 1`(약 6배 시간)로 기준선을 잡고, 어긋난 mutant 는 이름을 지정해 단독 재실행으로 가린다.
+
 ### 커버리지 (coverage.py)
 
 ```bash
