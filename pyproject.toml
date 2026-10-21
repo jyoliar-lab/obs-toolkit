@@ -13,3 +13,18 @@ addopts = "-q"
 include = ["obs", "tests", "skills"]
 pythonVersion = "3.10"
 typeCheckingMode = "strict"
+
+# 측정 도구 — CI 밖. 설치: python -m pip install --group measure (pip ≥ 25.1)
+[dependency-groups]
+measure = ["mutmut==3.8.0"]
+
+[tool.mutmut]
+source_paths = ["obs"]
+# fixtures/ 는 tests/record.py 기준 상대 경로로 읽히고, bin/ · skills/ 도 테스트가 읽는다 — 변이 사본(mutants/)에 함께 복사한다
+also_copy = ["fixtures", "bin", "skills"]
+# 테스트 선택 — contracts · format 두 티어. infra 티어는 하네스 검사라 obs 함수를 지나지 않는다.
+# test_core_never_sets_http_method 는 obs/core.py 를 AST 로 읽어 변이 함수의 호출 꼴에 걸린다(저장소 모양의 검사) — 고치지 않고 뺀다
+pytest_add_cli_args_test_selection = [
+  "tests/contracts", "tests/format",
+  "--deselect", "tests/contracts/test_get_only.py::test_core_never_sets_http_method",
+]

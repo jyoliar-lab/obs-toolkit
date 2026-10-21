@@ -9,3 +9,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .venv/
+
+# 측정 산출물 — mutmut 의 변이 사본 · 결과
+mutants/

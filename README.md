@@ -45,3 +45,19 @@ python -m tests.record traceql-trace.json           # 하나만. 재현 불가(�
 `obs/metrics.py` 등이 질의 조립을 바꾸면 fixture replay 테스트가 **요청 불일치**로 실패한다(문구에 나간 요청 · 녹화 요청이 나란히) — 그때는 `python -m tests.record <fixture>` 로 다시 녹화한다. 공유 fixture(`promql-instant-empty.json`)만 `unchecked=` 로 검사를 끄고, 그 이유가 테스트 코드에 있다.
 
 fixture 에 `recorded: manual` 표시가 있는 것은 재현할 수 없는 조건의 손 기록이고 `reason` 이 이유를 말한다 — 표시 없는 파일은 전부 녹화기가 만든 것이다. 물리(호스트 · 프록시 경로 · uid · 토큰)는 fixture 에 실리지 않는다(`tests/test_fixtures.py` 가 파일 전체를 검사한다).
+
+## 측정 — mutation testing
+
+`tests/` 가 약속 위반을 잡는지 재는 척도다. CI 밖이다 — 로컬에서 돌리고 산출물(`mutants/`)은 커밋하지 않는다(gitignore). 설정은 `pyproject.toml` 의 `[tool.mutmut]` — `obs/` 를 변이하고, 테스트는 contracts · format 두 티어만 고른다(infra 티어는 하네스 검사라 obs 함수를 지나지 않고, `test_core_never_sets_http_method` 는 소스를 AST 로 읽어 변이 사본과 양립하지 않아 `--deselect`). 소스 · 테스트는 바꾸지 않는다.
+
+```bash
+python -m pip install mutmut==3.8.0          # 또는 python -m pip install --group measure (pip ≥ 25.1 · 핀은 pyproject 의 [dependency-groups])
+unset OBS_TEST_UPDATE                        # 켜져 있으면 format 티어가 스냅샷을 다시 쓰고 통과해 렌더러 변이가 전부 살아남는다
+rm -rf mutants && mutmut run                 # 빈 mutants/ 에서 시작 — 전제 검증 세 단계(stats · clean tests · forced fail)를 지나 전체를 돈다. 워커 수 기본 = CPU 수(--max-children N 으로 고정)
+mutmut results                               # killed 를 뺀 목록 — survived · no tests · timeout · suspicious
+mutmut show <mutant 이름>                    # 한 mutant 의 diff. mutmut browse 는 터미널 UI
+mutmut run "obs.core.x_load_config*"         # 이름 패턴으로 일부만 다시 — 바뀐 함수만 재검사되므로 전체 재실행도 짧다
+mutmut print-time-estimates                  # 예상 시간 — 첫 실행 뒤(mutants/ 가 있을 때)에만 동작한다
+```
+
+`python -m mutmut` 이 아니라 **`mutmut run`** 이다. 워커는 fork 라 macOS · Linux 에서 돈다(Windows 는 WSL). 상태의 뜻 — **killed**(테스트가 변이를 잡았다) · **survived**(테스트 전부 통과 — 그 결과를 검사하는 테스트가 없다) · **no tests**(그 함수를 지나는 테스트가 없다 — 함수 단위 미실행) · **timeout** · **suspicious**(측정 자체의 문제 — 설정 · 테스트를 먼저 본다). 점수는 `killed / total` 이고 `no tests` 를 뺀 분모도 함께 적는다. 측정 조건(Python 버전 · 워커 수 · 실행 시간)을 결과와 같이 남긴다 — 수치는 기록이지 목표가 아니다. 생존 mutant 는 고칠 목록이 아니라 읽고 분류할 목록이다.
