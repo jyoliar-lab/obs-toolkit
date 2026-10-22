@@ -563,9 +563,12 @@ def test_run_result_lines_are_render_output_without_marker() -> None:
     w = Window(AT - MINUTE, AT)
     empty: cli.RunResult[list[str]] = cli.RunResult(Evidence([]), "k", w, lambda v, w: [])
     same: cli.RunResult[list[str]] = cli.RunResult(Evidence(["a", "b"]), "k", w, lambda v, w: v)
+    # given — 값과 창을 둘 다 쓰는 렌더러(값을 그대로 돌려주거나 창을 넘기지 않으면 갈린다)
+    shaped: cli.RunResult[list[str]] = cli.RunResult(Evidence(["a", "b"]), "k", w, lambda v, w: ["%s@%d" % (x, w.start) for x in v])
     # when · then
     assert empty.lines() == []
     assert same.lines() == ["a", "b"]
+    assert shaped.lines() == ["a@%d" % w.start, "b@%d" % w.start]
 
 
 def test_search_lines_empty_hints_wider_window() -> None:
