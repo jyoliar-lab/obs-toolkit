@@ -24,9 +24,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Mapping, Sequence, TypeAlias, TypeVar
 
 from obs.adapters.cli_argparse import (
-    AROUND_DOC, COMPARE_DOC, CRITICAL_PATH_DOC, DIFF_DOC, EXEMPLARS_DOC, FIRST_SEEN_DOC, HISTOGRAM_DOC, LOGQL_DOC, PROMQL_DOC, RED_DOC,
-    SERVICE_GRAPH_DOC, SUMMARIZE_DOC, TEMPLATES_DOC, TOP_DOC, TRACEQL_DOC,
     DEFAULT_LOG_LIMIT, DEFAULT_MAX_LINES, DEFAULT_SINCE, LOGS_SUBCOMMANDS, METRICS_SUBCOMMANDS, TRACES_SUBCOMMANDS,
+    logql_parser, logs_parser, metrics_parser, promql_parser, traceql_parser, traces_parser,
 )
 from obs.core import (
     JSON, Client, DoctorReport, Evidence, Lines, ObsError, Params, Response, Transport, Window, doctor, fmt_ts, load_config,
@@ -38,7 +37,7 @@ from obs.logs import (
     Side, Templates, around, first_seen, histogram, parse_logs, templates,
 )
 from obs.metrics import (
-    DEFAULT_BASELINE, DEFAULT_TOP_AGG, DEFAULT_TOP_K, RED_IDLE, RED_MISSING, RED_QUANTILE, TOP_AGGS, Comparison, MetricResult, Red,
+    DEFAULT_BASELINE, DEFAULT_TOP_AGG, DEFAULT_TOP_K, RED_IDLE, RED_MISSING, RED_QUANTILE, Comparison, MetricResult, Red,
     Signal, Summary, Top, auto_step, check_status, compare, parse_metric, red, summarize, top,
 )
 from obs.traces import (
@@ -167,12 +166,6 @@ def _run_main(client: Callable[[], Client], run: Callable[[Client], RunResult], 
     """*_main 의 끝 — parse 뒤에 client() 로 Client 하나를 만들어 run 과 finish 가 같이 쓴다. spill 은 env 의 프로젝트 디렉터리에."""
     c = client()
     finish(c, lambda: run(c), failed_kind, output.max_lines, output.as_json, base=project_dir(env), at=at)
-
-
-def _common(ap: argparse.ArgumentParser) -> None:
-    ap.add_argument("--max-lines", type=int, default=DEFAULT_MAX_LINES,
-                    help="stdout 줄 수 상한. 기본 %d — 나머지는 호출 디렉터리의 summary.txt 에" % DEFAULT_MAX_LINES)
-    ap.add_argument("--json", action="store_true", help="stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 성공 · 실패 모두 남는다)")
 
 
 @dataclass(frozen=True)
@@ -307,21 +300,9 @@ def promql_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: 
     if argv and argv[0] in METRICS_SUBCOMMANDS:
         metrics_main(argv, env, at, client)
         return
-    ap = argparse.ArgumentParser(prog="promql.py", description=PROMQL_DOC,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("query", nargs="?", help="PromQL (또는 --labels/--label-values/--series 의 selector)")
-    ap.add_argument("--end", default=None)
-    ap.add_argument("--range", dest="range_", default=None)
-    ap.add_argument("--step", default=None)
-    ap.add_argument("--points", action="store_true", help="구간 조회에서 시각별 값을 전부 출력")
-    ap.add_argument("--labels", action="store_true")
-    ap.add_argument("--label-values", metavar="NAME", default=None)
-    ap.add_argument("--series", metavar="SELECTOR", default=None)
-    _common(ap)
-    a = ap.parse_args(argv)
-    args = PromqlArgs(query=a.query, end=a.end, range_=a.range_, step=a.step, points=a.points,
-                      labels=a.labels, label_values=a.label_values, series=a.series)
-    _run_main(client, lambda c: promql_run(c, args, at), "promql-failed", OutputArgs(max_lines=a.max_lines, as_json=a.json), env, at)
+    a = promql_parser().parse_args(argv)
+    args = map_args(PromqlArgs, a)
+    _run_main(client, lambda c: promql_run(c, args, at), "promql-failed", map_args(OutputArgs, a), env, at)
 
 
 # ── 환원 연산 — promql.py 의 서브커맨드 (계산은 obs.metrics, 표는 여기) ─────────────────
@@ -445,43 +426,9 @@ def metrics_run(client: Client, a: MetricsArgs, at: float) -> RunResult:
 
 
 def metrics_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: Callable[[], Client]) -> None:
-    ap = argparse.ArgumentParser(prog="promql.py", description="메트릭 환원 연산 — summarize · compare · top · red. 각 서브커맨드의 --help 에 설명 전부.",
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", required=True, metavar="<%s>" % "|".join(METRICS_SUBCOMMANDS))
-    fmt = argparse.RawDescriptionHelpFormatter
-
-    def common(sp: argparse.ArgumentParser, end_help: str) -> None:
-        sp.add_argument("query", help="PromQL")
-        sp.add_argument("--end", default=None, help=end_help)
-        _common(sp)
-
-    sp_sum = sub.add_parser("summarize", help="시계열별 n·min·p50·p95·max·last·기울기", description=SUMMARIZE_DOC, formatter_class=fmt)
-    sp_sum.add_argument("--since", default="1h", help="창 길이. 기본 1h")
-    common(sp_sum, "창 끝 (now · -10m · unix초 · RFC3339). 기본 now")
-    sp_sum.add_argument("--step", default=None, help="서브쿼리 해상도. 기본 창 길이/60 (최소 15s)")
-    sp_cmp = sub.add_parser("compare", help="지금 창 vs 기준선 창 — 시계열별 p95 차이만", description=COMPARE_DOC, formatter_class=fmt)
-    sp_cmp.add_argument("--since", default="1h", help="창 길이. 기본 1h")
-    common(sp_cmp, "창 끝 (now · -10m · unix초 · RFC3339). 기본 now")
-    sp_cmp.add_argument("--baseline", default=DEFAULT_BASELINE,
-                        help="기준선 창 — 같은 식의 offset: 1d(기본 — 1일 전 같은 시각) · 1w · prev(직전 창)")
-    sp_cmp.add_argument("--step", default=None, help="서브쿼리 해상도(두 창에 같다). 기본 창 길이/60 (최소 15s)")
-    sp_top = sub.add_parser("top", help="레이블 축 상위 k (--end 시각의 즉시 조회)", description=TOP_DOC, formatter_class=fmt)
-    common(sp_top, "평가 시각 (now · -10m · unix초 · RFC3339). 기본 now — top 은 창이 없다")
-    sp_top.add_argument("--by", default="pod", help="레이블 축. 쉼표로 여러 개. 기본 pod")
-    sp_top.add_argument("--k", type=int, default=DEFAULT_TOP_K, help="상위 k. 기본 %d" % DEFAULT_TOP_K)
-    sp_top.add_argument("--agg", choices=TOP_AGGS, default=DEFAULT_TOP_AGG, help="축으로 접는 집계. 기본 sum")
-    sp_red = sub.add_parser("red", help="서비스 하나의 R · E · D — 지금 창 vs 기준선 창", description=RED_DOC, formatter_class=fmt)
-    sp_red.add_argument("service", help="서비스 이름(spanmetrics 의 service_name)")
-    sp_red.add_argument("--since", default="1h", help="창 길이. 기본 1h")
-    sp_red.add_argument("--end", default=None, help="창 끝 (now · -10m · unix초 · RFC3339). 기본 now")
-    _common(sp_red)
-    sp_red.add_argument("--baseline", default=DEFAULT_BASELINE,
-                        help="기준선 창 — 같은 식의 offset: 1d(기본 — 1일 전 같은 시각) · 1w · prev(직전 창)")
-    a = ap.parse_args(argv)
-    args = MetricsArgs(cmd=a.cmd, query=getattr(a, "query", ""), service=getattr(a, "service", ""), since=getattr(a, "since", "1h"), end=a.end, step=getattr(a, "step", None),
-                       baseline=getattr(a, "baseline", DEFAULT_BASELINE), k=getattr(a, "k", DEFAULT_TOP_K),
-                       by=getattr(a, "by", "pod"), agg=getattr(a, "agg", DEFAULT_TOP_AGG))
-    _run_main(client, lambda c: metrics_run(c, args, at), "promql-%s-failed" % a.cmd, OutputArgs(max_lines=a.max_lines, as_json=a.json), env, at)
+    a = metrics_parser().parse_args(argv)
+    args = map_args(MetricsArgs, a)
+    _run_main(client, lambda c: metrics_run(c, args, at), "promql-%s-failed" % a.cmd, map_args(OutputArgs, a), env, at)
 
 
 # ── logql ────────────────────────────────────────────────────────────────────────
@@ -583,22 +530,9 @@ def logql_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: C
     if argv and argv[0] in LOGS_SUBCOMMANDS:
         logs_main(argv, env, at, client)
         return
-    ap = argparse.ArgumentParser(prog="logql.py", description=LOGQL_DOC,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("query", nargs="?", help="LogQL")
-    ap.add_argument("--since", default="1h")
-    ap.add_argument("--end", default=None)
-    ap.add_argument("--limit", type=int, default=DEFAULT_LOG_LIMIT)
-    ap.add_argument("--direction", choices=("backward", "forward"), default="backward")
-    ap.add_argument("--width", type=int, default=200)
-    ap.add_argument("--labels", action="store_true")
-    ap.add_argument("--label-values", metavar="NAME", default=None)
-    ap.add_argument("--series", metavar="SELECTOR", default=None)
-    _common(ap)
-    a = ap.parse_args(argv)
-    args = LogqlArgs(query=a.query, since=a.since, end=a.end, limit=a.limit, direction=a.direction,
-                     width=a.width, labels=a.labels, label_values=a.label_values, series=a.series)
-    _run_main(client, lambda c: logql_run(c, args, at), "logql-failed", OutputArgs(max_lines=a.max_lines, as_json=a.json), env, at)
+    a = logql_parser().parse_args(argv)
+    args = map_args(LogqlArgs, a)
+    _run_main(client, lambda c: logql_run(c, args, at), "logql-failed", map_args(OutputArgs, a), env, at)
 
 
 # ── 환원 연산 — logql.py 의 서브커맨드 (계산은 obs.logs, 표는 여기) ────────────────────
@@ -701,40 +635,9 @@ def logs_run(client: Client, a: LogsArgs, at: float) -> RunResult:
 
 
 def logs_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: Callable[[], Client]) -> None:
-    ap = argparse.ArgumentParser(prog="logql.py", description="로그 환원 연산 — %s. 각 서브커맨드의 --help 에 설명 전부." % " · ".join(LOGS_SUBCOMMANDS),
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", required=True, metavar="<%s>" % "|".join(LOGS_SUBCOMMANDS))
-    fmt = argparse.RawDescriptionHelpFormatter
-
-    def common(sp: argparse.ArgumentParser, window: bool = True) -> None:
-        sp.add_argument("selector", help="LogQL 스트림 selector — 예: '{namespace=\"x\"}'")
-        if window:
-            sp.add_argument("--since", default="1h", help="창 길이. 기본 1h")
-            sp.add_argument("--end", default=None, help="창 끝 (now · -10m · unix초 · RFC3339). 기본 now")
-        _common(sp)
-
-    sp_h = sub.add_parser("histogram", help="by 값별 · 구간별 건수 표", description=HISTOGRAM_DOC, formatter_class=fmt)
-    common(sp_h)
-    sp_h.add_argument("--by", default="detected_level", help="행의 레이블 축. 쉼표로 여러 개. 기본 detected_level")
-    sp_h.add_argument("--step", default=None, help="구간 폭. 기본 창 길이/60 (최소 15s)")
-    sp_t = sub.add_parser("templates", help="로그 군집 상위 k + 예시", description=TEMPLATES_DOC, formatter_class=fmt)
-    common(sp_t)
-    sp_t.add_argument("--k", type=int, default=DEFAULT_TEMPLATES_K, help="상위 k. 기본 %d" % DEFAULT_TEMPLATES_K)
-    sp_t.add_argument("--step", default=None, help="sample 구간 폭. 기본 창 길이/60 (최소 15s)")
-    sp_a = sub.add_parser("around", help="시각 앞뒤의 문맥", description=AROUND_DOC, formatter_class=fmt)
-    common(sp_a, window=False)
-    sp_a.add_argument("--ts", default=None, help="중심 시각 (--ts=-30m · unix초 · RFC3339). 필수")
-    sp_a.add_argument("--span", default=DEFAULT_AROUND_SPAN, help="한 쪽 폭. 기본 %s" % DEFAULT_AROUND_SPAN)
-    sp_a.add_argument("--limit", type=int, default=DEFAULT_AROUND_LIMIT, help="한 쪽 줄 수 상한. 기본 %d" % DEFAULT_AROUND_LIMIT)
-    sp_f = sub.add_parser("first-seen", help="템플릿의 첫 발생", description=FIRST_SEEN_DOC, formatter_class=fmt)
-    common(sp_f)
-    sp_f.add_argument("template", help="패턴 — templates 출력의 템플릿 그대로")
-    a = ap.parse_args(argv)
-    args = LogsArgs(cmd=a.cmd, selector=a.selector, since=getattr(a, "since", "1h"), end=getattr(a, "end", None),
-                    by=getattr(a, "by", "detected_level"), step=getattr(a, "step", None), k=getattr(a, "k", DEFAULT_TEMPLATES_K),
-                    ts=getattr(a, "ts", None), span=getattr(a, "span", DEFAULT_AROUND_SPAN), limit=getattr(a, "limit", DEFAULT_AROUND_LIMIT),
-                    template=getattr(a, "template", None))
-    _run_main(client, lambda c: logs_run(c, args, at), "logql-%s-failed" % a.cmd, OutputArgs(max_lines=a.max_lines, as_json=a.json), env, at)
+    a = logs_parser().parse_args(argv)
+    args = map_args(LogsArgs, a)
+    _run_main(client, lambda c: logs_run(c, args, at), "logql-%s-failed" % a.cmd, map_args(OutputArgs, a), env, at)
 
 
 # ── traceql ──────────────────────────────────────────────────────────────────────
@@ -834,22 +737,9 @@ def traceql_main(argv: Sequence[str], env: Mapping[str, str], at: float, client:
     if argv and argv[0] in TRACES_SUBCOMMANDS:
         traces_main(argv, env, at, client)
         return
-    ap = argparse.ArgumentParser(prog="traceql.py", description=TRACEQL_DOC,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=("search", "trace", "tags", "tag-values"))
-    ap.add_argument("arg", nargs="?", help="trace: traceID · tag-values: 태그 이름")
-    ap.add_argument("--q", default=None)
-    ap.add_argument("--since", default="1h")
-    ap.add_argument("--end", default=None)
-    ap.add_argument("--limit", type=int, default=20)
-    ap.add_argument("--min-duration", default=None)
-    ap.add_argument("--scope", choices=("span", "resource", "intrinsic"), default=None)
-    ap.add_argument("--top", type=int, default=15)
-    _common(ap)
-    a = ap.parse_args(argv)
-    args = TraceqlArgs(cmd=a.cmd, arg=a.arg, q=a.q, since=a.since, end=a.end, limit=a.limit,
-                       min_duration=a.min_duration, scope=a.scope, top=a.top)
-    _run_main(client, lambda c: traceql_run(c, args, at), "traceql-failed", OutputArgs(max_lines=a.max_lines, as_json=a.json), env, at)
+    a = traceql_parser().parse_args(argv)
+    args = map_args(TraceqlArgs, a)
+    _run_main(client, lambda c: traceql_run(c, args, at), "traceql-failed", map_args(OutputArgs, a), env, at)
 
 
 # ── 환원 연산 — traceql.py 의 서브커맨드 (계산은 obs.traces, 표는 여기) ─────────────────
@@ -972,44 +862,9 @@ def traces_run(client: Client, a: TracesArgs, at: float) -> RunResult:
 
 def traces_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: Callable[[], Client]) -> None:
     """argparse 서브파서 → TracesArgs → traces_run → _finish."""
-    ap = argparse.ArgumentParser(prog="traceql.py", description="트레이스 환원 연산 — %s. 각 서브커맨드의 --help 에 설명 전부." % " · ".join(TRACES_SUBCOMMANDS),
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", required=True, metavar="<%s>" % "|".join(TRACES_SUBCOMMANDS))
-    fmt = argparse.RawDescriptionHelpFormatter
-
-    def window(sp: argparse.ArgumentParser) -> None:
-        sp.add_argument("--since", default="1h", help="창 길이. 기본 1h")
-        sp.add_argument("--end", default=None, help="창 끝 (now · -10m · unix초 · RFC3339). 기본 now")
-
-    def distribution(sp: argparse.ArgumentParser) -> None:
-        sp.add_argument("--quantile", type=float, default=DEFAULT_QUANTILE, help="분위수 (0, 1). 기본 %s" % DEFAULT_QUANTILE)
-        sp.add_argument("--baseline-range", default=DEFAULT_BASELINE_RANGE,
-                        help="평소 분포의 구간 — 조사 창 바로 앞. 기본 %s" % DEFAULT_BASELINE_RANGE)
-
-    sp_e = sub.add_parser("exemplars", help="느림 · 오류 · 정상 묶음별 대표 트레이스", description=EXEMPLARS_DOC, formatter_class=fmt)
-    sp_e.add_argument("--q", default="", help="TraceQL 조건식(중괄호 없이). 비우면 서버 span 전부")
-    window(sp_e)
-    sp_e.add_argument("--k", type=int, default=DEFAULT_EXEMPLARS_K, help="묶음별 상위 k. 기본 %d" % DEFAULT_EXEMPLARS_K)
-    distribution(sp_e)
-    sp_e.add_argument("--limit", type=int, default=DEFAULT_SEARCH_LIMIT, help="검색 트레이스 상한. 기본 %d" % DEFAULT_SEARCH_LIMIT)
-    _common(sp_e)
-    sp_c = sub.add_parser("critical-path", help="트레이스 하나의 임계경로와 병목", description=CRITICAL_PATH_DOC, formatter_class=fmt)
-    sp_c.add_argument("trace_id", help="traceID")
-    _common(sp_c)
-    sp_g = sub.add_parser("service-graph", help="엔드포인트별 호출 엣지 — 건수 · 오류율 · p95 배율", description=SERVICE_GRAPH_DOC, formatter_class=fmt)
-    window(sp_g)
-    distribution(sp_g)
-    _common(sp_g)
-    sp_d = sub.add_parser("diff", help="같은 루트의 두 트레이스 — span 별 시간 차이", description=DIFF_DOC, formatter_class=fmt)
-    sp_d.add_argument("slow_id", help="느린 트레이스의 traceID")
-    sp_d.add_argument("normal_id", help="정상 트레이스의 traceID")
-    _common(sp_d)
-    a = ap.parse_args(argv)
-    args = TracesArgs(cmd=a.cmd, q=getattr(a, "q", ""), since=getattr(a, "since", "1h"), end=getattr(a, "end", None),
-                      k=getattr(a, "k", DEFAULT_EXEMPLARS_K), quantile=getattr(a, "quantile", DEFAULT_QUANTILE),
-                      baseline_range=getattr(a, "baseline_range", DEFAULT_BASELINE_RANGE), limit=getattr(a, "limit", DEFAULT_SEARCH_LIMIT),
-                      trace_id=getattr(a, "trace_id", None), slow_id=getattr(a, "slow_id", None), normal_id=getattr(a, "normal_id", None))
-    _run_main(client, lambda c: traces_run(c, args, at), "traceql-%s-failed" % a.cmd, OutputArgs(max_lines=a.max_lines, as_json=a.json), env, at)
+    a = traces_parser().parse_args(argv)
+    args = map_args(TracesArgs, a)
+    _run_main(client, lambda c: traces_run(c, args, at), "traceql-%s-failed" % a.cmd, map_args(OutputArgs, a), env, at)
 
 
 # ── obs-doctor.py — 사람용. 물리가 보이는 유일한 출력 ───────────────────────────────

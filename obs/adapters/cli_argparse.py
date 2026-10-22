@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+from typing import TypeAlias
 
 from obs.logs import DEFAULT_AROUND_LIMIT, DEFAULT_AROUND_SPAN, DEFAULT_TEMPLATES_K
 from obs.metrics import DEFAULT_TOP_K, TOP_AGGS
@@ -21,6 +22,7 @@ LOGS_SUBCOMMANDS: tuple[str, ...] = ("histogram", "templates", "around", "first-
 TRACES_SUBCOMMANDS: tuple[str, ...] = ("exemplars", "critical-path", "service-graph", "diff")
 
 FMT = argparse.RawDescriptionHelpFormatter
+SubParsers: TypeAlias = "argparse._SubParsersAction[argparse.ArgumentParser]"  # pyright: ignore[reportPrivateUsage] — add_subparsers 의 반환 타입, 공개 이름이 없다
 
 
 PROMQL_DOC = """promql — 즉시 조회·구간 조회 (metrics 백엔드, GET 만).
@@ -240,11 +242,11 @@ def _parser(prog: str, description: str) -> argparse.ArgumentParser:
     return argparse.ArgumentParser(prog=prog, description=description, formatter_class=FMT, argument_default=argparse.SUPPRESS)
 
 
-def _subparsers(ap: argparse.ArgumentParser, names: tuple[str, ...]) -> argparse._SubParsersAction[argparse.ArgumentParser]:  # pyright: ignore[reportPrivateUsage]
+def _subparsers(ap: argparse.ArgumentParser, names: tuple[str, ...]) -> SubParsers:
     return ap.add_subparsers(dest="cmd", required=True, metavar="<%s>" % "|".join(names))
 
 
-def _subparser(sub: argparse._SubParsersAction[argparse.ArgumentParser], name: str, help: str, description: str) -> argparse.ArgumentParser:  # pyright: ignore[reportPrivateUsage]
+def _subparser(sub: SubParsers, name: str, help: str, description: str) -> argparse.ArgumentParser:
     return sub.add_parser(name, help=help, description=description, formatter_class=FMT, argument_default=argparse.SUPPRESS)
 
 
