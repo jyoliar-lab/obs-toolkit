@@ -184,7 +184,7 @@ def finish(client: Client, run: Callable[[], Renderable], failed_kind: str, max_
         if client.log:
             err("원본: %s" % _spill_failed(client, failed_kind, e, base, at))
         raise
-    _finish(r.lines(), client.log, r.kind, r.window, max_lines, as_json, base=base, at=at, out=out)
+    _finish(r.lines() or ["(결과 없음)"], client.log, r.kind, r.window, max_lines, as_json, base=base, at=at, out=out)
 
 
 def _run_main(client: Callable[[], Client], run: Callable[[Client], Renderable], failed_kind: str, output: OutputArgs,
