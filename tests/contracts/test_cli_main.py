@@ -6,20 +6,12 @@ from __future__ import annotations
 import json
 import urllib.parse
 from pathlib import Path
-from typing import Callable, Mapping
 
 import pytest
 
 from obs.adapters import cli
-from obs.core import JSON, Config, DoctorReport, ObsError, Probe, Resolved, Transport, spill_root, to_dict
+from obs.core import JSON, ObsError, json_list, json_obj, spill_root
 from tests.conftest import AT, ClientFactory, MainFn, MainRunner, RouteKey, _vector
-
-
-@pytest.fixture
-def cli_env(monkeypatch: pytest.MonkeyPatch, base_env: dict[str, str]) -> None:
-    """doctor_main 이 os.environ 에서 읽는 것(설정 후보 · 토큰)을 tmp 로 고정한다."""
-    for k, v in base_env.items():
-        monkeypatch.setenv(k, v)
 
 
 def test_main_guard_prints_obs_error_to_stderr_and_exits_1(capsys: pytest.CaptureFixture[str]) -> None:
@@ -34,49 +26,70 @@ def test_main_guard_prints_obs_error_to_stderr_and_exits_1(capsys: pytest.Captur
     assert captured.out == ""
 
 
-def _report(ok: bool) -> DoctorReport:
-    """probe 하나짜리 보고서 — ok 에 따라 결론이 갈린다. 물리 값은 손으로 만든 것."""
-    probe = Probe("metrics", "prom", "https://gw.example/p/prom/api", ok, 200 if ok else 401, "ok" if ok else "metrics 백엔드 인증 실패(401)")
-    return DoctorReport(grafana_url=Resolved("https://gw.example", "default"), proxy_prefix=Resolved("/p", "default"),
-                        uids={"metrics": Resolved("prom", "default")}, config_path=None, config_candidates=[], token_present=True,
-                        spill_dir="/proj/tmp/obs", probes=[probe])
+def _doctor_routes(traces_status: int) -> dict[RouteKey, tuple[int, object]]:
+    """doctor 의 probe 셋 — traces 만 상태를 바꿔 준다(tests/contracts/test_core.py 의 것과 같은 셋)."""
+    return {("metrics", "api/v1/status/buildinfo"): (200, {}), ("logs", "loki/api/v1/labels"): (200, {}), ("traces", "api/echo"): (traces_status, b"")}
 
 
-def _fake_doctor(rep: DoctorReport) -> Callable[..., DoctorReport]:
-    def fake(config: Config, token: str, env: Mapping[str, str] | None = None, transport: Transport | None = None, cwd: Path | None = None) -> DoctorReport:
-        return rep
-    return fake
-
-
-@pytest.mark.parametrize("ok,code", [(True, 0), (False, 1)])
-def test_doctor_main_exit_code_follows_report(monkeypatch: pytest.MonkeyPatch, cli_env: None, capsys: pytest.CaptureFixture[str], ok: bool, code: int) -> None:
-    """doctor_main 은 보고서가 정상이면 exit 0, 아니면 exit 1 이고 stdout 마지막 줄이 결론이다."""
-    monkeypatch.setattr(cli, "doctor", _fake_doctor(_report(ok)))
+@pytest.mark.parametrize("traces_status,code", [(200, 0), (401, 1)], ids=["ok", "fail"])
+def test_doctor_main_exit_code_follows_report(base_env: dict[str, str], make_client: ClientFactory, capsys: pytest.CaptureFixture[str],
+                                              traces_status: int, code: int) -> None:
+    """doctor_main 은 probe 를 인자 transport 로 백엔드마다 1회 보내고, 보고서가 정상이면 exit 0, 아니면 exit 1 이며 stdout 마지막 줄이 결론이다."""
+    # given — 명시 env(base_env · 토큰 있음) · probe 라우트 셋(traces 만 상태가 갈린다)
+    _, t = make_client(_doctor_routes(traces_status))
+    # when
     with pytest.raises(SystemExit) as ei:
-        cli.doctor_main([])
+        cli.doctor_main([], base_env, t)
+    # then
     assert ei.value.code == code
+    assert len(t.calls) == 3
     assert capsys.readouterr().out.splitlines()[-1].startswith("결론: ")
 
 
-def test_doctor_main_json_prints_report_as_json(monkeypatch: pytest.MonkeyPatch, cli_env: None, capsys: pytest.CaptureFixture[str]) -> None:
-    """--json 은 보고서를 to_dict 그대로의 JSON 으로 찍고 exit 코드는 같은 규칙이다."""
-    monkeypatch.setattr(cli, "doctor", _fake_doctor(_report(False)))
-    with pytest.raises(SystemExit) as ei:
-        cli.doctor_main(["--json"])
-    assert ei.value.code == 1
-    assert json.loads(capsys.readouterr().out) == to_dict(_report(False))
-
-
-def test_doctor_main_exits_1_on_missing_explicit_config(monkeypatch: pytest.MonkeyPatch, cli_env: None, tmp_path: Path) -> None:
-    """OBS_CONFIG 가 없는 파일을 가리키면 obs-doctor.py 의 배선(main_guard(doctor_main))은 exit 1 이다."""
-    # given — OBS_CONFIG 는 없는 파일 · doctor 는 정상 보고서를 내는 대역
-    monkeypatch.setenv("OBS_CONFIG", str(tmp_path / "nonexistent" / "obs-config.json"))
-    monkeypatch.setattr(cli, "doctor", _fake_doctor(_report(True)))
+def test_doctor_main_reads_token_and_config_from_env(base_env: dict[str, str], make_client: ClientFactory, capsys: pytest.CaptureFixture[str]) -> None:
+    """doctor_main 의 토큰 · 설정은 인자 env 에서 읽힌다 — 토큰 없는 env 면 probe 요청 0 · exit 1 이고, 그 env 의 OBS_GRAFANA_URL 이 보고서에 보인다."""
+    # given — 토큰 없음 · 게이트웨이 URL 은 손으로 만든 값 · 라우트 없는 fake transport
+    env = {k: v for k, v in base_env.items() if k != "OBS_GRAFANA_TOKEN"}
+    env["OBS_GRAFANA_URL"] = "https://gw.example"
+    _, t = make_client({})
     # when
     with pytest.raises(SystemExit) as ei:
-        cli.main_guard(lambda: cli.doctor_main([]))
+        cli.doctor_main([], env, t)
+    # then
+    assert t.calls == []
+    assert ei.value.code == 1
+    assert "gw.example" in capsys.readouterr().out
+
+
+def test_doctor_main_json_is_report_dict(base_env: dict[str, str], make_client: ClientFactory, capsys: pytest.CaptureFixture[str]) -> None:
+    """--json 은 보고서 하나를 JSON 으로 찍는다 — probes 가 백엔드 수(3)만큼 · token_present 가 true · 토큰 값은 없고 · exit 코드는 같은 규칙(traces 401 → 1)."""
+    # given — 토큰 있는 env · traces 만 401
+    _, t = make_client(_doctor_routes(401))
+    # when
+    with pytest.raises(SystemExit) as ei:
+        cli.doctor_main(["--json"], base_env, t)
+    # then
+    out = capsys.readouterr().out
+    rep = json_obj(json.loads(out))
+    assert ei.value.code == 1
+    assert len(json_list(rep.get("probes"))) == 3
+    assert rep.get("token_present") is True
+    assert base_env["OBS_GRAFANA_TOKEN"] not in out
+
+
+def test_doctor_main_exits_1_on_missing_explicit_config(base_env: dict[str, str], make_client: ClientFactory, tmp_path: Path,
+                                                        capsys: pytest.CaptureFixture[str]) -> None:
+    """env 의 OBS_CONFIG 가 없는 파일을 가리키면 obs-doctor.py 의 배선(main_guard(doctor_main))은 exit 1 이고 stderr 가 OBS_CONFIG 를 말하며 probe 는 나가지 않는다."""
+    # given — OBS_CONFIG 는 없는 파일 · 정상 라우트
+    env = {**base_env, "OBS_CONFIG": str(tmp_path / "nonexistent" / "obs-config.json")}
+    _, t = make_client(_doctor_routes(200))
+    # when
+    with pytest.raises(SystemExit) as ei:
+        cli.main_guard(lambda: cli.doctor_main([], env, t))
     # then
     assert ei.value.code == 1
+    assert "OBS_CONFIG" in capsys.readouterr().err
+    assert t.calls == []
 
 
 # ── 실패한 명령의 배선 — main 이 만든 Client 하나를 run 과 finish 가 같이 쓴다 ──────────

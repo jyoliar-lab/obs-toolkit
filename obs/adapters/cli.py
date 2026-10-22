@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Callable, Mapping, Sequence, TypeAlias
 
 from obs.core import (
-    JSON, Client, DoctorReport, Evidence, Lines, ObsError, Params, Response, Window, doctor, fmt_ts, load_config,
+    JSON, Client, DoctorReport, Evidence, Lines, ObsError, Params, Response, Transport, Window, doctor, fmt_ts, load_config,
     SPILL_RAW, SPILL_SUMMARY, json_labels, json_list, json_strs,
     parse_duration, parse_time, project_dir, spill, spill_ref, to_json, token_from_env,
 )
@@ -1234,7 +1234,7 @@ def doctor_lines(rep: DoctorReport) -> list[str]:
     return lines
 
 
-def doctor_main(argv: Sequence[str] | None = None) -> None:
+def doctor_main(argv: Sequence[str], env: Mapping[str, str], transport: Transport | None) -> None:
     ap = argparse.ArgumentParser(prog="obs-doctor.py", description=DOCTOR_DOC,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--json", action="store_true")
