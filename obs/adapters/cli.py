@@ -27,7 +27,7 @@ from typing import Callable, Mapping, Sequence, TypeAlias
 from obs.core import (
     JSON, Client, DoctorReport, Evidence, Lines, ObsError, Params, Response, Window, doctor, fmt_ts, load_config,
     SPILL_RAW, SPILL_SUMMARY, json_labels, json_list, json_strs,
-    parse_duration, parse_time, now, project_dir, spill, spill_ref, to_json, token_from_env,
+    parse_duration, parse_time, project_dir, spill, spill_ref, to_json, token_from_env,
 )
 from obs.logs import (
     DEFAULT_AROUND_LIMIT, DEFAULT_AROUND_SPAN, DEFAULT_TEMPLATES_K, Context, FirstSeen, Histogram, LogEntry, LogResult, Stream,
@@ -166,14 +166,6 @@ def _common(ap: argparse.ArgumentParser) -> None:
                     help="stdout 줄 수 상한. 기본 %d — 나머지는 호출 디렉터리의 summary.txt 에" % DEFAULT_MAX_LINES)
     ap.add_argument("--json", action="store_true", help="stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 성공 · 실패 모두 남는다)")
 
-
-def _client() -> Client:
-    return Client.from_env(os.environ)
-
-
-def _base() -> Path:
-    """spill 의 프로젝트 디렉터리 — 프로세스 env 의 CLAUDE_PROJECT_DIR(없으면 cwd)."""
-    return project_dir(os.environ)
 
 
 def main_guard(fn: Callable[[], None]) -> None:
@@ -335,9 +327,8 @@ def promql_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: 
     a = ap.parse_args(argv)
     args = PromqlArgs(query=a.query, end=a.end, range_=a.range_, step=a.step, points=a.points,
                       labels=a.labels, label_values=a.label_values, series=a.series)
-    at = now()
-    c = _client()
-    finish(c, lambda: promql_run(c, args, at), "promql-failed", a.max_lines, a.json, base=_base(), at=at)
+    c = client()
+    finish(c, lambda: promql_run(c, args, at), "promql-failed", a.max_lines, a.json, base=project_dir(env), at=at)
 
 
 # ── 환원 연산 — promql.py 의 서브커맨드 (계산은 obs.metrics, 표는 여기) ─────────────────
@@ -539,9 +530,8 @@ def metrics_main(argv: Sequence[str], env: Mapping[str, str], at: float, client:
     args = MetricsArgs(cmd=a.cmd, query=getattr(a, "query", ""), service=getattr(a, "service", ""), since=getattr(a, "since", "1h"), end=a.end, step=getattr(a, "step", None),
                        baseline=getattr(a, "baseline", DEFAULT_BASELINE), k=getattr(a, "k", DEFAULT_TOP_K),
                        by=getattr(a, "by", "pod"), agg=getattr(a, "agg", DEFAULT_TOP_AGG))
-    at = now()
-    c = _client()
-    finish(c, lambda: metrics_run(c, args, at), "promql-%s-failed" % a.cmd, a.max_lines, a.json, base=_base(), at=at)
+    c = client()
+    finish(c, lambda: metrics_run(c, args, at), "promql-%s-failed" % a.cmd, a.max_lines, a.json, base=project_dir(env), at=at)
 
 
 # ── logql ────────────────────────────────────────────────────────────────────────
@@ -688,9 +678,8 @@ def logql_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: C
     a = ap.parse_args(argv)
     args = LogqlArgs(query=a.query, since=a.since, end=a.end, limit=a.limit, direction=a.direction,
                      width=a.width, labels=a.labels, label_values=a.label_values, series=a.series)
-    at = now()
-    c = _client()
-    finish(c, lambda: logql_run(c, args, at), "logql-failed", a.max_lines, a.json, base=_base(), at=at)
+    c = client()
+    finish(c, lambda: logql_run(c, args, at), "logql-failed", a.max_lines, a.json, base=project_dir(env), at=at)
 
 
 # ── 환원 연산 — logql.py 의 서브커맨드 (계산은 obs.logs, 표는 여기) ────────────────────
@@ -863,9 +852,8 @@ def logs_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: Ca
                     by=getattr(a, "by", "detected_level"), step=getattr(a, "step", None), k=getattr(a, "k", DEFAULT_TEMPLATES_K),
                     ts=getattr(a, "ts", None), span=getattr(a, "span", DEFAULT_AROUND_SPAN), limit=getattr(a, "limit", DEFAULT_AROUND_LIMIT),
                     template=getattr(a, "template", None))
-    at = now()
-    c = _client()
-    finish(c, lambda: logs_run(c, args, at), "logql-%s-failed" % a.cmd, a.max_lines, a.json, base=_base(), at=at)
+    c = client()
+    finish(c, lambda: logs_run(c, args, at), "logql-%s-failed" % a.cmd, a.max_lines, a.json, base=project_dir(env), at=at)
 
 
 # ── traceql ──────────────────────────────────────────────────────────────────────
@@ -1009,9 +997,8 @@ def traceql_main(argv: Sequence[str], env: Mapping[str, str], at: float, client:
     a = ap.parse_args(argv)
     args = TraceqlArgs(cmd=a.cmd, arg=a.arg, q=a.q, since=a.since, end=a.end, limit=a.limit,
                        min_duration=a.min_duration, scope=a.scope, top=a.top)
-    at = now()
-    c = _client()
-    finish(c, lambda: traceql_run(c, args, at), "traceql-failed", a.max_lines, a.json, base=_base(), at=at)
+    c = client()
+    finish(c, lambda: traceql_run(c, args, at), "traceql-failed", a.max_lines, a.json, base=project_dir(env), at=at)
 
 
 # ── 환원 연산 — traceql.py 의 서브커맨드 (계산은 obs.traces, 표는 여기) ─────────────────
@@ -1211,9 +1198,8 @@ def traces_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: 
                       k=getattr(a, "k", DEFAULT_EXEMPLARS_K), quantile=getattr(a, "quantile", DEFAULT_QUANTILE),
                       baseline_range=getattr(a, "baseline_range", DEFAULT_BASELINE_RANGE), limit=getattr(a, "limit", DEFAULT_SEARCH_LIMIT),
                       trace_id=getattr(a, "trace_id", None), slow_id=getattr(a, "slow_id", None), normal_id=getattr(a, "normal_id", None))
-    at = now()
-    c = _client()
-    finish(c, lambda: traces_run(c, args, at), "traceql-%s-failed" % a.cmd, a.max_lines, a.json, base=_base(), at=at)
+    c = client()
+    finish(c, lambda: traces_run(c, args, at), "traceql-%s-failed" % a.cmd, a.max_lines, a.json, base=project_dir(env), at=at)
 
 
 # ── obs-doctor.py — 사람용. 물리가 보이는 유일한 출력 ───────────────────────────────
