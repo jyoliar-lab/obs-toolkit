@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import urllib.parse
 from dataclasses import dataclass, field
@@ -211,10 +212,10 @@ class Recorder:
 
 def real_client(at: float) -> tuple[Client, Recorder]:
     """실환경 Client — 토큰은 env 에서, transport 는 진짜 urllib 을 감싼 Recorder."""
-    token = token_from_env()
+    token = token_from_env(os.environ)
     if not token:
         raise ObsError("OBS_GRAFANA_TOKEN 이 비어 있다 — 녹화는 실환경 토큰이 필요하다(.claude/settings.local.json 의 env)")
-    config = load_config()
+    config = load_config(os.environ)
     rec = Recorder(inner=_urllib_transport, config=config, at=at)
     return Client(config=config, token=token, transport=rec), rec
 
@@ -291,10 +292,10 @@ def _traces_op(a: cli.TracesArgs) -> Recipe:
 
 def _scratch_client() -> Client:
     """녹화되지 않는 별도 Client — fixture 에 담을 트레이스를 고르는 데만 쓴다(검색 · 후보 열기). 예산은 넉넉히."""
-    token = token_from_env()
+    token = token_from_env(os.environ)
     if not token:
         raise ObsError("OBS_GRAFANA_TOKEN 이 비어 있다 — 녹화는 실환경 토큰이 필요하다(.claude/settings.local.json 의 env)")
-    return Client(config=load_config(), token=token, budget=Budget(max_queries=80))
+    return Client(config=load_config(os.environ), token=token, budget=Budget(max_queries=80))
 
 
 def _open(client: Client, trace_id: str) -> list[Span]:

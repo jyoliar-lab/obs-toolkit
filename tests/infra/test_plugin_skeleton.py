@@ -6,6 +6,8 @@ import re
 import stat
 from pathlib import Path
 
+import pytest
+
 from tests.conftest import ROOT, _no_physical
 
 
@@ -22,6 +24,26 @@ def test_scripts_are_thin_executable_shims() -> None:
         assert src.startswith("#!/usr/bin/env python3")
         assert fn in src
         assert len(src.splitlines()) < 20
+
+
+ASSEMBLY: dict[str, str] = {
+    "promql.py": "main_guard(lambda: promql_main(sys.argv[1:], os.environ, now(), lambda: Client.from_env(os.environ)))",
+    "logql.py": "main_guard(lambda: logql_main(sys.argv[1:], os.environ, now(), lambda: Client.from_env(os.environ)))",
+    "traceql.py": "main_guard(lambda: traceql_main(sys.argv[1:], os.environ, now(), lambda: Client.from_env(os.environ)))",
+    "obs-doctor.py": "main_guard(lambda: doctor_main(sys.argv[1:], os.environ, None))",
+}
+"""shim 마다 프로세스를 읽는 조립 줄 — 이 한 줄 밖에서는 sys.argv · os.environ · now() · Client.from_env 를 읽지 않는다."""
+
+
+@pytest.mark.parametrize("name", ["promql.py", "logql.py", "traceql.py", "obs-doctor.py"], ids=["promql", "logql", "traceql", "obs-doctor"])
+def test_shim_assembles_process_inputs_in_one_line(name: str) -> None:
+    """shim 은 프로세스(sys.argv · os.environ · now() · Client.from_env)를 조립 줄 하나에서만 읽는다 — 그 줄이 정확히 하나이고 옛 꼴 main_guard(<main>) 은 없다."""
+    # given — shim 의 소스 줄(앞뒤 공백 제거)
+    lines = [line.strip() for line in (ROOT / "bin" / name).read_text(encoding="utf-8").splitlines()]
+    fn = dict(SHIMS)[name]
+    # when · then
+    assert lines.count(ASSEMBLY[name]) == 1
+    assert "main_guard(%s)" % fn not in lines
 
 
 def test_shim_finds_plugin_root_from_any_cwd(tmp_path: Path) -> None:

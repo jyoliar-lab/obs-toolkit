@@ -1,14 +1,12 @@
 """--help 텍스트 — 열 화면의 스냅샷. 폭은 COLUMNS 로 고정한다(argparse 가 터미널 폭으로 줄을 바꾼다)."""
 from __future__ import annotations
 
-from typing import Callable
-
 import pytest
 
 from obs.adapters import cli
-from tests.conftest import assert_snapshot
+from tests.conftest import AT, MainFn, assert_snapshot, no_client
 
-HELP_SCREENS: dict[str, tuple[Callable[[list[str]], None], list[str]]] = {
+HELP_SCREENS: dict[str, tuple[MainFn, list[str]]] = {
     "promql": (cli.promql_main, ["--help"]), "promql-summarize": (cli.promql_main, ["summarize", "--help"]),
     "promql-compare": (cli.promql_main, ["compare", "--help"]), "promql-top": (cli.promql_main, ["top", "--help"]),
     "promql-red": (cli.promql_main, ["red", "--help"]),
@@ -26,7 +24,7 @@ def test_help_text(screen: str, request: pytest.FixtureRequest, monkeypatch: pyt
     monkeypatch.setenv("COLUMNS", "120")
     main, argv = HELP_SCREENS[screen]
     with pytest.raises(SystemExit):
-        main(argv)
+        main(argv, {}, AT, no_client)
     out = capsys.readouterr().out.splitlines()
     for word in argv[:-1]:
         assert word in out[0]

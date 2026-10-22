@@ -10,7 +10,7 @@ from obs import metrics
 from obs.adapters import cli
 from obs.core import Window, fmt_rfc3339, json_list, json_obj
 from tests.conftest import (
-    AT, RED_BASE_ONLY, RED_FULL, RED_NOW_ONLY, UNCHECKED_SHARED_EMPTY, ClientFactory, ReplayFactory, _red_body, _stat, _vector, assert_snapshot,
+    AT, RED_BASE_ONLY, RED_FULL, RED_NOW_ONLY, UNCHECKED_SHARED_EMPTY, ClientFactory, MainRunner, ReplayFactory, _red_body, _stat, _vector, assert_snapshot,
     load_response,
 )
 from tests.record import CPU_QUERY
@@ -183,18 +183,16 @@ def test_top_lines_empty(replay: ReplayFactory, request: pytest.FixtureRequest) 
 
 # ── CLI — stdout 절제 · summary.txt 머리 ───────────────────────────────────────────
 
-def test_promql_main_top_prints_table_and_call_dir_only(replay: ReplayFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+def test_promql_main_top_prints_table_and_call_dir_only(replay: ReplayFactory, run_main: MainRunner, base_env: dict[str, str],
                                                         capsys: pytest.CaptureFixture[str]) -> None:
     """`promql.py top …` 은 stdout 에 표와 호출 디렉터리 한 줄만 찍고(조립 질의 없음), summary.txt 머리에 창만 남고 그 뒤가 stdout 의 표다."""
     client, t = replay("promql-instant-topk-memory-by-pod.json")
-    monkeypatch.setattr(cli, "_client", lambda: client)
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-    cli.promql_main(["top", "container_memory_working_set_bytes", "--by", "pod", "--k", "10", "--end", str(t.at)])
+    run_main(cli.promql_main, ["top", "container_memory_working_set_bytes", "--by", "pod", "--k", "10", "--end", str(t.at)], client, at=t.at)
     out = capsys.readouterr().out.splitlines()
     assert out[-1].startswith("원본·요약: tmp/obs/")
     assert out[-1].endswith("-promql-top/ (raw.json · summary.txt)")
     assert not any("topk(" in l for l in out)
-    summary = (tmp_path / out[-1].split()[1].rstrip("/")).joinpath("summary.txt").read_text(encoding="utf-8").splitlines()
+    summary = (Path(base_env["CLAUDE_PROJECT_DIR"]) / out[-1].split()[1].rstrip("/")).joinpath("summary.txt").read_text(encoding="utf-8").splitlines()
     assert summary[0].startswith("# 창  ")
     assert summary[1] == ""
     assert summary[2:] == out[:-1]
@@ -202,27 +200,23 @@ def test_promql_main_top_prints_table_and_call_dir_only(replay: ReplayFactory, m
     t.assert_exhausted()
 
 
-def test_promql_main_plain_query_is_instant_lookup(replay: ReplayFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_promql_main_plain_query_is_instant_lookup(replay: ReplayFactory, run_main: MainRunner) -> None:
     """서브커맨드 없는 `promql.py 'up'` 은 그대로 즉시 조회다 — 질의가 감싸이지 않는다."""
     client, t = replay("promql-instant-up.json")
-    monkeypatch.setattr(cli, "_client", lambda: client)
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-    cli.promql_main(["up", "--end", str(t.at)])
+    run_main(cli.promql_main, ["up", "--end", str(t.at)], client, at=t.at)
     assert "query=up" in t.calls[0].url
     assert "topk" not in t.calls[0].url
     t.assert_exhausted()
 
 
-def test_compare_summary_preamble_has_window_baseline(replay: ReplayFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+def test_compare_summary_preamble_has_window_baseline(replay: ReplayFactory, run_main: MainRunner, base_env: dict[str, str],
                                                             capsys: pytest.CaptureFixture[str]) -> None:
     """summary.txt 머리에는 창 · 기준선이 RFC3339 와 unix 초로 남고 stdout · summary.txt 어디에도 조립 질의가 없다."""
     client, t = replay("promql-instant-compare-cpu-by-pod-1d.json")
-    monkeypatch.setattr(cli, "_client", lambda: client)
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-    cli.promql_main(["compare", CPU_QUERY, "--since", "1h", "--baseline", "1d", "--end", str(t.at)])
+    run_main(cli.promql_main, ["compare", CPU_QUERY, "--since", "1h", "--baseline", "1d", "--end", str(t.at)], client, at=t.at)
     out = capsys.readouterr().out.splitlines()
     assert not any("label_replace" in l for l in out)
-    summary = (tmp_path / out[-1].split()[1].rstrip("/")).joinpath("summary.txt").read_text(encoding="utf-8").splitlines()
+    summary = (Path(base_env["CLAUDE_PROJECT_DIR"]) / out[-1].split()[1].rstrip("/")).joinpath("summary.txt").read_text(encoding="utf-8").splitlines()
     assert summary[0] == "# 창  %s ~ %s  (start=%.3f end=%.3f)" % (fmt_rfc3339(t.at - 3600), fmt_rfc3339(t.at), t.at - 3600, t.at)
     assert summary[1] == "# 기준선  %s ~ %s  (start=%.3f end=%.3f)" % (fmt_rfc3339(t.at - 3600 - 86400), fmt_rfc3339(t.at - 86400), t.at - 3600 - 86400, t.at - 86400)
     assert summary[2] == ""

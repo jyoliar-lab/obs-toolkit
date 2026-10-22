@@ -166,6 +166,6 @@ def test_replay_exhausted_check_fails_when_nothing_was_called(replay: ReplayFact
     from obs.adapters import cli
     client, t = replay("promql-instant-up.json")
     with pytest.raises(ObsError):
-        cli.promql_run(client, cli.PromqlArgs())
+        cli.promql_run(client, cli.PromqlArgs(), at=t.at)
     with pytest.raises(AssertionError, match="중 0개만"):
         t.assert_exhausted()

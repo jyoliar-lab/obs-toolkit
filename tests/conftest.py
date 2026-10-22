@@ -7,7 +7,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping, Protocol, Sequence, cast
+from typing import Callable, Mapping, Protocol, Sequence, cast
 
 import pytest
 
@@ -181,6 +181,33 @@ def make_client(config: Config) -> ClientFactory:
         t = FakeTransport(config=config, routes=routes or {}, fail=fail, hang=hang)
         return Client(config=config, token="test-token-not-real", transport=t), t
     return _make
+
+
+MainFn = Callable[[Sequence[str], Mapping[str, str], float, Callable[[], Client]], None]
+"""여섯 *_main(promql · metrics · logql · logs · traceql · traces)의 꼴 — argv · env · at · client(Client 를 만드는 함수)."""
+
+
+def no_client() -> Client:
+    """--help · 인자 오류의 client 대역 — 불리면 그 자체가 실패다(parse 뒤에만 client() 를 부른다는 약속)."""
+    raise AssertionError("Client 를 만들면 안 된다 — --help · 인자 오류에서는 client() 를 부르지 않는다")
+
+
+class MainRunner(Protocol):
+    def __call__(self, main: MainFn, argv: Sequence[str], client: Client | None = None, *,
+                 at: float = AT, env: Mapping[str, str] | None = None) -> None: ...
+
+
+@pytest.fixture
+def run_main(base_env: dict[str, str]) -> MainRunner:
+    """*_main 을 인자 넷으로 부른다 — env 는 base_env(격리), at 은 AT, client 는 준 Client 를 돌려주는 함수(없으면 no_client)."""
+    def _run(main: MainFn, argv: Sequence[str], client: Client | None = None, *,
+             at: float = AT, env: Mapping[str, str] | None = None) -> None:
+        def factory() -> Client:
+            if client is None:
+                return no_client()
+            return client
+        main(argv, base_env if env is None else env, at, factory)
+    return _run
 
 
 class LokiFactory(Protocol):
