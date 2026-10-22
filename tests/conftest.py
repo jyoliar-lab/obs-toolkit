@@ -264,3 +264,22 @@ def assert_snapshot(request: pytest.FixtureRequest, lines: Sequence[str]) -> Non
     shown = path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else str(path)
     diff = "".join(difflib.unified_diff(expected.splitlines(True), actual.splitlines(True), fromfile=shown, tofile="이번 실행"))
     raise AssertionError("스냅샷과 다르다 — 의도한 변경이면 %s=1 로 갱신한다\n%s" % (UPDATE_ENV, diff))
+
+
+# ── mutmut — mutant 세션별 임시 root ─────────────────────────────────────────────
+
+MUTANT_BASETEMP: str = ".pytest-basetemp"
+"""mutmut 의 mutant 세션이 쓰는 basetemp 의 부모 — rootdir(mutants/) 아래라 `rm -rf mutants` 가 함께 지운다."""
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config: pytest.Config) -> None:
+    """mutmut 의 mutant 세션(`MUTANT_UNDER_TEST` 가 있다)에 프로세스별 basetemp 를 준다. 기본 root(`$TMPDIR/pytest-of-<user>/`)는
+    병렬 워커가 함께 쓰는 자리라, 세션 종료의 죽은 링크 정리(`pytest-current`)가 서로 지운 것을 다시 지우려다 FileNotFoundError 로
+    워커를 죽이고 mutmut 은 그것을 killed 로 읽는다. basetemp 를 주면 pytest 는 번호 디렉터리도 공유 링크도 만들지 않는다.
+    tmpdir 플러그인이 basetemp 를 읽기 전이어야 하므로 tryfirst. 일반 실행(CI · 커버리지)은 그대로다."""
+    if not os.environ.get("MUTANT_UNDER_TEST") or config.option.basetemp is not None:
+        return
+    parent = config.rootpath / MUTANT_BASETEMP
+    parent.mkdir(exist_ok=True)
+    config.option.basetemp = str(parent / str(os.getpid()))
