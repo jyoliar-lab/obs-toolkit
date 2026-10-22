@@ -361,7 +361,8 @@ class Evidence(Generic[V]):
 
 def project_dir(env: Mapping[str, str], cwd: Path | None = None) -> Path:
     """${CLAUDE_PROJECT_DIR} — 없으면 cwd(없으면 프로세스의 cwd). env → 경로 해석의 유일한 자리."""
-    raise NotImplementedError("project_dir")
+    proj = env.get("CLAUDE_PROJECT_DIR", "").strip()
+    return Path(proj) if proj else (cwd or Path.cwd())
 
 
 def spill_root(env: Mapping[str, str], cwd: Path | None = None) -> Path:
@@ -383,7 +384,7 @@ def spill(kind: str, payload: object, summary: Sequence[str], base: Path, at: fl
     root = base / "tmp" / "obs"
     root.mkdir(parents=True, exist_ok=True)
     # 마이크로초까지 — 같은 초 안의 spill 이 지워진 이름을 다시 받아, 앞서 안내한 경로가 다른 호출을 가리키는 일을 막는다
-    stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    stamp = _dt.datetime.fromtimestamp(at, _dt.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     path = root / ("%s-%s" % (stamp, kind))
     n = 1
     while path.exists():
