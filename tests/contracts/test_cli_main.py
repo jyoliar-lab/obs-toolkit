@@ -12,6 +12,7 @@ import pytest
 from obs.adapters import cli
 from obs.core import JSON, ObsError, json_list, json_obj, spill_root
 from tests.conftest import AT, ClientFactory, MainFn, MainRunner, RouteKey, _vector
+from tests.record import strip_physical
 
 
 def test_main_guard_prints_obs_error_to_stderr_and_exits_1(capsys: pytest.CaptureFixture[str]) -> None:
@@ -43,6 +44,7 @@ def test_doctor_main_exit_code_follows_report(base_env: dict[str, str], make_cli
     # then
     assert ei.value.code == code
     assert len(t.calls) == 3
+    assert sorted((rq.backend, rq.path) for rq in (strip_physical(c.url, t.config, None) for c in t.calls)) == sorted(_doctor_routes(traces_status))
     assert capsys.readouterr().out.splitlines()[-1].startswith("결론: ")
 
 
@@ -58,7 +60,11 @@ def test_doctor_main_reads_token_and_config_from_env(base_env: dict[str, str], m
     # then
     assert t.calls == []
     assert ei.value.code == 1
-    assert "gw.example" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "gw.example" in out
+    url_lines = [line for line in out.splitlines() if line.startswith("grafana_url ")]
+    assert len(url_lines) == 1
+    assert "https://gw.example" in url_lines[0]
 
 
 def test_doctor_main_json_is_report_dict(base_env: dict[str, str], make_client: ClientFactory, capsys: pytest.CaptureFixture[str]) -> None:
