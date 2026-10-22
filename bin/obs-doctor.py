@@ -12,4 +12,4 @@ sys.path.insert(0, _d)
 from obs.adapters.cli import doctor_main, main_guard  # noqa: E402
 
 if __name__ == "__main__":
-    main_guard(doctor_main)
+    main_guard(lambda: doctor_main(sys.argv[1:], os.environ, None))

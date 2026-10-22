@@ -17,7 +17,6 @@ agent 인터페이스에 물리(URL · uid · 토큰)가 없다. `--uid` 같은 
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import sys
 from dataclasses import dataclass
@@ -1239,7 +1238,7 @@ def doctor_main(argv: Sequence[str], env: Mapping[str, str], transport: Transpor
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
-    rep = doctor(load_config(os.environ), token_from_env(os.environ), os.environ)
+    rep = doctor(load_config(env), token_from_env(env), env, transport)
     if a.json:
         print(to_json(rep))
     else:
