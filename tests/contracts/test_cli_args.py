@@ -45,15 +45,15 @@ def test_parsers_leave_omitted_options_unset(parser: ParserFn, argv: list[str], 
 MappedArgs = cli.PromqlArgs | cli.MetricsArgs | cli.LogqlArgs | cli.LogsArgs | cli.TraceqlArgs | cli.TracesArgs
 
 PRESENT_CASES: list[tuple[str, ParserFn, list[str], Callable[[argparse.Namespace], MappedArgs], MappedArgs]] = [
-    # (옵션 종류, 파서, 그 종류를 명시한 argv(+ --max-lines 3 — Namespace 의 여분 속성), 매핑, 기대 — 명시한 필드만 값이고 나머지는 dataclass 기본값)
-    ("positional", cli_argparse.logql_parser, ['{a="b"}', "--max-lines", "3"],
+    # (옵션 종류, 파서, 그 종류를 명시한 argv(+ --max-lines 3 --json — Namespace 의 여분 속성), 매핑, 기대 — 명시한 필드만 값이고 나머지는 dataclass 기본값)
+    ("positional", cli_argparse.logql_parser, ['{a="b"}', "--max-lines", "3", "--json"],
      lambda ns: cli.map_args(cli.LogqlArgs, ns), cli.LogqlArgs(query='{a="b"}')),
-    ("flag", cli_argparse.promql_parser, ["up", "--labels", "--points", "--max-lines", "3"],
+    ("flag", cli_argparse.promql_parser, ["up", "--labels", "--points", "--max-lines", "3", "--json"],
      lambda ns: cli.map_args(cli.PromqlArgs, ns), cli.PromqlArgs(query="up", labels=True, points=True)),
-    ("valued", cli_argparse.traceql_parser, ["search", "--limit", "7", "--min-duration", "2s", "--max-lines", "3"],
+    ("valued", cli_argparse.traceql_parser, ["search", "--limit", "7", "--min-duration", "2s", "--max-lines", "3", "--json"],
      lambda ns: cli.map_args(cli.TraceqlArgs, ns), cli.TraceqlArgs(cmd="search", limit=7, min_duration="2s")),
     ("subcommand-valued", cli_argparse.traces_parser,
-     ["exemplars", "--k", "2", "--quantile", "0.9", "--baseline-range", "3d", "--limit", "5", "--max-lines", "3"],
+     ["exemplars", "--k", "2", "--quantile", "0.9", "--baseline-range", "3d", "--limit", "5", "--max-lines", "3", "--json"],
      lambda ns: cli.map_args(cli.TracesArgs, ns), cli.TracesArgs(cmd="exemplars", k=2, quantile=0.9, baseline_range="3d", limit=5)),
 ]
 
@@ -61,10 +61,11 @@ PRESENT_CASES: list[tuple[str, ParserFn, list[str], Callable[[argparse.Namespace
 @pytest.mark.parametrize("parser,argv,mapper,expected", [c[1:] for c in PRESENT_CASES], ids=[c[0] for c in PRESENT_CASES])
 def test_map_args_takes_present_options_by_field_name(parser: ParserFn, argv: list[str], mapper: Callable[[argparse.Namespace], MappedArgs],
                                                       expected: MappedArgs) -> None:
-    """명시한 옵션은 같은 이름의 필드로 옮겨지고(타입 변환 포함) 나머지 필드는 dataclass 기본값이다 — Namespace 의 여분 속성(max_lines)은 예외 없이 무시된다."""
-    # given — 옵션 종류 하나를 명시한 argv 의 Namespace(--max-lines 가 함께 있다)
+    """명시한 옵션은 같은 이름의 필드로 옮겨지고(타입 변환 포함) 나머지 필드는 dataclass 기본값이다 — Namespace 의 여분 속성(max_lines · as_json)은 예외 없이 무시된다."""
+    # given — 옵션 종류 하나를 명시한 argv 의 Namespace(--max-lines · --json 이 함께 있다)
     ns = parser().parse_args(argv)
     assert hasattr(ns, "max_lines")
+    assert hasattr(ns, "as_json")
     # when
     got = mapper(ns)
     # then
