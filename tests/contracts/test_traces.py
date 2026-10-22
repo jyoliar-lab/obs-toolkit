@@ -1014,6 +1014,17 @@ def test_diff_pairs_spans_by_name_and_reports_time_difference() -> None:
     ])
 
 
+@pytest.mark.parametrize("services", [["f", "c", "a", "e", "b", "d"], ["zeta", "eta", "theta", "iota", "kappa", "lambda"]], ids=["letters", "words"])
+def test_diff_orders_rows_of_one_name_by_service(services: list[str]) -> None:
+    """같은 이름의 span 이 서로 다른 서비스 여럿에 있으면 그 행들은 service 오름차순이다 — 동률의 순서가 set 반복 순서(해시 시드)를 따르지 않는다."""
+    # given — 이름 하나 · 서비스 여섯: 이름만으로 정렬하는 구현이 우연히 통과할 확률은 벌마다 1/6! 이고, 두 벌이 함께 통과할 확률은 그 제곱이다
+    spans = [_span("root", "r", "", 0, 100)] + [_span("q", "q-" + s, "r", 0, 10, service=s) for s in services]
+    # when
+    d = _pair(spans, spans)
+    # then
+    assert [x.service for x in d.deltas if x.name == "q"] == sorted(services)
+
+
 def test_diff_marks_spans_present_on_one_side_only() -> None:
     """한쪽에만 있는 span 은 있는 쪽 SpanTime 만 있고 다른 쪽과 delta 가 None 이다."""
     # given

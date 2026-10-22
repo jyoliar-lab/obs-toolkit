@@ -55,6 +55,7 @@ fixture 에 `recorded: manual` 표시가 있는 것은 재현할 수 없는 조�
 ```bash
 python -m pip install mutmut==3.8.0          # 또는 python -m pip install --group measure (pip ≥ 25.1 · 핀은 pyproject 의 [dependency-groups])
 unset OBS_TEST_UPDATE                        # 켜져 있으면 format 티어가 스냅샷을 다시 쓰고 통과해 렌더러 변이가 전부 살아남는다
+export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES   # macOS 만 — fork 된 워커의 abort 방지
 rm -rf mutants && mutmut run                 # 빈 mutants/ 에서 시작 — 전제 검증 세 단계(stats · clean tests · forced fail)를 지나 전체를 돈다. 워커 수 기본 = CPU 수(--max-children N 으로 고정)
 mutmut results                               # killed 를 뺀 목록 — survived · no tests · timeout · suspicious
 mutmut show <mutant 이름>                    # 한 mutant 의 diff. mutmut browse 는 터미널 UI
@@ -63,8 +64,6 @@ mutmut print-time-estimates                  # 예상 시간 — 첫 실행 뒤(
 ```
 
 `python -m mutmut` 이 아니라 **`mutmut run`** 이다. 워커는 fork 라 macOS · Linux 에서 돈다(Windows 는 WSL). 상태의 뜻 — **killed**(테스트가 변이를 잡았다) · **survived**(테스트 전부 통과 — 그 결과를 검사하는 테스트가 없다) · **no tests**(그 함수를 지나는 테스트가 없다 — 함수 단위 미실행) · **timeout** · **suspicious**(측정 자체의 문제 — 설정 · 테스트를 먼저 본다). 점수는 `killed / total` 이고 `no tests` 를 뺀 분모도 함께 적는다. 측정 조건(Python 버전 · 워커 수 · 실행 시간)을 결과와 같이 남긴다 — 수치는 기록이지 목표가 아니다. 생존 mutant 는 고칠 목록이 아니라 읽고 분류할 목록이다.
-
-**워커 수와 결정론.** 병렬 실행(워커 = CPU 수)은 killed 에 변이와 무관한 가짜가 실행당 1 ~ 4개 섞인다 — 뒤집힌 mutant 를 단독으로 돌리면 전부 survived 였다. survived · no tests 목록은 결정론적이다. 그래서 **일상 실행은 병렬로 하고 결과는 survived · no tests 목록으로 읽는다**. 점수나 killed 수를 전 · 후로 비교할 때는 `mutmut run --max-children 1`(약 6배 시간)로 기준선을 잡고, 어긋난 mutant 는 이름을 지정해 단독 재실행으로 가린다.
 
 ### 커버리지 (coverage.py)
 
