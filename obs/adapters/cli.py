@@ -161,6 +161,13 @@ def finish(client: Client, run: Callable[[], RunResult], failed_kind: str, max_l
     _finish(ev, client.log, kind, window, max_lines, as_json, base=base, at=at, out=out)
 
 
+def _run_main(client: Callable[[], Client], run: Callable[[Client], RunResult], failed_kind: str, max_lines: int, as_json: bool,
+              env: Mapping[str, str], at: float) -> None:
+    """*_main 의 끝 — parse 뒤에 client() 로 Client 하나를 만들어 run 과 finish 가 같이 쓴다. spill 은 env 의 프로젝트 디렉터리에."""
+    c = client()
+    finish(c, lambda: run(c), failed_kind, max_lines, as_json, base=project_dir(env), at=at)
+
+
 def _common(ap: argparse.ArgumentParser) -> None:
     ap.add_argument("--max-lines", type=int, default=DEFAULT_MAX_LINES,
                     help="stdout 줄 수 상한. 기본 %d — 나머지는 호출 디렉터리의 summary.txt 에" % DEFAULT_MAX_LINES)
@@ -309,9 +316,8 @@ def promql_run(client: Client, a: PromqlArgs, at: float) -> RunResult:
 
 
 def promql_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: Callable[[], Client]) -> None:
-    args_list = list(argv)
-    if args_list and args_list[0] in METRICS_SUBCOMMANDS:
-        metrics_main(args_list, env, at, client)
+    if argv and argv[0] in METRICS_SUBCOMMANDS:
+        metrics_main(argv, env, at, client)
         return
     ap = argparse.ArgumentParser(prog="promql.py", description=PROMQL_DOC,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -327,8 +333,7 @@ def promql_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: 
     a = ap.parse_args(argv)
     args = PromqlArgs(query=a.query, end=a.end, range_=a.range_, step=a.step, points=a.points,
                       labels=a.labels, label_values=a.label_values, series=a.series)
-    c = client()
-    finish(c, lambda: promql_run(c, args, at), "promql-failed", a.max_lines, a.json, base=project_dir(env), at=at)
+    _run_main(client, lambda c: promql_run(c, args, at), "promql-failed", a.max_lines, a.json, env, at)
 
 
 # ── 환원 연산 — promql.py 의 서브커맨드 (계산은 obs.metrics, 표는 여기) ─────────────────
@@ -530,8 +535,7 @@ def metrics_main(argv: Sequence[str], env: Mapping[str, str], at: float, client:
     args = MetricsArgs(cmd=a.cmd, query=getattr(a, "query", ""), service=getattr(a, "service", ""), since=getattr(a, "since", "1h"), end=a.end, step=getattr(a, "step", None),
                        baseline=getattr(a, "baseline", DEFAULT_BASELINE), k=getattr(a, "k", DEFAULT_TOP_K),
                        by=getattr(a, "by", "pod"), agg=getattr(a, "agg", DEFAULT_TOP_AGG))
-    c = client()
-    finish(c, lambda: metrics_run(c, args, at), "promql-%s-failed" % a.cmd, a.max_lines, a.json, base=project_dir(env), at=at)
+    _run_main(client, lambda c: metrics_run(c, args, at), "promql-%s-failed" % a.cmd, a.max_lines, a.json, env, at)
 
 
 # ── logql ────────────────────────────────────────────────────────────────────────
@@ -659,9 +663,8 @@ def logql_run(client: Client, a: LogqlArgs, at: float) -> RunResult:
 
 
 def logql_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: Callable[[], Client]) -> None:
-    args_list = list(argv)
-    if args_list and args_list[0] in LOGS_SUBCOMMANDS:
-        logs_main(args_list, env, at, client)
+    if argv and argv[0] in LOGS_SUBCOMMANDS:
+        logs_main(argv, env, at, client)
         return
     ap = argparse.ArgumentParser(prog="logql.py", description=LOGQL_DOC,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -678,8 +681,7 @@ def logql_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: C
     a = ap.parse_args(argv)
     args = LogqlArgs(query=a.query, since=a.since, end=a.end, limit=a.limit, direction=a.direction,
                      width=a.width, labels=a.labels, label_values=a.label_values, series=a.series)
-    c = client()
-    finish(c, lambda: logql_run(c, args, at), "logql-failed", a.max_lines, a.json, base=project_dir(env), at=at)
+    _run_main(client, lambda c: logql_run(c, args, at), "logql-failed", a.max_lines, a.json, env, at)
 
 
 # ── 환원 연산 — logql.py 의 서브커맨드 (계산은 obs.logs, 표는 여기) ────────────────────
@@ -852,8 +854,7 @@ def logs_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: Ca
                     by=getattr(a, "by", "detected_level"), step=getattr(a, "step", None), k=getattr(a, "k", DEFAULT_TEMPLATES_K),
                     ts=getattr(a, "ts", None), span=getattr(a, "span", DEFAULT_AROUND_SPAN), limit=getattr(a, "limit", DEFAULT_AROUND_LIMIT),
                     template=getattr(a, "template", None))
-    c = client()
-    finish(c, lambda: logs_run(c, args, at), "logql-%s-failed" % a.cmd, a.max_lines, a.json, base=project_dir(env), at=at)
+    _run_main(client, lambda c: logs_run(c, args, at), "logql-%s-failed" % a.cmd, a.max_lines, a.json, env, at)
 
 
 # ── traceql ──────────────────────────────────────────────────────────────────────
@@ -978,9 +979,8 @@ def traceql_run(client: Client, a: TraceqlArgs, at: float) -> RunResult:
 
 
 def traceql_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: Callable[[], Client]) -> None:
-    args_list = list(argv)
-    if args_list and args_list[0] in TRACES_SUBCOMMANDS:
-        traces_main(args_list, env, at, client)
+    if argv and argv[0] in TRACES_SUBCOMMANDS:
+        traces_main(argv, env, at, client)
         return
     ap = argparse.ArgumentParser(prog="traceql.py", description=TRACEQL_DOC,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -997,8 +997,7 @@ def traceql_main(argv: Sequence[str], env: Mapping[str, str], at: float, client:
     a = ap.parse_args(argv)
     args = TraceqlArgs(cmd=a.cmd, arg=a.arg, q=a.q, since=a.since, end=a.end, limit=a.limit,
                        min_duration=a.min_duration, scope=a.scope, top=a.top)
-    c = client()
-    finish(c, lambda: traceql_run(c, args, at), "traceql-failed", a.max_lines, a.json, base=project_dir(env), at=at)
+    _run_main(client, lambda c: traceql_run(c, args, at), "traceql-failed", a.max_lines, a.json, env, at)
 
 
 # ── 환원 연산 — traceql.py 의 서브커맨드 (계산은 obs.traces, 표는 여기) ─────────────────
@@ -1198,8 +1197,7 @@ def traces_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: 
                       k=getattr(a, "k", DEFAULT_EXEMPLARS_K), quantile=getattr(a, "quantile", DEFAULT_QUANTILE),
                       baseline_range=getattr(a, "baseline_range", DEFAULT_BASELINE_RANGE), limit=getattr(a, "limit", DEFAULT_SEARCH_LIMIT),
                       trace_id=getattr(a, "trace_id", None), slow_id=getattr(a, "slow_id", None), normal_id=getattr(a, "normal_id", None))
-    c = client()
-    finish(c, lambda: traces_run(c, args, at), "traceql-%s-failed" % a.cmd, a.max_lines, a.json, base=project_dir(env), at=at)
+    _run_main(client, lambda c: traces_run(c, args, at), "traceql-%s-failed" % a.cmd, a.max_lines, a.json, env, at)
 
 
 # ── obs-doctor.py — 사람용. 물리가 보이는 유일한 출력 ───────────────────────────────
