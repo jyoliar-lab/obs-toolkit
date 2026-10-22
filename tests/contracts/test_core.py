@@ -132,6 +132,7 @@ def test_project_dir_prefers_env_then_cwd(tmp_path: Path) -> None:
     with_env = {"CLAUDE_PROJECT_DIR": str(tmp_path / "proj")}
     # when · then
     assert project_dir(with_env) == tmp_path / "proj"
+    assert project_dir(with_env, cwd=tmp_path / "cwd") == tmp_path / "proj"   # 둘 다 있으면 env 가 앞선다
     assert project_dir({}, cwd=tmp_path / "cwd") == tmp_path / "cwd"
     assert project_dir({"CLAUDE_PROJECT_DIR": "  "}, cwd=tmp_path / "cwd") == tmp_path / "cwd"
 
