@@ -783,42 +783,49 @@ ARGS: dict[str, cli.LogsArgs] = {
 }
 
 
-@pytest.mark.parametrize("cmd", sorted(ARGS))
-def test_logs_run_dispatches_by_subcommand(make_client: ClientFactory, cmd: str) -> None:
-    """logs_run 은 cmd 에 따라 연산을 부르고 Evidence[Lines] 와 kind logql-<cmd> 를 낸다 — 배선 예 하나씩."""
+def test_logs_run_around_window_is_ts_plus_minus_span(make_client: ClientFactory) -> None:
+    """around 의 RunResult 의 window 는 --ts ± --span 이다 — --since 창이 아니다."""
+    # given — --since 는 기본 1h · 빈 응답
+    client, _ = make_client({("logs", INSTANT): (200, _vector()), ("logs", RANGE): (200, _streams())})
+    # when
+    window = cli.logs_run(client, cli.LogsArgs(cmd="around", selector=SEL, ts="-30m", span="60s"), at=AT).window
+    # then
+    assert window == Window(AT - 30 * MINUTE - 60, AT - 30 * MINUTE + 60)
+
+
+
+
+# ── logs_run — 환원 값을 이름으로 ────────────────────────────────────────────────────
+
+LOGS_TYPES: dict[str, type[object]] = {"histogram": logs.Histogram, "templates": logs.Templates, "around": logs.Context, "first-seen": logs.FirstSeen}
+"""서브커맨드 → logs_run 의 evidence.value 가 되는 환원 dataclass."""
+
+
+@pytest.mark.parametrize("cmd", sorted(LOGS_TYPES))
+def test_logs_run_returns_reduction_value_by_subcommand(make_client: ClientFactory, cmd: str) -> None:
+    """logs_run 의 결과는 kind 가 logql-<cmd> 이고 evidence.value 가 그 연산의 환원 dataclass(Histogram · Templates · Context · FirstSeen)다 — 줄이 아니다."""
     # given — 최소 라우트
     line = _streams(({"pod": "p"}, [(_ns(AT - 60), "x")]))
     client, _ = make_client({("logs", RANGE): (200, _matrix(({"detected_level": "error"}, [(AT - 60, "1")])) if cmd == "histogram" else line),
                              ("logs", PATTERNS): (200, _patterns(("a <_>", [(100, 1)]))),
                              ("logs", INSTANT): (200, _vector(({}, "1")))})
     # when
-    ev, kind, _ = cli.logs_run(client, ARGS[cmd], at=AT)
+    r = cli.logs_run(client, ARGS[cmd], at=AT)
     # then
-    assert kind == "logql-%s" % cmd
-    assert ev.value.lines
+    assert r.kind == "logql-%s" % cmd
+    assert isinstance(r.evidence.value, LOGS_TYPES[cmd])
 
 
-def test_logs_run_around_window_is_ts_plus_minus_span(make_client: ClientFactory) -> None:
-    """around 의 RunResult 셋째 자리는 --ts ± --span 이다 — --since 창이 아니다."""
-    # given — --since 는 기본 1h · 빈 응답
-    client, _ = make_client({("logs", INSTANT): (200, _vector()), ("logs", RANGE): (200, _streams())})
+def test_around_lines_empty_names_the_ts_window() -> None:
+    """빈 문맥(entries 없음)의 around_lines 는 "(데이터 없음 …" 한 줄이고, 그 줄은 ts ± span 의 창을 말하며 --since 창의 표기가 없다."""
+    # given — 창 안 건수 0 인 손 입력 Context · 창은 center ± 60s
+    center = AT - 30 * MINUTE
+    ctx = logs.Context(center=center, span=60.0, limit=50, total=0, before=Side(shown=0, truncated=False), after=Side(shown=0, truncated=False), entries=[])
+    w = Window(center - 60, center + 60)
     # when
-    _, _, window = cli.logs_run(client, cli.LogsArgs(cmd="around", selector=SEL, ts="-30m", span="60s"), at=AT)
+    lines = cli.around_lines(ctx, w)
     # then
-    assert window == Window(AT - 30 * MINUTE - 60, AT - 30 * MINUTE + 60)
-
-
-def test_logs_run_around_empty_lines_show_ts_plus_minus_span(make_client: ClientFactory) -> None:
-    """창 안에 로그가 없는 around 의 출력 줄("데이터 없음")은 --ts ± --span 의 창을 말하고 --since 창의 표기가 없다."""
-    # given — --since 는 기본 1h · 빈 응답
-    client, _ = make_client({("logs", INSTANT): (200, _vector()), ("logs", RANGE): (200, _streams())})
-    # when
-    ev, _, _ = cli.logs_run(client, cli.LogsArgs(cmd="around", selector=SEL, ts="-30m", span="60s"), at=AT)
-    # then
-    lines = ev.value.lines
     assert len(lines) == 1
     assert lines[0].startswith("(데이터 없음")
-    assert cli.window_str(Window(AT - 30 * MINUTE - 60, AT - 30 * MINUTE + 60)) in lines[0]
+    assert cli.window_str(w) in lines[0]
     assert cli.window_str(Window.last("1h", None, at=AT)) not in lines[0]
-
-

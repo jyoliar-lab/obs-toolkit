@@ -9,7 +9,7 @@ import pytest
 
 from obs import traces
 from obs.adapters import cli
-from obs.core import JSON, Lines, ObsError, Window, to_dict
+from obs.core import JSON, ObsError, Window, to_dict, to_json
 from obs.metrics import parse_metric
 from obs.traces import (
     THRESHOLD_BASELINE, THRESHOLD_SAMPLE, THRESHOLD_WINDOW, Bucket, ClientRow, CriticalPath, Edge, Endpoint, EndpointQuantiles, Exemplar,
@@ -1327,18 +1327,6 @@ def _args_for(cmd: str) -> cli.TracesArgs:
     return cli.TracesArgs(cmd=cmd)
 
 
-@pytest.mark.parametrize("cmd", cli.TRACES_SUBCOMMANDS)
-def test_traces_run_dispatches_each_subcommand(make_client: ClientFactory, cmd: str) -> None:
-    """cmd 마다 kind 는 traceql-<cmd> 이고 Evidence 의 value 는 Lines 다."""
-    # given
-    client, _ = make_client(_routes_for(cmd))
-    # when
-    ev, kind, _ = cli.traces_run(client, _args_for(cmd), at=AT)
-    # then
-    assert kind == "traceql-" + cmd
-    assert isinstance(ev.value, Lines)
-
-
 def test_traces_run_exemplars_passes_baseline_range(make_client: ClientFactory) -> None:
     """exemplars 의 호출은 metrics · traces 순이고 metrics 질의에 --baseline-range 의 구간이 있다."""
     # given
@@ -1348,21 +1336,6 @@ def test_traces_run_exemplars_passes_baseline_range(make_client: ClientFactory) 
     # then
     assert [_path(c).endswith(p) for c, p in zip(t.calls, (INSTANT, SEARCH))] == [True, True]
     assert "[3d] offset" in _params(t.calls[0])["query"]
-
-
-@pytest.mark.parametrize("cmd", cli.TRACES_SUBCOMMANDS)
-def test_traces_run_summary_carries_no_raw_trace_body(make_client: ClientFactory, cmd: str) -> None:
-    """요약 줄 어디에도 원본 표식(startTimeUnixNano · batches · resourceSpans · spanSets · resultType)이 없고 client.log 에는 있다."""
-    # given
-    client, _ = make_client(_routes_for(cmd))
-    # when
-    ev, _, _ = cli.traces_run(client, _args_for(cmd), at=AT)
-    text = "\n".join(ev.value.lines)
-    # then
-    for marker in RAW_MARKERS:
-        assert marker not in text
-    assert len(client.log) >= 1
-    assert any(marker in json.dumps(to_dict(client.log)) for marker in RAW_MARKERS)
 
 
 @pytest.mark.parametrize("a", [cli.TracesArgs(cmd="graph"), cli.TracesArgs(cmd="critical-path"), cli.TracesArgs(cmd="diff", slow_id="s1")],
@@ -1376,3 +1349,50 @@ def test_traces_args_validate_rejects(make_client: ClientFactory, a: cli.TracesA
         cli.traces_run(client, a, at=AT)
     assert t.calls == []
 
+
+
+# ── traces_run — 환원 값을 이름으로 ──────────────────────────────────────────────────
+
+TRACES_TYPES: dict[str, type[object]] = {"exemplars": Exemplars, "critical-path": CriticalPath, "service-graph": ServiceGraph, "diff": TraceDiff}
+"""서브커맨드 → traces_run 의 evidence.value 가 되는 환원 dataclass."""
+
+
+@pytest.mark.parametrize("cmd", cli.TRACES_SUBCOMMANDS)
+def test_traces_run_returns_reduction_value_by_subcommand(make_client: ClientFactory, cmd: str) -> None:
+    """traces_run 의 결과는 kind 가 traceql-<cmd> 이고 evidence.value 가 그 연산의 환원 dataclass(Exemplars · CriticalPath · ServiceGraph · TraceDiff)다 — 줄이 아니다."""
+    # given — 최소 라우트
+    client, _ = make_client(_routes_for(cmd))
+    # when
+    r = cli.traces_run(client, _args_for(cmd), at=AT)
+    # then
+    assert r.kind == "traceql-" + cmd
+    assert isinstance(r.evidence.value, TRACES_TYPES[cmd])
+
+
+@pytest.mark.parametrize("cmd", cli.TRACES_SUBCOMMANDS)
+def test_traces_run_value_carries_no_raw_trace_body(make_client: ClientFactory, cmd: str) -> None:
+    """환원 값(evidence.value)의 직렬화 어디에도 원본 표식(startTimeUnixNano · batches · resourceSpans · spanSets · resultType)이 없고 client.log 에는 있다 — 값에 없으면 어느 렌더러도 실을 수 없다."""
+    # given
+    client, _ = make_client(_routes_for(cmd))
+    # when
+    r = cli.traces_run(client, _args_for(cmd), at=AT)
+    text = to_json(r.evidence.value)
+    # then
+    for marker in RAW_MARKERS:
+        assert marker not in text
+    assert len(client.log) >= 1
+    assert any(marker in json.dumps(to_dict(client.log)) for marker in RAW_MARKERS)
+
+
+def test_traces_run_exemplars_passes_k_quantile_limit(make_client: ClientFactory) -> None:
+    """exemplars 의 Args 의 k · quantile 은 환원 값(Exemplars.k · .quantile)에, limit 은 search 요청(limit = a.limit + 1 — 초과 감지용 하나 더)에 나타난다."""
+    # given — exemplars 의 최소 라우트(metrics 즉시 조회 + traces search) · k=2 · quantile=0.9 · limit=5
+    client, t = make_client(_routes_for("exemplars"))
+    # when
+    r = cli.traces_run(client, cli.TracesArgs(cmd="exemplars", k=2, quantile=0.9, limit=5), at=AT)
+    # then
+    assert isinstance(r.evidence.value, Exemplars)
+    assert r.evidence.value.k == 2
+    assert r.evidence.value.quantile == 0.9
+    assert _path(t.calls[1]).endswith(SEARCH)
+    assert _params(t.calls[1])["limit"] == "6"

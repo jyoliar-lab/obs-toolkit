@@ -10,7 +10,7 @@ import pytest
 
 from obs import metrics
 from obs.adapters import cli
-from obs.core import JSON, Client, Evidence, Lines, ObsError, Window, to_json
+from obs.core import JSON, Client, Evidence, ObsError, Window, to_json
 from tests.conftest import AT, DAY, HOUR, MINUTE, RED_BASE_ONLY, RED_FULL, RED_NOW_ONLY, WEEK, ClientFactory, _no_physical, _red_body, _stat, _vector
 from tests.record import CPU_QUERY
 from tests.replay import Call
@@ -590,36 +590,23 @@ def test_top_empty_response_has_no_entries(make_client: ClientFactory) -> None:
     assert ev.value.entries == []
 
 
-def test_metrics_run_dispatches_by_subcommand(make_client: ClientFactory) -> None:
-    """metrics_run 은 네 서브커맨드를 Evidence[Lines] 와 kind 로 내고(red 의 창에는 --baseline 의 기준선이 달린다) 모르는 서브커맨드는 ObsError 다."""
-    client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
-    for cmd, kind in (("summarize", "promql-summarize"), ("compare", "promql-compare"), ("top", "promql-top"), ("red", "promql-red")):
-        ev, got, _ = cli.metrics_run(client, cli.MetricsArgs(cmd=cmd, query="up", service="svc"), at=AT)
-        assert got == kind
-        assert isinstance(ev.value, Lines)
-    _, _, window = cli.metrics_run(client, cli.MetricsArgs(cmd="red", service="svc", since="1h", baseline="prev"), at=AT)
-    assert window == Window.last("1h", None, at=AT).with_baseline("prev")
-    with pytest.raises(ObsError):
-        cli.metrics_run(client, cli.MetricsArgs(cmd="nope", query="x"), at=AT)
-
-
 def test_metrics_run_compare_window_has_baseline(make_client: ClientFactory) -> None:
-    """compare 의 RunResult 셋째 자리는 --since · --end 의 창에 --baseline 의 기준선이 달린 창이다."""
+    """compare 의 RunResult 의 window 는 --since · --end 의 창에 --baseline 의 기준선이 달린 창이다."""
     # given — 빈 응답
     client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
     # when
-    _, _, window = cli.metrics_run(client, cli.MetricsArgs(cmd="compare", query="up", since="1h", baseline="prev"), at=AT)
+    window = cli.metrics_run(client, cli.MetricsArgs(cmd="compare", query="up", since="1h", baseline="prev"), at=AT).window
     # then
     assert window == Window.last("1h", None, at=AT).with_baseline("prev")
     assert window.baseline is not None
 
 
 def test_metrics_run_top_window_is_end_instant(make_client: ClientFactory) -> None:
-    """top 의 RunResult 셋째 자리는 --end 시각 한 점(start = end)이다 — --since 창이 아니다."""
+    """top 의 RunResult 의 window 는 --end 시각 한 점(start = end)이다 — --since 창이 아니다."""
     # given — 빈 응답 · --end 는 10분 전
     client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
     # when
-    _, _, window = cli.metrics_run(client, cli.MetricsArgs(cmd="top", query="up", end="-10m"), at=AT)
+    window = cli.metrics_run(client, cli.MetricsArgs(cmd="top", query="up", end="-10m"), at=AT).window
     # then
     assert window == Window(AT - 10 * MINUTE, AT - 10 * MINUTE)
 
@@ -727,3 +714,63 @@ def test_red_lines_carry_no_physical() -> None:
     # when · then
     assert len(lines) == 4
     _no_physical("\n".join(lines))
+
+
+# ── metrics_run — 환원 값을 이름으로 ─────────────────────────────────────────────────
+
+REDUCTION_TYPES: dict[str, type[object]] = {"summarize": metrics.Summary, "compare": metrics.Comparison, "top": metrics.Top, "red": metrics.Red}
+"""서브커맨드 → metrics_run 의 evidence.value 가 되는 환원 dataclass."""
+
+
+@pytest.mark.parametrize("cmd", sorted(REDUCTION_TYPES))
+def test_metrics_run_returns_reduction_value_by_subcommand(make_client: ClientFactory, cmd: str) -> None:
+    """metrics_run 의 결과는 kind 가 promql-<cmd> 이고 evidence.value 가 그 연산의 환원 dataclass(Summary · Comparison · Top · Red)다 — 줄이 아니다."""
+    # given — 빈 vector 라우트
+    client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
+    # when
+    r = cli.metrics_run(client, cli.MetricsArgs(cmd=cmd, query="up", service="svc"), at=AT)
+    # then
+    assert r.kind == "promql-%s" % cmd
+    assert isinstance(r.evidence.value, REDUCTION_TYPES[cmd])
+
+
+def test_metrics_run_rejects_unknown_subcommand(make_client: ClientFactory) -> None:
+    """모르는 서브커맨드의 MetricsArgs 는 metrics_run 이 요청 없이 ObsError 다."""
+    # given — 라우트 없는 fake transport
+    client, t = make_client()
+    # when · then
+    with pytest.raises(ObsError):
+        cli.metrics_run(client, cli.MetricsArgs(cmd="nope", query="x"), at=AT)
+    assert t.calls == []
+
+
+def _sent_query(call: Call) -> str:
+    """나간 호출의 query 파라미터."""
+    return dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(call.url).query, keep_blank_values=True))["query"]
+
+
+def test_metrics_run_top_passes_k_and_by(make_client: ClientFactory) -> None:
+    """top 의 Args 의 k · by 는 환원 값(Top.k · Top.by)과 나간 질의(topk(k, … by (by) …)) 둘 다에 나타난다."""
+    # given — 빈 vector 라우트 · k=2 · by=ns
+    client, t = make_client({("metrics", "api/v1/query"): (200, _vector())})
+    # when
+    r = cli.metrics_run(client, cli.MetricsArgs(cmd="top", query="up", k=2, by="ns"), at=AT)
+    # then
+    assert isinstance(r.evidence.value, metrics.Top)
+    assert r.evidence.value.k == 2
+    assert r.evidence.value.by == ["ns"]
+    sent = _sent_query(t.calls[0])
+    assert "topk(2," in sent
+    assert "by (ns)" in sent
+
+
+def test_metrics_run_summarize_passes_step(make_client: ClientFactory) -> None:
+    """summarize 의 Args 의 step 은 환원 값(Summary.step)과 나간 서브쿼리의 해상도(…:30s]) 둘 다에 나타난다."""
+    # given — 빈 vector 라우트 · step=30s
+    client, t = make_client({("metrics", "api/v1/query"): (200, _vector())})
+    # when
+    r = cli.metrics_run(client, cli.MetricsArgs(cmd="summarize", query="up", step="30s"), at=AT)
+    # then
+    assert isinstance(r.evidence.value, metrics.Summary)
+    assert r.evidence.value.step == "30s"
+    assert ":30s]" in _sent_query(t.calls[0])
