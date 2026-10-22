@@ -10,6 +10,7 @@ while not os.path.isfile(os.path.join(_d, "obs", "core.py")):
 sys.path.insert(0, _d)
 
 from obs.adapters.cli import traceql_main, main_guard  # noqa: E402
+from obs.core import Client, now  # noqa: E402
 
 if __name__ == "__main__":
-    main_guard(traceql_main)
+    main_guard(lambda: traceql_main(sys.argv[1:], os.environ, now(), lambda: Client.from_env(os.environ)))

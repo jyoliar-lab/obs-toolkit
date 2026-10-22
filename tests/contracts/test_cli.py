@@ -10,8 +10,9 @@ from typing import Callable
 import pytest
 
 from obs.adapters import cli
-from obs.core import JSON, BudgetExceeded, Client, Evidence, Lines, ObsError, Response, Window, json_list
-from tests.conftest import AT, HOUR, MINUTE, ClientFactory, RouteKey, _no_physical, _vector
+from obs.core import JSON, BudgetExceeded, Client, Config, Evidence, Lines, ObsError, Response, Window, json_list
+from tests.conftest import AT, HOUR, MINUTE, ClientFactory, MainFn, MainRunner, RouteKey, _no_physical, _vector, no_client
+from tests.record import strip_physical
 
 
 # ── 거부 · 오류 ──────────────────────────────────────────────────────────────────
@@ -250,7 +251,7 @@ def test_finish_names_failed_directory_by_at(make_client: ClientFactory, tmp_pat
 
 # ── 인터페이스 — 물리 인자가 없다 ────────────────────────────────────────────────
 
-HELP_SCREENS: tuple[tuple[Callable[[list[str]], None], list[str]], ...] = (
+HELP_SCREENS: tuple[tuple[MainFn, list[str]], ...] = (
     (cli.promql_main, ["--help"]), (cli.promql_main, ["summarize", "--help"]), (cli.promql_main, ["compare", "--help"]),
     (cli.promql_main, ["top", "--help"]), (cli.logql_main, ["--help"]), (cli.traceql_main, ["--help"]),
     (cli.logql_main, ["histogram", "--help"]), (cli.logql_main, ["templates", "--help"]), (cli.logql_main, ["around", "--help"]),
@@ -264,10 +265,10 @@ HELP_SCREENS: tuple[tuple[Callable[[list[str]], None], list[str]], ...] = (
                                                          "logql-histogram", "logql-templates", "logql-around", "logql-first-seen",
                                                          "traceql-exemplars", "traceql-critical-path", "traceql-service-graph", "traceql-diff",
                                                          "promql-red"])
-def test_help_has_no_physical_flags_or_strings(main: Callable[[list[str]], None], argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
-    """모든 --help 화면에 --uid · --url · --token · --host 가 없고 물리 문자열도 없다."""
+def test_help_has_no_physical_flags_or_strings(main: MainFn, argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
+    """모든 --help 화면에 --uid · --url · --token · --host 가 없고 물리 문자열도 없다 — 토큰 · 설정 없는 env 로, Client 는 만들어지지 않는다."""
     with pytest.raises(SystemExit) as ei:
-        main(argv)
+        main(argv, {}, AT, no_client)
     assert ei.value.code == 0
     text = capsys.readouterr().out
     for flag in ("--uid", "--url", "--token", "--host"):
@@ -281,7 +282,7 @@ def test_traceql_help_lists_traces_subcommands(capsys: pytest.CaptureFixture[str
     argv = ["--help"]
     # when
     with pytest.raises(SystemExit) as ei:
-        cli.traceql_main(argv)
+        cli.traceql_main(argv, {}, AT, no_client)
     # then
     assert ei.value.code == 0
     text = capsys.readouterr().out
@@ -295,7 +296,7 @@ def test_promql_help_lists_metrics_subcommands(capsys: pytest.CaptureFixture[str
     argv = ["--help"]
     # when
     with pytest.raises(SystemExit) as ei:
-        cli.promql_main(argv)
+        cli.promql_main(argv, {}, AT, no_client)
     # then
     assert ei.value.code == 0
     text = capsys.readouterr().out
@@ -310,7 +311,7 @@ def test_logql_help_lists_logs_subcommands(capsys: pytest.CaptureFixture[str]) -
     argv = ["--help"]
     # when
     with pytest.raises(SystemExit) as ei:
-        cli.logql_main(argv)
+        cli.logql_main(argv, {}, AT, no_client)
     # then
     assert ei.value.code == 0
     text = capsys.readouterr().out
@@ -330,79 +331,6 @@ def test_parse_metric_scalar_goes_to_scalar_field() -> None:
 def test_parse_metric_broken_result_is_empty() -> None:
     """형태가 깨진 result 는 예외가 아니라 빈 시계열 목록이다."""
     assert cli.parse_metric({"data": {"resultType": "vector", "result": "garbage"}}).series == []
-
-
-@pytest.mark.parametrize("argv,expected", [
-    (["histogram", '{a="b"}', "--by", "app", "--since", "2h"], {"cmd": "histogram", "selector": '{a="b"}', "by": "app", "since": "2h"}),
-    (["first-seen", '{a="b"}', "<_> x", "--since", "2h"], {"cmd": "first-seen", "selector": '{a="b"}', "template": "<_> x", "since": "2h"}),
-], ids=["histogram", "first-seen"])
-def test_logql_main_routes_subcommand_to_logs_run(argv: list[str], expected: dict[str, str], monkeypatch: pytest.MonkeyPatch,
-                                                  make_client: ClientFactory, tmp_path: Path) -> None:
-    """logql.py 의 첫 인자가 서브커맨드면 logs_run 으로 간다 — argv 의 cmd · selector · 옵션(by · since) · 위치 인자(template) 가 LogsArgs 로 들어간다."""
-    # given — logs_run 대역이 받은 Args 를 기록한다
-    seen: list[cli.LogsArgs] = []
-
-    def fake_run(client: Client, a: cli.LogsArgs, at: float | None = None) -> cli.RunResult:
-        seen.append(a)
-        return Evidence(value=Lines(["x"])), "logql-histogram", Window(AT - MINUTE, AT)
-
-    client, _ = make_client()
-    monkeypatch.setattr(cli, "logs_run", fake_run)
-    monkeypatch.setattr(cli, "_client", lambda: client)
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-    # when
-    cli.logql_main(argv)
-    # then
-    assert len(seen) == 1
-    for name, value in expected.items():
-        assert getattr(seen[0], name) == value
-
-
-@pytest.mark.parametrize("argv,expected", [
-    (["exemplars", "--q", 'resource.service.name = "a"', "--k", "2", "--quantile", "0.9", "--baseline-range", "3d", "--limit", "50", "--since", "6h", "--end=-10m"],
-     cli.TracesArgs(cmd="exemplars", q='resource.service.name = "a"', since="6h", end="-10m", k=2, quantile=0.9, baseline_range="3d", limit=50)),
-    (["critical-path", "abc"], cli.TracesArgs(cmd="critical-path", trace_id="abc")),
-    (["service-graph", "--quantile", "0.9", "--baseline-range", "3d"], cli.TracesArgs(cmd="service-graph", quantile=0.9, baseline_range="3d")),
-    (["diff", "s1", "n1"], cli.TracesArgs(cmd="diff", slow_id="s1", normal_id="n1")),
-], ids=["exemplars", "critical-path", "service-graph", "diff"])
-def test_traceql_main_routes_subcommand_to_traces_run(argv: list[str], expected: cli.TracesArgs, monkeypatch: pytest.MonkeyPatch,
-                                                      make_client: ClientFactory, tmp_path: Path) -> None:
-    """traceql.py 의 첫 인자가 서브커맨드면 traces_run 으로 간다 — cmd · 위치 인자(traceID) · 옵션(k · quantile · baseline-range · limit · since · end) 이 TracesArgs 로 들어가고 나머지 필드는 전부 기본값이다."""
-    # given — traces_run 대역이 받은 Args 를 기록한다
-    seen: list[cli.TracesArgs] = []
-
-    def fake_run(client: Client, a: cli.TracesArgs, at: float | None = None) -> cli.RunResult:
-        seen.append(a)
-        return Evidence(value=Lines(["x"])), "traceql-" + a.cmd, Window(AT - MINUTE, AT)
-
-    client, _ = make_client()
-    monkeypatch.setattr(cli, "traces_run", fake_run)
-    monkeypatch.setattr(cli, "_client", lambda: client)
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-    # when
-    cli.traceql_main(argv)
-    # then
-    assert len(seen) == 1
-    assert seen[0] == expected
-
-
-def test_traceql_main_still_routes_legacy_commands_to_traceql_run(monkeypatch: pytest.MonkeyPatch, make_client: ClientFactory, tmp_path: Path) -> None:
-    """서브커맨드가 아닌 기존 명령(tags)은 그대로 traceql_run 이 받는다."""
-    # given — traceql_run 대역
-    seen: list[cli.TraceqlArgs] = []
-
-    def fake_run(client: Client, a: cli.TraceqlArgs, at: float | None = None) -> cli.RunResult:
-        seen.append(a)
-        return Evidence(value=Lines(["x"])), "traceql-tags", Window(AT - MINUTE, AT)
-
-    client, _ = make_client()
-    monkeypatch.setattr(cli, "traceql_run", fake_run)
-    monkeypatch.setattr(cli, "_client", lambda: client)
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-    # when
-    cli.traceql_main(["tags"])
-    # then
-    assert [a.cmd for a in seen] == ["tags"]
 
 
 def test_window_preamble_has_window_line_only() -> None:
@@ -459,33 +387,29 @@ def test_finish_writes_window_preamble_then_lines(tmp_path: Path, capsys: pytest
     assert not [line for line in out if line.startswith("# ")]
 
 
-def test_promql_main_summarize_writes_no_assembled_query(monkeypatch: pytest.MonkeyPatch, make_client: ClientFactory, tmp_path: Path,
+def test_promql_main_summarize_writes_no_assembled_query(run_main: MainRunner, base_env: dict[str, str], make_client: ClientFactory,
                                                          capsys: pytest.CaptureFixture[str]) -> None:
     """promql.py summarize 의 stdout · summary.txt 어디에도 실제로 보낸 조립 질의가 없고, summary.txt 에는 `# 창` 줄이 있다."""
-    # given — 빈 응답 · spill 은 tmp
+    # given — 빈 응답 · spill 은 명시 env(base_env)의 프로젝트 디렉터리
     client, t = make_client({("metrics", "api/v1/query"): (200, _vector())})
-    monkeypatch.setattr(cli, "_client", lambda: client)
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     # when
-    cli.promql_main(["summarize", "up", "--since", "1h"])
+    run_main(cli.promql_main, ["summarize", "up", "--since", "1h"], client)
     # then
     sent = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(t.calls[0].url).query))["query"]
     assert sent != "up"
-    summary = _summary_text(tmp_path)
+    summary = _summary_text(Path(base_env["CLAUDE_PROJECT_DIR"]))
     assert [line for line in summary.splitlines() if line.startswith("# 창")]
     assert sent not in summary
     assert sent not in capsys.readouterr().out
 
 
-def test_promql_main_red_writes_no_query_and_raw_has_one_element_per_call(monkeypatch: pytest.MonkeyPatch, make_client: ClientFactory, tmp_path: Path,
+def test_promql_main_red_writes_no_query_and_raw_has_one_element_per_call(run_main: MainRunner, base_env: dict[str, str], make_client: ClientFactory,
                                                                            capsys: pytest.CaptureFixture[str]) -> None:
     """promql.py red 의 stdout · summary.txt 어디에도 보낸 조립 질의가 없고, raw.json 의 원소 수가 보낸 호출 수(1)와 같다."""
-    # given — 빈 응답 · spill 은 tmp
+    # given — 빈 응답 · spill 은 명시 env(base_env)의 프로젝트 디렉터리
     client, t = make_client({("metrics", "api/v1/query"): (200, _vector())})
-    monkeypatch.setattr(cli, "_client", lambda: client)
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     # when
-    cli.promql_main(["red", "svc", "--since", "1h"])
+    run_main(cli.promql_main, ["red", "svc", "--since", "1h"], client)
     # then — 호출 1회 · 그 질의는 서비스 이름 그대로가 아니다
     assert len(t.calls) == 1
     sent = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(t.calls[0].url).query))["query"]
@@ -494,37 +418,18 @@ def test_promql_main_red_writes_no_query_and_raw_has_one_element_per_call(monkey
     assert out[-1].startswith("원본·요약: tmp/obs/")
     assert out[-1].endswith("-promql-red/ (raw.json · summary.txt)")
     assert not any(sent in line for line in out)
-    summary = _summary_text(tmp_path)
+    summary = _summary_text(Path(base_env["CLAUDE_PROJECT_DIR"]))
     assert [line for line in summary.splitlines() if line.startswith("# 창")]
     assert sent not in summary
-    raw_body: JSON = json.loads((tmp_path / out[-1].split()[1].rstrip("/") / "raw.json").read_text(encoding="utf-8"))
+    raw_body: JSON = json.loads((Path(base_env["CLAUDE_PROJECT_DIR"]) / out[-1].split()[1].rstrip("/") / "raw.json").read_text(encoding="utf-8"))
     assert isinstance(raw_body, list)
     assert len(json_list(raw_body)) == len(t.calls)
-
-
-def test_promql_main_routes_red_to_metrics_run(monkeypatch: pytest.MonkeyPatch, make_client: ClientFactory, tmp_path: Path) -> None:
-    """promql.py red <service> 는 metrics_run 으로 간다 — service · --since · --baseline · --end 가 MetricsArgs 로 들어가고 나머지는 기본값이다."""
-    # given — metrics_run 대역이 받은 Args 를 기록한다
-    seen: list[cli.MetricsArgs] = []
-
-    def fake_run(client: Client, a: cli.MetricsArgs, at: float | None = None) -> cli.RunResult:
-        seen.append(a)
-        return Evidence(value=Lines(["x"])), "promql-red", Window(AT - MINUTE, AT)
-
-    client, _ = make_client()
-    monkeypatch.setattr(cli, "metrics_run", fake_run)
-    monkeypatch.setattr(cli, "_client", lambda: client)
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-    # when
-    cli.promql_main(["red", "svc", "--since", "6h", "--baseline", "prev", "--end=-10m"])
-    # then
-    assert seen == [cli.MetricsArgs(cmd="red", service="svc", since="6h", baseline="prev", end="-10m")]
 
 
 def test_promql_main_top_rejects_since() -> None:
     """top 은 창이 없으므로 --since 를 받지 않는다 — argparse 가 거부한다(exit 2)."""
     with pytest.raises(SystemExit) as ei:
-        cli.promql_main(["top", "x", "--since", "1h"])
+        cli.promql_main(["top", "x", "--since", "1h"], {}, AT, no_client)
     assert ei.value.code == 2
 
 
@@ -535,6 +440,33 @@ STREAMS: dict[str, JSON] = {"status": "success", "data": {"resultType": "streams
     {"stream": {"namespace": "n", "pod": "p"}, "values": [["1700000000000000000", "x" * 100], ["1700000001000000000", "short"]]}]}}
 SEARCH: dict[str, JSON] = {"traces": [{"traceID": "abc123", "rootServiceName": "svc", "rootTraceName": "op", "startTimeUnixNano": "1700000000000000000",
                                        "durationMs": 12}]}
+
+
+DISPATCH_CASES: list[tuple[str, MainFn, list[str], RouteKey, dict[RouteKey, tuple[int, object]], dict[str, str]]] = [
+    # (id, main, argv, 첫 요청의 (backend, path), 라우트, 요청에 보여야 하는 창 파라미터) — 창은 Window.last("2h", "-10m", at=AT) = [92200, 99400]
+    ("logs", cli.logql_main, ["histogram", '{a="b"}', "--since", "2h", "--end=-10m"], ("logs", "loki/api/v1/query_range"),
+     {("logs", "loki/api/v1/query_range"): (200, EMPTY_MATRIX)}, {"start": str(int((AT - 600 - 7200) * 1e9)), "end": str(int((AT - 600) * 1e9))}),
+    ("traces", cli.traceql_main, ["exemplars", "--since", "2h", "--end=-10m"], ("metrics", "api/v1/query"),
+     {("metrics", "api/v1/query"): (200, _vector()), ("traces", "api/search"): (200, {"traces": []})}, {"time": str(AT - 600)}),
+    ("traceql", cli.traceql_main, ["tags"], ("traces", "api/v2/search/tags"),
+     {("traces", "api/v2/search/tags"): (200, {"scopes": []})}, {"start": str(int(AT - 3600)), "end": str(int(AT))}),
+    ("metrics", cli.promql_main, ["red", "svc", "--since", "2h", "--end=-10m"], ("metrics", "api/v1/query"),
+     {("metrics", "api/v1/query"): (200, _vector())}, {"time": str(AT - 600)}),
+]
+
+
+@pytest.mark.parametrize("main,argv,route,routes,expected", [c[1:] for c in DISPATCH_CASES], ids=[c[0] for c in DISPATCH_CASES])
+def test_main_dispatches_subcommand_to_its_run(main: MainFn, argv: list[str], route: RouteKey, routes: dict[RouteKey, tuple[int, object]],
+                                               expected: dict[str, str], run_main: MainRunner, make_client: ClientFactory, config: Config) -> None:
+    """argv 의 첫 토큰이 맞는 *_run 을 고른다 — 첫 요청이 그 *_run 의 백엔드 · 경로로 나가고, 요청의 창 파라미터(start · end 또는 time)가 --since · --end 로 계산한 창과 같다."""
+    # given — 그 *_run 의 첫 요청에 빈 응답을 주는 라우트 · at 은 AT
+    client, t = make_client(routes)
+    # when
+    run_main(main, argv, client)
+    # then
+    rq = strip_physical(t.calls[0].url, config, None)
+    assert (rq.backend, rq.path) == route
+    assert {k: str(v) for k, v in rq.params.items() if k in expected} == expected
 
 
 def test_promql_range_window_and_auto_step(make_client: ClientFactory) -> None:
