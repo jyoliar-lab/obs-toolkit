@@ -67,6 +67,9 @@ class Renderable(Protocol):
     def lines(self) -> list[str]: ...
 
 
+NO_RESULT = "(결과 없음)"   # 빈 결과의 한 줄 — finish 가 빈 줄 목록에 붙이고, 일부 *_lines 도 같은 문구를 쓴다
+
+
 PromqlResult: TypeAlias = RunResult[list[str]] | RunResult[list[dict[str, str]]] | RunResult[MetricResult]              # labels · label-values / series / range · instant
 LogqlResult: TypeAlias = RunResult[list[str]] | RunResult[list[dict[str, str]]] | RunResult[LogResult]                 # labels · label-values / series / 질의
 TraceqlResult: TypeAlias = RunResult[list[TraceHit]] | RunResult[list[Span]] | RunResult[list[TagScope]] | RunResult[list[str]]   # search / trace / tags / tag-values
@@ -184,7 +187,7 @@ def finish(client: Client, run: Callable[[], Renderable], failed_kind: str, max_
         if client.log:
             err("원본: %s" % _spill_failed(client, failed_kind, e, base, at))
         raise
-    _finish(r.lines() or ["(결과 없음)"], client.log, r.kind, r.window, max_lines, as_json, base=base, at=at, out=out)
+    _finish(r.lines() or [NO_RESULT], client.log, r.kind, r.window, max_lines, as_json, base=base, at=at, out=out)
 
 
 def _run_main(client: Callable[[], Client], run: Callable[[Client], Renderable], failed_kind: str, output: OutputArgs,
@@ -224,6 +227,16 @@ def main_guard(fn: Callable[[], None]) -> None:
         sys.exit(1)
 
 
+def _as_is(values: list[str], window: Window) -> list[str]:
+    """이름 목록(labels · label-values · tag-values)의 렌더러 — 값이 곧 줄이다."""
+    return values
+
+
+def _label_set_lines(sets: list[dict[str, str]], window: Window) -> list[str]:
+    """series 조회의 렌더러 — 레이블 집합 하나가 한 줄."""
+    return [labels_str(m) for m in sets]
+
+
 # ── promql ───────────────────────────────────────────────────────────────────────
 
 
@@ -237,7 +250,7 @@ def instant_lines(res: MetricResult) -> list[str]:
         elif s.values:   # 즉시 조회에 range vector 를 준 경우
             vals = [fmt_val(v) for _, v in s.values]
             lines.append("[%s]  %s" % (", ".join(vals[:10]) + (" …" if len(vals) > 10 else ""), labels_str(s.labels)))
-    return lines or ["(결과 없음)"]
+    return lines or [NO_RESULT]
 
 
 def range_lines(res: MetricResult, points: bool) -> list[str]:
@@ -260,7 +273,7 @@ def range_lines(res: MetricResult, points: bool) -> list[str]:
             continue
         lines.append("n=%d  min=%s  max=%s  first=%s  last=%s  %s" % (
             len(nums), fmt_val(min(nums)), fmt_val(max(nums)), fmt_val(nums[0]), fmt_val(nums[-1]), labels))
-    return lines or ["(결과 없음)"]
+    return lines or [NO_RESULT]
 
 
 @dataclass
@@ -286,17 +299,17 @@ def promql_run(client: Client, a: PromqlArgs, at: float) -> PromqlResult:
         params: Params = {"match[]": match, "start": start, "end": end}
         resp = client.get("metrics", "api/v1/labels", params)
         body = check_status(resp.body, "metrics")
-        return RunResult(Evidence(sorted(parse_strings(body))), "promql-labels", window, lambda v, w: v)
-    elif a.label_values:
+        return RunResult(Evidence(sorted(parse_strings(body))), "promql-labels", window, _as_is)
+    if a.label_values:
         params = {"match[]": match, "start": start, "end": end}
         resp = client.get("metrics", "api/v1/label/%s/values" % a.label_values, params)
         body = check_status(resp.body, "metrics")
-        return RunResult(Evidence(sorted(parse_strings(body))), "promql-label-values", window, lambda v, w: v)
-    elif a.series:
+        return RunResult(Evidence(sorted(parse_strings(body))), "promql-label-values", window, _as_is)
+    if a.series:
         params = {"match[]": a.series, "start": start if start is not None else end - 3600, "end": end}
         resp = client.get("metrics", "api/v1/series", params)
         body = check_status(resp.body, "metrics")
-        return RunResult(Evidence(parse_label_sets(body)), "promql-series", window, lambda v, w: [labels_str(m) for m in v])
+        return RunResult(Evidence(parse_label_sets(body)), "promql-series", window, _label_set_lines)
     if not match:
         raise ObsError("PromQL 이 필요하다")
     if start is not None:
@@ -474,7 +487,7 @@ def stream_lines(res: LogResult, direction: str, width: int) -> list[str]:
         tag = (" " + labels_str(e.labels)) if e.labels else ""
         lines.append("%s%s  %s" % (fmt_ts(e.ts_ns / 1e9), tag, clip(e.line, width)))
     if not entries:
-        lines.append("(결과 없음)")
+        lines.append(NO_RESULT)
     return lines
 
 
@@ -492,7 +505,7 @@ def matrix_lines(res: LogResult) -> list[str]:
             lines.append("n=%d  min=%g  max=%g  last=%g  %s" % (len(nums), min(nums), max(nums), nums[-1], labels))
         else:
             lines.append("n=0  %s" % labels)
-    return lines or ["(결과 없음)"]
+    return lines or [NO_RESULT]
 
 
 @dataclass
@@ -515,15 +528,15 @@ def logql_run(client: Client, a: LogqlArgs, at: float) -> LogqlResult:
     if a.labels:
         resp = client.get("logs", "loki/api/v1/labels", ns)
         body = check_status(resp.body, "logs")
-        return RunResult(Evidence(sorted(parse_strings(body))), "logql-labels", window, lambda v, w: v)
-    elif a.label_values:
+        return RunResult(Evidence(sorted(parse_strings(body))), "logql-labels", window, _as_is)
+    if a.label_values:
         resp = client.get("logs", "loki/api/v1/label/%s/values" % a.label_values, ns)
         body = check_status(resp.body, "logs")
-        return RunResult(Evidence(sorted(parse_strings(body))), "logql-label-values", window, lambda v, w: v)
-    elif a.series:
+        return RunResult(Evidence(sorted(parse_strings(body))), "logql-label-values", window, _as_is)
+    if a.series:
         resp = client.get("logs", "loki/api/v1/series", {**ns, "match[]": a.series})
         body = check_status(resp.body, "logs")
-        return RunResult(Evidence(parse_label_sets(body)), "logql-series", window, lambda v, w: [labels_str(m) for m in v])
+        return RunResult(Evidence(parse_label_sets(body)), "logql-series", window, _label_set_lines)
     if not a.query:
         raise ObsError("LogQL 이 필요하다")
     params: Params = {**ns, "query": a.query, "limit": a.limit, "direction": a.direction}
@@ -689,7 +702,7 @@ def trace_lines(trace_id: str, spans: Sequence[Span], top: int) -> list[str]:
 
 
 def tags_lines(scopes: Sequence[TagScope]) -> list[str]:
-    return ["[%s] %s" % (sc.name, ", ".join(sorted(sc.tags))) for sc in scopes] or ["(결과 없음)"]
+    return ["[%s] %s" % (sc.name, ", ".join(sorted(sc.tags))) for sc in scopes] or [NO_RESULT]
 
 
 @dataclass
@@ -730,7 +743,7 @@ def traceql_run(client: Client, a: TraceqlArgs, at: float) -> TraceqlResult:
             raise ObsError("태그 이름이 필요하다")
         resp = client.get("traces", "api/v2/search/tag/%s/values" % a.arg, {**w, "q": a.q})
         body = check_json(resp.body, "traces")
-        return RunResult(Evidence(sorted(parse_tag_values(body))), "traceql-tag-values", window, lambda v, w: v)
+        return RunResult(Evidence(sorted(parse_tag_values(body))), "traceql-tag-values", window, _as_is)
     raise ObsError("알 수 없는 명령 %r — search · trace · tags · tag-values" % a.cmd)
 
 
