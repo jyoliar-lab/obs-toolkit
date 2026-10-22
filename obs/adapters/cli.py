@@ -21,14 +21,14 @@ import re
 import sys
 from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Mapping, Sequence, TypeAlias, TypeVar
+from typing import TYPE_CHECKING, Callable, Generic, Mapping, Protocol, Sequence, TypeAlias, TypeVar
 
 from obs.adapters.cli_argparse import (
     DEFAULT_LOG_LIMIT, DEFAULT_MAX_LINES, DEFAULT_SINCE, LOGS_SUBCOMMANDS, METRICS_SUBCOMMANDS, TRACES_SUBCOMMANDS,
     logql_parser, logs_parser, metrics_parser, promql_parser, traceql_parser, traces_parser,
 )
 from obs.core import (
-    JSON, Client, DoctorReport, Evidence, Lines, ObsError, Params, Response, Transport, Window, doctor, fmt_ts, load_config,
+    JSON, Client, DoctorReport, Evidence, ObsError, Params, Response, Transport, V, Window, doctor, fmt_ts, load_config,
     SPILL_RAW, SPILL_SUMMARY, json_labels, json_list, json_strs,
     parse_duration, parse_time, project_dir, spill, spill_ref, to_json, token_from_env,
 )
@@ -45,8 +45,34 @@ from obs.traces import (
     TraceDiff, TraceHit, check_json, critical_path, diff, exemplars, parse_search, parse_spans, parse_tag_values, parse_tags, service_graph,
 )
 
-RunResult: TypeAlias = "tuple[Evidence[Lines], str, Window]"   # 원본 자리 없음 — 보낸 호출의 기록은 Client.log
-"""(근거, spill 종류 이름, CLI 가 인자로 계산한 창)"""
+@dataclass(frozen=True)
+class RunResult(Generic[V]):
+    """한 명령의 결과 — 렌더 전 값과 그 렌더러. 줄은 finish 가 만든다. 원본 자리 없음 — 보낸 호출의 기록은 Client.log."""
+    evidence: Evidence[V]                       # 렌더 전 값 — 환원 dataclass(Summary …) 또는 원시 조회의 파싱 결과(MetricResult · list[str] …)
+    kind: str                                   # spill 종류 이름("promql-top" · "logql" …)
+    window: Window                              # CLI 가 인자로 계산한 창 — compare · red 는 baseline 이 달려 있다 · around 는 ts ± span
+    render: Callable[[V, Window], list[str]]    # 줄을 만드는 함수 — *_lines 또는 그것을 감싼 lambda(points · width 같은 Args 는 여기 갇힌다)
+
+    def lines(self) -> list[str]:
+        """render(evidence.value, window) 그대로 — 빈 목록이면 빈 목록. "(결과 없음)" 은 finish 의 것."""
+        return self.render(self.evidence.value, self.window)
+
+
+class Renderable(Protocol):
+    """finish 가 run 에서 받는 것 — RunResult[…] 의 union 을 제네릭 하나로는 받을 수 없어(V 불변) 구조적 타입으로."""
+    @property
+    def kind(self) -> str: ...
+    @property
+    def window(self) -> Window: ...
+    def lines(self) -> list[str]: ...
+
+
+PromqlResult: TypeAlias = RunResult[list[str]] | RunResult[list[dict[str, str]]] | RunResult[MetricResult]              # labels · label-values / series / range · instant
+LogqlResult: TypeAlias = RunResult[list[str]] | RunResult[list[dict[str, str]]] | RunResult[LogResult]                 # labels · label-values / series / 질의
+TraceqlResult: TypeAlias = RunResult[list[TraceHit]] | RunResult[list[Span]] | RunResult[list[TagScope]] | RunResult[list[str]]   # search / trace / tags / tag-values
+MetricsResult: TypeAlias = RunResult[Summary] | RunResult[Comparison] | RunResult[Top] | RunResult[Red]
+LogsResult: TypeAlias = RunResult[Histogram] | RunResult[Templates] | RunResult[Context] | RunResult[FirstSeen]
+TracesResult: TypeAlias = RunResult[Exemplars] | RunResult[CriticalPath] | RunResult[ServiceGraph] | RunResult[TraceDiff]
 
 
 # ── 응답 dataclass + 파서 — Loki 의 로그 파서(Stream · LogResult · parse_logs)는 obs.logs 에, Prometheus 형은 obs.metrics 에 ──
@@ -126,11 +152,11 @@ def window_preamble(window: Window) -> list[str]:
     return [*lines, ""]
 
 
-def _finish(ev: Evidence[Lines], raw: list[Response], kind: str, window: Window, max_lines: int, as_json: bool, *,
+def _finish(lines: list[str], raw: list[Response], kind: str, window: Window, max_lines: int, as_json: bool, *,
             base: Path, at: float, out: Callable[[str], None] = print) -> None:
-    """Evidence 를 stdout 규약으로. as_json 은 stdout 에 요약을 찍지 않고 경로만(파일은 어느 쪽이든 같다).
+    """요약 줄을 stdout 규약으로. as_json 은 stdout 에 요약을 찍지 않고 경로만(파일은 어느 쪽이든 같다).
     summary.txt 는 머리(창) + 요약 전체다."""
-    emit(ev.value.lines, raw, kind, max_lines, base=base, at=at, quiet=as_json, out=out, preamble=window_preamble(window))
+    emit(lines, raw, kind, max_lines, base=base, at=at, quiet=as_json, out=out, preamble=window_preamble(window))
 
 
 def _stderr(line: str) -> None:
@@ -143,13 +169,13 @@ def _spill_failed(client: Client, failed_kind: str, error: BaseException, base: 
     return "%s/ (%s · %s)" % (ref, SPILL_RAW, SPILL_SUMMARY)
 
 
-def finish(client: Client, run: Callable[[], RunResult], failed_kind: str, max_lines: int, as_json: bool, *,
+def finish(client: Client, run: Callable[[], Renderable], failed_kind: str, max_lines: int, as_json: bool, *,
            base: Path, at: float, out: Callable[[str], None] = print, err: Callable[[str], None] = _stderr) -> None:
     """run 을 돌리고 끝낸다 — 성공이면 client.log 를 원본으로 emit(지금의 _finish). 실패(어떤 예외든)면 client.log 가 비지 않을 때
     <failed_kind> 호출 디렉터리를 남기고(summary.txt 는 오류 문구) — ObsError 는 같은 종류로 문구 끝에 경로를 붙여 다시 올리고,
     그 외 예외는 err 로 경로 한 줄을 찍은 뒤 그대로 올린다. 보낸 호출이 없으면 디렉터리 없이 예외 그대로."""
     try:
-        ev, kind, window = run()
+        r = run()
     except ObsError as e:
         if not client.log:
             raise
@@ -158,10 +184,10 @@ def finish(client: Client, run: Callable[[], RunResult], failed_kind: str, max_l
         if client.log:
             err("원본: %s" % _spill_failed(client, failed_kind, e, base, at))
         raise
-    _finish(ev, client.log, kind, window, max_lines, as_json, base=base, at=at, out=out)
+    _finish(r.lines(), client.log, r.kind, r.window, max_lines, as_json, base=base, at=at, out=out)
 
 
-def _run_main(client: Callable[[], Client], run: Callable[[Client], RunResult], failed_kind: str, output: OutputArgs,
+def _run_main(client: Callable[[], Client], run: Callable[[Client], Renderable], failed_kind: str, output: OutputArgs,
               env: Mapping[str, str], at: float) -> None:
     """*_main 의 끝 — parse 뒤에 client() 로 Client 하나를 만들어 run 과 finish 가 같이 쓴다. spill 은 env 의 프로젝트 디렉터리에."""
     c = client()
@@ -196,10 +222,6 @@ def main_guard(fn: Callable[[], None]) -> None:
     except ObsError as e:
         print(str(e), file=sys.stderr)
         sys.exit(1)
-
-
-def _evidence(lines: list[str]) -> Evidence[Lines]:
-    return Evidence(value=Lines(lines or ["(결과 없음)"]))
 
 
 # ── promql ───────────────────────────────────────────────────────────────────────
@@ -253,8 +275,8 @@ class PromqlArgs:
     series: str | None = None
 
 
-def promql_run(client: Client, a: PromqlArgs, at: float) -> RunResult:
-    """→ (Evidence, 원본 Response 목록, kind, 창). stdout 을 만지지 않는다."""
+def promql_run(client: Client, a: PromqlArgs, at: float) -> PromqlResult:
+    """→ RunResult(렌더 전 값 · kind · 창 · 렌더러). stdout 을 만지지 않는다."""
     end = parse_time(a.end, at)
     start = end - parse_duration(a.range_) if a.range_ else None
     window = Window(start=start if start is not None else end, end=end)
@@ -264,36 +286,28 @@ def promql_run(client: Client, a: PromqlArgs, at: float) -> RunResult:
         params: Params = {"match[]": match, "start": start, "end": end}
         resp = client.get("metrics", "api/v1/labels", params)
         body = check_status(resp.body, "metrics")
-        lines = sorted(parse_strings(body))
-        kind = "promql-labels"
+        return RunResult(Evidence(sorted(parse_strings(body))), "promql-labels", window, lambda v, w: v)
     elif a.label_values:
         params = {"match[]": match, "start": start, "end": end}
         resp = client.get("metrics", "api/v1/label/%s/values" % a.label_values, params)
         body = check_status(resp.body, "metrics")
-        lines = sorted(parse_strings(body))
-        kind = "promql-label-values"
+        return RunResult(Evidence(sorted(parse_strings(body))), "promql-label-values", window, lambda v, w: v)
     elif a.series:
         params = {"match[]": a.series, "start": start if start is not None else end - 3600, "end": end}
         resp = client.get("metrics", "api/v1/series", params)
         body = check_status(resp.body, "metrics")
-        lines = [labels_str(m) for m in parse_label_sets(body)]
-        kind = "promql-series"
-    elif not match:
+        return RunResult(Evidence(parse_label_sets(body)), "promql-series", window, lambda v, w: [labels_str(m) for m in v])
+    if not match:
         raise ObsError("PromQL 이 필요하다")
-    elif start is not None:
+    if start is not None:
         step = a.step or auto_step(end - start)
         params = {"query": match, "start": start, "end": end, "step": step}
         resp = client.get("metrics", "api/v1/query_range", params)
         body = check_status(resp.body, "metrics")
-        lines = range_lines(parse_metric(body), a.points)
-        kind = "promql-range"
-    else:
-        resp = client.get("metrics", "api/v1/query", {"query": match, "time": end})
-        body = check_status(resp.body, "metrics")
-        lines = instant_lines(parse_metric(body))
-        kind = "promql"
-
-    return _evidence(lines), kind, window
+        return RunResult(Evidence(parse_metric(body)), "promql-range", window, lambda v, w: range_lines(v, a.points))
+    resp = client.get("metrics", "api/v1/query", {"query": match, "time": end})
+    body = check_status(resp.body, "metrics")
+    return RunResult(Evidence(parse_metric(body)), "promql", window, lambda v, w: instant_lines(v))
 
 
 def promql_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: Callable[[], Client]) -> None:
@@ -404,24 +418,24 @@ class MetricsArgs:
     agg: str = DEFAULT_TOP_AGG
 
 
-def metrics_run(client: Client, a: MetricsArgs, at: float) -> RunResult:
-    """→ (Evidence[Lines], 원본, kind, 창). 계산은 obs.metrics 가, 표는 *_lines 가. stdout 을 만지지 않는다.
+def metrics_run(client: Client, a: MetricsArgs, at: float) -> MetricsResult:
+    """→ RunResult(환원 값 · kind · 창 · 렌더러). 계산은 obs.metrics 가, 표는 *_lines 가 — finish 가 부른다. stdout 을 만지지 않는다.
     top 은 창이 없다 — --end 시각 하나(since 는 쓰이지 않는다)."""
     window = Window.last(a.since, a.end, at=at) if a.cmd != "top" else Window(parse_time(a.end, at), parse_time(a.end, at))
     if a.cmd == "summarize":
         ev = summarize(client, a.query, window, a.step)
-        return _evidence(summary_lines(ev.value, window)), "promql-summarize", window
+        return RunResult(ev, "promql-summarize", window, summary_lines)
     if a.cmd == "compare":
         w = window.with_baseline(a.baseline)
         ev_c = compare(client, a.query, w, a.step)
-        return _evidence(compare_lines(ev_c.value, w)), "promql-compare", w
+        return RunResult(ev_c, "promql-compare", w, compare_lines)
     if a.cmd == "top":
         ev_t = top(client, a.query, window, k=a.k, by=a.by.split(","), agg=a.agg)
-        return _evidence(top_lines(ev_t.value, window)), "promql-top", window
+        return RunResult(ev_t, "promql-top", window, top_lines)
     if a.cmd == "red":
         w = window.with_baseline(a.baseline)
         ev_r = red(client, a.service, w)
-        return _evidence(red_lines(ev_r.value, w)), "promql-red", w
+        return RunResult(ev_r, "promql-red", w, red_lines)
     raise ObsError("알 수 없는 명령 %r — %s" % (a.cmd, " · ".join(METRICS_SUBCOMMANDS)))
 
 
@@ -494,36 +508,29 @@ class LogqlArgs:
     series: str | None = None
 
 
-def logql_run(client: Client, a: LogqlArgs, at: float) -> RunResult:
+def logql_run(client: Client, a: LogqlArgs, at: float) -> LogqlResult:
     window = Window.last(a.since, a.end, at=at)
     ns: Params = {"start": int(window.start * 1e9), "end": int(window.end * 1e9)}
 
     if a.labels:
         resp = client.get("logs", "loki/api/v1/labels", ns)
         body = check_status(resp.body, "logs")
-        lines = sorted(parse_strings(body))
-        kind = "logql-labels"
+        return RunResult(Evidence(sorted(parse_strings(body))), "logql-labels", window, lambda v, w: v)
     elif a.label_values:
         resp = client.get("logs", "loki/api/v1/label/%s/values" % a.label_values, ns)
         body = check_status(resp.body, "logs")
-        lines = sorted(parse_strings(body))
-        kind = "logql-label-values"
+        return RunResult(Evidence(sorted(parse_strings(body))), "logql-label-values", window, lambda v, w: v)
     elif a.series:
         resp = client.get("logs", "loki/api/v1/series", {**ns, "match[]": a.series})
         body = check_status(resp.body, "logs")
-        lines = [labels_str(m) for m in parse_label_sets(body)]
-        kind = "logql-series"
-    elif not a.query:
+        return RunResult(Evidence(parse_label_sets(body)), "logql-series", window, lambda v, w: [labels_str(m) for m in v])
+    if not a.query:
         raise ObsError("LogQL 이 필요하다")
-    else:
-        params: Params = {**ns, "query": a.query, "limit": a.limit, "direction": a.direction}
-        resp = client.get("logs", "loki/api/v1/query_range", params)
-        body = check_status(resp.body, "logs")
-        res = parse_logs(body)
-        lines = matrix_lines(res) if res.result_type == "matrix" else stream_lines(res, a.direction, a.width)
-        kind = "logql"
-
-    return _evidence(lines), kind, window
+    params: Params = {**ns, "query": a.query, "limit": a.limit, "direction": a.direction}
+    resp = client.get("logs", "loki/api/v1/query_range", params)
+    body = check_status(resp.body, "logs")
+    return RunResult(Evidence(parse_logs(body)), "logql", window,
+                     lambda v, w: matrix_lines(v) if v.result_type == "matrix" else stream_lines(v, a.direction, a.width))
 
 
 def logql_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: Callable[[], Client]) -> None:
@@ -614,24 +621,24 @@ class LogsArgs:
             raise ObsError("first-seen 은 템플릿이 필요하다")
 
 
-def logs_run(client: Client, a: LogsArgs, at: float) -> RunResult:
-    """→ (Evidence[Lines], 원본, kind, 창). 검사(validate)가 요청 앞이다. 계산은 obs.logs 가, 표는 *_lines 가. stdout 을 만지지 않는다."""
+def logs_run(client: Client, a: LogsArgs, at: float) -> LogsResult:
+    """→ RunResult(환원 값 · kind · 창 · 렌더러). 검사(validate)가 요청 앞이다. 계산은 obs.logs 가, 표는 *_lines 가. stdout 을 만지지 않는다."""
     a.validate()
     window = Window.last(a.since, a.end, at=at)
     if a.cmd == "histogram":
         ev_h = histogram(client, a.selector, window, by=a.by.split(","), step=a.step)
-        return _evidence(histogram_lines(ev_h.value, window)), "logql-histogram", window
+        return RunResult(ev_h, "logql-histogram", window, histogram_lines)
     if a.cmd == "templates":
         ev_t = templates(client, a.selector, window, k=a.k, step=a.step)
-        return _evidence(templates_lines(ev_t.value, window)), "logql-templates", window
+        return RunResult(ev_t, "logql-templates", window, templates_lines)
     if a.cmd == "around":
         ts = parse_time(a.ts, at)
         span = parse_duration(a.span)
         ev_a = around(client, a.selector, ts, span, limit=a.limit)
         w = Window(ts - span, ts + span)
-        return _evidence(around_lines(ev_a.value, w)), "logql-around", w
+        return RunResult(ev_a, "logql-around", w, around_lines)
     ev_f = first_seen(client, a.selector, a.template or "", window)
-    return _evidence(first_seen_lines(ev_f.value, window)), "logql-first-seen", window
+    return RunResult(ev_f, "logql-first-seen", window, first_seen_lines)
 
 
 def logs_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: Callable[[], Client]) -> None:
@@ -698,7 +705,7 @@ class TraceqlArgs:
     top: int = 15
 
 
-def traceql_run(client: Client, a: TraceqlArgs, at: float) -> RunResult:
+def traceql_run(client: Client, a: TraceqlArgs, at: float) -> TraceqlResult:
     window = Window.last(a.since, a.end, at=at)
     w: Params = {"start": int(window.start), "end": int(window.end)}
 
@@ -706,31 +713,25 @@ def traceql_run(client: Client, a: TraceqlArgs, at: float) -> RunResult:
         params: Params = {**w, "limit": a.limit, "q": a.q, "minDuration": a.min_duration}
         resp = client.get("traces", "api/search", params)
         body = check_json(resp.body, "traces")
-        lines = search_lines(parse_search(body))
-        kind = "traceql-search"
-    elif a.cmd == "trace":
+        return RunResult(Evidence(parse_search(body)), "traceql-search", window, lambda v, w: search_lines(v))
+    if a.cmd == "trace":
         if not a.arg:
             raise ObsError("traceID 가 필요하다")
-        resp = client.get("traces", "api/traces/%s" % a.arg)
+        trace_id = a.arg
+        resp = client.get("traces", "api/traces/%s" % trace_id)
         body = check_json(resp.body, "traces")
-        lines = trace_lines(a.arg, parse_spans(body), a.top)
-        kind = "traceql-trace"
-    elif a.cmd == "tags":
+        return RunResult(Evidence(parse_spans(body)), "traceql-trace", window, lambda v, w: trace_lines(trace_id, v, a.top))
+    if a.cmd == "tags":
         resp = client.get("traces", "api/v2/search/tags", {**w, "scope": a.scope})
         body = check_json(resp.body, "traces")
-        lines = tags_lines(parse_tags(body))
-        kind = "traceql-tags"
-    elif a.cmd == "tag-values":
+        return RunResult(Evidence(parse_tags(body)), "traceql-tags", window, lambda v, w: tags_lines(v))
+    if a.cmd == "tag-values":
         if not a.arg:
             raise ObsError("태그 이름이 필요하다")
         resp = client.get("traces", "api/v2/search/tag/%s/values" % a.arg, {**w, "q": a.q})
         body = check_json(resp.body, "traces")
-        lines = sorted(parse_tag_values(body))
-        kind = "traceql-tag-values"
-    else:
-        raise ObsError("알 수 없는 명령 %r — search · trace · tags · tag-values" % a.cmd)
-
-    return _evidence(lines), kind, window
+        return RunResult(Evidence(sorted(parse_tag_values(body))), "traceql-tag-values", window, lambda v, w: v)
+    raise ObsError("알 수 없는 명령 %r — search · trace · tags · tag-values" % a.cmd)
 
 
 def traceql_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: Callable[[], Client]) -> None:
@@ -842,22 +843,22 @@ class TracesArgs:
             raise ObsError("diff 는 traceID 두 개(느린 것 · 정상인 것)가 필요하다")
 
 
-def traces_run(client: Client, a: TracesArgs, at: float) -> RunResult:
-    """→ (Evidence[Lines], 원본, kind, 창). validate 가 요청 앞. 계산은 obs.traces 가, 표는 *_lines 가. stdout 을 만지지 않는다."""
+def traces_run(client: Client, a: TracesArgs, at: float) -> TracesResult:
+    """→ RunResult(환원 값 · kind · 창 · 렌더러). validate 가 요청 앞. 계산은 obs.traces 가, 표는 *_lines 가. stdout 을 만지지 않는다."""
     a.validate()
     window = Window.last(a.since, a.end, at=at)
     kind = "traceql-" + a.cmd
     if a.cmd == "exemplars":
         ev_e = exemplars(client, a.q, window, k=a.k, quantile=a.quantile, baseline_range=a.baseline_range, limit=a.limit)
-        return _evidence(exemplars_lines(ev_e.value, window)), kind, window
+        return RunResult(ev_e, kind, window, exemplars_lines)
     if a.cmd == "critical-path":
         ev_c = critical_path(client, a.trace_id or "", window)
-        return _evidence(critical_path_lines(ev_c.value, window)), kind, window
+        return RunResult(ev_c, kind, window, critical_path_lines)
     if a.cmd == "service-graph":
         ev_g = service_graph(client, window, quantile=a.quantile, baseline_range=a.baseline_range)
-        return _evidence(service_graph_lines(ev_g.value, window)), kind, window
+        return RunResult(ev_g, kind, window, service_graph_lines)
     ev_d = diff(client, a.slow_id or "", a.normal_id or "", window)
-    return _evidence(diff_lines(ev_d.value, window)), kind, window
+    return RunResult(ev_d, kind, window, diff_lines)
 
 
 def traces_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: Callable[[], Client]) -> None:

@@ -293,3 +293,29 @@ def test_main_stdout_follows_max_lines_and_json(option: list[str], shown: int, t
     assert summary[0].startswith("# 창")
     assert summary[1] == ""
     assert len(summary[2:]) == 3
+
+
+# ── (결과 없음) — 빈 결과의 한 줄은 finish 가 붙인다 ─────────────────────────────────
+
+EMPTY_LOOKUPS: list[tuple[str, MainFn, list[str], RouteKey]] = [
+    ("promql-labels", cli.promql_main, ["--labels"], ("metrics", "api/v1/labels")),
+    ("logql-series", cli.logql_main, ["--series", '{a="b"}'], ("logs", "loki/api/v1/series")),
+]
+
+
+@pytest.mark.parametrize("main,argv,route", [c[1:] for c in EMPTY_LOOKUPS], ids=[c[0] for c in EMPTY_LOOKUPS])
+def test_main_prints_no_result_marker_for_empty_lookup(main: MainFn, argv: list[str], route: RouteKey, run_main: MainRunner, base_env: dict[str, str],
+                                                       make_client: ClientFactory, capsys: pytest.CaptureFixture[str]) -> None:
+    """빈 결과의 조회는 stdout 첫 줄이 (결과 없음) 이고 그다음이 경로 한 줄뿐이며, summary.txt 도 창 머리 뒤 (결과 없음) 한 줄이다."""
+    # given — 빈 목록을 주는 라우트 · base_env
+    client, _ = make_client({route: (200, EMPTY_LABELS)})
+    # when
+    run_main(main, argv, client)
+    # then
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == "(결과 없음)"
+    assert out[1].startswith("원본·요약:")
+    assert len(out) == 2
+    summary = next(spill_root(base_env).glob("*/summary.txt")).read_text(encoding="utf-8").splitlines()
+    assert summary[0].startswith("# 창")
+    assert summary[1:] == ["", "(결과 없음)"]

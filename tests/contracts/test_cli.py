@@ -10,7 +10,7 @@ from typing import Callable
 import pytest
 
 from obs.adapters import cli
-from obs.core import JSON, BudgetExceeded, Client, Config, Evidence, Lines, ObsError, Response, Window, json_list
+from obs.core import JSON, BudgetExceeded, Client, Config, Evidence, ObsError, Response, Window, json_list
 from tests.conftest import AT, HOUR, MINUTE, ClientFactory, MainFn, MainRunner, RouteKey, _no_physical, _vector, no_client
 from tests.record import strip_physical
 
@@ -45,13 +45,6 @@ def test_rejected_response_stays_in_log(make_client: ClientFactory) -> None:
     assert len(client.log) == 1
     assert client.log[0].status == 200
     assert client.log[0].body == body
-
-
-def test_traceql_search_empty_hints_wider_window(make_client: ClientFactory) -> None:
-    """search 결과가 비면 창을 넓히라는 힌트 한 줄을 낸다."""
-    client, _ = make_client({("traces", "api/search"): (200, {"traces": []})})
-    ev, _, _ = cli.traceql_run(client, cli.TraceqlArgs(cmd="search"), at=AT)
-    assert ev.value.lines == ["(결과 없음 — 트레이스는 드물다. 창을 넓혀 다시: --since 24h · 7d)"]
 
 
 def test_traceql_trace_requires_id(make_client: ClientFactory) -> None:
@@ -127,14 +120,14 @@ def test_emit_names_call_directory_by_at(tmp_path: Path) -> None:
 FINISH_ROUTES: dict[RouteKey, tuple[int, object]] = {("metrics", "api/v1/labels"): (200, {"data": []}), ("metrics", "api/v1/series"): (200, {"data": []})}
 
 
-def _run_after(client: Client, calls: int, raise_: BaseException | None = None) -> Callable[[], cli.RunResult]:
-    """호출 calls 개(labels · series 순)를 보낸 뒤 raise_ 를 올리거나 요약 하나를 돌려주는 run 대역."""
-    def run() -> cli.RunResult:
+def _run_after(client: Client, calls: int, raise_: BaseException | None = None) -> Callable[[], cli.RunResult[list[str]]]:
+    """호출 calls 개(labels · series 순)를 보낸 뒤 raise_ 를 올리거나 요약 하나(줄 목록을 그대로 렌더)를 돌려주는 run 대역."""
+    def run() -> cli.RunResult[list[str]]:
         for path in ("api/v1/labels", "api/v1/series")[:calls]:
             client.get("metrics", path)
         if raise_ is not None:
             raise raise_
-        return Evidence(value=Lines(["x"])), "k", Window(AT - MINUTE, AT)
+        return cli.RunResult(Evidence(["x"]), "k", Window(AT - MINUTE, AT), lambda v, w: v)
     return run
 
 
@@ -377,9 +370,8 @@ def test_finish_writes_window_preamble_then_lines(tmp_path: Path, capsys: pytest
     """_finish 의 summary.txt 는 window_preamble(창) 뒤에 요약 줄이고, stdout 에는 요약 줄만 — `# ` 머리 줄이 없다."""
     # given — 기준선이 달린 창 · 요약 줄 둘 · spill 은 tmp
     w = Window(AT - HOUR, AT).with_baseline("1d")
-    ev = Evidence(value=Lines(["a 1", "b 2"]))
     # when
-    cli._finish(ev, [], "k", w, 40, False, base=tmp_path, at=AT)  # pyright: ignore[reportPrivateUsage]
+    cli._finish(["a 1", "b 2"], [], "k", w, 40, False, base=tmp_path, at=AT)  # pyright: ignore[reportPrivateUsage]
     # then
     assert _summary_text(tmp_path).splitlines() == [*cli.window_preamble(w), "a 1", "b 2"]
     out = capsys.readouterr().out.splitlines()
@@ -472,31 +464,16 @@ def test_main_dispatches_subcommand_to_its_run(main: MainFn, argv: list[str], ro
 def test_promql_range_window_and_auto_step(make_client: ClientFactory) -> None:
     """--range 는 창 길이를 계산하고 step 을 자동(range/60, 최소 15s)으로 붙여 query_range 를 부른다."""
     client, t = make_client({("metrics", "api/v1/query_range"): (200, EMPTY_MATRIX)})
-    _, kind, _ = cli.promql_run(client, cli.PromqlArgs(query="sum(up)", range_="30m"), at=AT)
-    assert kind == "promql-range"
+    r = cli.promql_run(client, cli.PromqlArgs(query="sum(up)", range_="30m"), at=AT)
+    assert r.kind == "promql-range"
     assert "step=30s" in t.calls[0].url
     assert "start=%s" % (AT - 30 * MINUTE) in t.calls[0].url
-
-
-def test_logql_width_clips_log_body(make_client: ClientFactory) -> None:
-    """--width 는 로그 본문을 지정 폭에서 자른다."""
-    client, _ = make_client({("logs", "loki/api/v1/query_range"): (200, STREAMS)})
-    ev, _, _ = cli.logql_run(client, cli.LogqlArgs(query='{namespace="n"}', width=60), at=AT)
-    assert all(len(l.split("  ", 2)[-1]) <= 60 for l in ev.value.lines[1:])
-
-
-def test_logql_common_labels_go_to_the_header(make_client: ClientFactory) -> None:
-    """스트림 출력의 첫 줄은 공통 레이블이고 그 뒤가 로그 줄이다 — 줄 수는 값 수 + 1."""
-    client, _ = make_client({("logs", "loki/api/v1/query_range"): (200, STREAMS)})
-    ev, _, _ = cli.logql_run(client, cli.LogqlArgs(query='{namespace="n"}'), at=AT)
-    assert ev.value.lines[0].startswith("공통 레이블 {")
-    assert len(ev.value.lines) == 3
 
 
 EMPTY_STREAMS: dict[str, JSON] = {"status": "success", "data": {"resultType": "streams", "result": []}}
 EMPTY_PATTERNS: dict[str, JSON] = {"status": "success", "data": []}
 
-WINDOW_RUNS: list[tuple[str, Callable[[Client], cli.RunResult], dict[RouteKey, tuple[int, object]]]] = [
+WINDOW_RUNS: list[tuple[str, Callable[[Client], cli.Renderable], dict[RouteKey, tuple[int, object]]]] = [
     ("promql-range", lambda c: cli.promql_run(c, cli.PromqlArgs(query="up", range_="30m", end="-10m"), at=AT),
      {("metrics", "api/v1/query_range"): (200, EMPTY_MATRIX)}),
     ("logql", lambda c: cli.logql_run(c, cli.LogqlArgs(query='{a="b"}', since="30m", end="-10m"), at=AT),
@@ -517,25 +494,25 @@ WINDOW_RUNS: list[tuple[str, Callable[[Client], cli.RunResult], dict[RouteKey, t
 
 
 @pytest.mark.parametrize("run,routes", [(r, rt) for _, r, rt in WINDOW_RUNS], ids=[name for name, _, _ in WINDOW_RUNS])
-def test_run_window_is_cli_window(make_client: ClientFactory, run: Callable[[Client], cli.RunResult],
+def test_run_window_is_cli_window(make_client: ClientFactory, run: Callable[[Client], cli.Renderable],
                                   routes: dict[RouteKey, tuple[int, object]]) -> None:
-    """창 인자(--since · --range · --end)를 받는 명령의 RunResult 셋째 자리는 그 인자로 계산한 창이다 — 기준선이 없다."""
+    """창 인자(--since · --range · --end)를 받는 명령의 RunResult 의 window 는 그 인자로 계산한 창이다 — 기준선이 없다."""
     # given — 빈 응답
     client, _ = make_client(routes)
     # when
-    _, _, window = run(client)
+    window = run(client).window
     # then
     assert window == Window.last("30m", "-10m", at=AT)
 
 
 def _lines_of(client: Client, backend: str) -> list[str]:
     if backend == "promql":
-        return cli.promql_run(client, cli.PromqlArgs(query="up"), at=AT)[0].value.lines
+        return cli.promql_run(client, cli.PromqlArgs(query="up"), at=AT).lines()
     if backend == "logql":
-        return cli.logql_run(client, cli.LogqlArgs(query='{namespace="n"}'), at=AT)[0].value.lines
+        return cli.logql_run(client, cli.LogqlArgs(query='{namespace="n"}'), at=AT).lines()
     if backend == "traceql":
-        return cli.traceql_run(client, cli.TraceqlArgs(cmd="search"), at=AT)[0].value.lines
-    return cli.metrics_run(client, cli.MetricsArgs(cmd="summarize", query="up"), at=AT)[0].value.lines
+        return cli.traceql_run(client, cli.TraceqlArgs(cmd="search"), at=AT).lines()
+    return cli.metrics_run(client, cli.MetricsArgs(cmd="summarize", query="up"), at=AT).lines()
 
 
 @pytest.mark.parametrize("backend", ["promql", "logql", "traceql", "metrics"])
@@ -576,3 +553,41 @@ def test_error_reason_falls_back_to_attrs() -> None:
     assert cli.error_reason(_span("", {"error.message": "e", "http.status_code": "500"})) == "e"
     assert cli.error_reason(_span("", {"http.status_code": "500"})) == "500"
     assert cli.error_reason(_span("")) == ""
+
+
+# ── RunResult — 값 · 렌더러 · 줄 ───────────────────────────────────────────────────
+
+def test_run_result_lines_are_render_output_without_marker() -> None:
+    """RunResult.lines() 는 render(evidence.value, window) 그대로다 — 렌더러가 빈 목록을 내면 빈 목록이고 "(결과 없음)" 을 붙이지 않는다(그 규칙은 finish 의 것)."""
+    # given — 빈 목록을 내는 렌더러 · 값을 그대로 내는 렌더러
+    w = Window(AT - MINUTE, AT)
+    empty: cli.RunResult[list[str]] = cli.RunResult(Evidence([]), "k", w, lambda v, w: [])
+    same: cli.RunResult[list[str]] = cli.RunResult(Evidence(["a", "b"]), "k", w, lambda v, w: v)
+    # when · then
+    assert empty.lines() == []
+    assert same.lines() == ["a", "b"]
+
+
+def test_search_lines_empty_hints_wider_window() -> None:
+    """빈 hit 목록의 search_lines 는 창을 넓히라는 힌트 한 줄이다 — 빈 목록이 아니다."""
+    # given — hit 없음
+    hits: list[cli.TraceHit] = []
+    # when
+    lines = cli.search_lines(hits)
+    # then
+    assert len(lines) == 1
+    assert lines[0].startswith("(결과 없음 — 트레이스는 드물다")
+    assert "--since 24h" in lines[0]
+
+
+def test_stream_lines_width_clips_and_leads_with_common_labels() -> None:
+    """스트림 출력은 공통 레이블 한 줄 뒤에 값 수만큼의 로그 줄이고, width 는 각 줄의 본문을 그 폭에서 자른다."""
+    # given — 100자 본문과 짧은 본문을 가진 스트림 하나(STREAMS) · 폭 60
+    res = cli.parse_logs(STREAMS)
+    # when
+    lines = cli.stream_lines(res, "backward", 60)
+    # then
+    assert lines[0].startswith("공통 레이블 {")
+    assert len(lines) == 1 + sum(len(st.values) for st in res.streams)
+    for line in lines[1:]:
+        assert len(line.split("  ", 2)[-1]) <= 60
