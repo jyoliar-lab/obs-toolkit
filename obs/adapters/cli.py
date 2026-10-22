@@ -21,8 +21,11 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Mapping, Sequence, TypeAlias
+from typing import TYPE_CHECKING, Callable, Mapping, Sequence, TypeAlias, TypeVar
 
+from obs.adapters.cli_argparse import (
+    DEFAULT_LOG_LIMIT, DEFAULT_MAX_LINES, DEFAULT_SINCE, LOGS_SUBCOMMANDS, METRICS_SUBCOMMANDS, TRACES_SUBCOMMANDS,
+)
 from obs.core import (
     JSON, Client, DoctorReport, Evidence, Lines, ObsError, Params, Response, Transport, Window, doctor, fmt_ts, load_config,
     SPILL_RAW, SPILL_SUMMARY, json_labels, json_list, json_strs,
@@ -40,9 +43,6 @@ from obs.traces import (
     DEFAULT_BASELINE_RANGE, DEFAULT_EXEMPLARS_K, DEFAULT_QUANTILE, DEFAULT_SEARCH_LIMIT, CriticalPath, Edge, Exemplars, ServiceGraph, Span, SpanTime, TagScope,
     TraceDiff, TraceHit, check_json, critical_path, diff, exemplars, parse_search, parse_spans, parse_tag_values, parse_tags, service_graph,
 )
-
-DEFAULT_MAX_LINES: int = 40
-DEFAULT_LOG_LIMIT: int = 30
 
 RunResult: TypeAlias = "tuple[Evidence[Lines], str, Window]"   # 원본 자리 없음 — 보낸 호출의 기록은 Client.log
 """(근거, spill 종류 이름, CLI 가 인자로 계산한 창)"""
@@ -160,11 +160,11 @@ def finish(client: Client, run: Callable[[], RunResult], failed_kind: str, max_l
     _finish(ev, client.log, kind, window, max_lines, as_json, base=base, at=at, out=out)
 
 
-def _run_main(client: Callable[[], Client], run: Callable[[Client], RunResult], failed_kind: str, max_lines: int, as_json: bool,
+def _run_main(client: Callable[[], Client], run: Callable[[Client], RunResult], failed_kind: str, output: OutputArgs,
               env: Mapping[str, str], at: float) -> None:
     """*_main 의 끝 — parse 뒤에 client() 로 Client 하나를 만들어 run 과 finish 가 같이 쓴다. spill 은 env 의 프로젝트 디렉터리에."""
     c = client()
-    finish(c, lambda: run(c), failed_kind, max_lines, as_json, base=project_dir(env), at=at)
+    finish(c, lambda: run(c), failed_kind, output.max_lines, output.as_json, base=project_dir(env), at=at)
 
 
 def _common(ap: argparse.ArgumentParser) -> None:
@@ -172,6 +172,26 @@ def _common(ap: argparse.ArgumentParser) -> None:
                     help="stdout 줄 수 상한. 기본 %d — 나머지는 호출 디렉터리의 summary.txt 에" % DEFAULT_MAX_LINES)
     ap.add_argument("--json", action="store_true", help="stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 성공 · 실패 모두 남는다)")
 
+
+
+@dataclass(frozen=True)
+class OutputArgs:
+    """--max-lines · --json — 여섯 명령이 공유하는 stdout 절제 옵션. 기본값은 여기 한 곳."""
+    max_lines: int = DEFAULT_MAX_LINES      # stdout 줄 상한
+    as_json: bool = False                   # True = 요약 대신 호출 디렉터리 경로만
+
+
+if TYPE_CHECKING:
+    from _typeshed import DataclassInstance      # 타입 검사 때만 — "__dataclass_fields__ 가 있는 것" 의 Protocol
+
+Args = TypeVar("Args", bound="DataclassInstance")
+"""map_args 의 대상 — 어느 dataclass 든. 넣은 클래스가 그대로 반환 타입이다."""
+
+
+def map_args(cls: type[Args], ns: argparse.Namespace) -> Args:
+    """Namespace 에 있는 cls 의 필드만 모아 cls(**…) — 없는 옵션은 dataclass 의 기본값. 순수 함수: Client · 요청 · env 없음.
+    Namespace 의 cls 밖 속성은 무시한다. 기본값 없는 필드가 없으면 TypeError — 파서가 필수로 막으므로 CLI 경로에서는 닿지 않는다."""
+    raise NotImplementedError("map_args")
 
 
 def main_guard(fn: Callable[[], None]) -> None:
@@ -332,12 +352,10 @@ def promql_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: 
     a = ap.parse_args(argv)
     args = PromqlArgs(query=a.query, end=a.end, range_=a.range_, step=a.step, points=a.points,
                       labels=a.labels, label_values=a.label_values, series=a.series)
-    _run_main(client, lambda c: promql_run(c, args, at), "promql-failed", a.max_lines, a.json, env, at)
+    _run_main(client, lambda c: promql_run(c, args, at), "promql-failed", OutputArgs(max_lines=a.max_lines, as_json=a.json), env, at)
 
 
 # ── 환원 연산 — promql.py 의 서브커맨드 (계산은 obs.metrics, 표는 여기) ─────────────────
-
-METRICS_SUBCOMMANDS: tuple[str, ...] = ("summarize", "compare", "top", "red")
 
 METRICS_COMMON_DOC = """계산은 백엔드가 한다 — 코어는 질의를 조립해 결과만 받는다(연산당 질의 1회). 창(compare 는 기준선도)은 호출 디렉터리의
 summary.txt 머리에 남는다. stdout 은 요약이고 --max-lines 에서 잘린다. --json 은 경로만.
@@ -467,7 +485,7 @@ class MetricsArgs:
     cmd: str                    # summarize · compare · top · red
     query: str = ""             # summarize · compare · top 의 PromQL
     service: str = ""           # red 의 서비스 이름
-    since: str = "1h"
+    since: str = DEFAULT_SINCE
     end: str | None = None
     step: str | None = None
     baseline: str = DEFAULT_BASELINE
@@ -534,7 +552,7 @@ def metrics_main(argv: Sequence[str], env: Mapping[str, str], at: float, client:
     args = MetricsArgs(cmd=a.cmd, query=getattr(a, "query", ""), service=getattr(a, "service", ""), since=getattr(a, "since", "1h"), end=a.end, step=getattr(a, "step", None),
                        baseline=getattr(a, "baseline", DEFAULT_BASELINE), k=getattr(a, "k", DEFAULT_TOP_K),
                        by=getattr(a, "by", "pod"), agg=getattr(a, "agg", DEFAULT_TOP_AGG))
-    _run_main(client, lambda c: metrics_run(c, args, at), "promql-%s-failed" % a.cmd, a.max_lines, a.json, env, at)
+    _run_main(client, lambda c: metrics_run(c, args, at), "promql-%s-failed" % a.cmd, OutputArgs(max_lines=a.max_lines, as_json=a.json), env, at)
 
 
 # ── logql ────────────────────────────────────────────────────────────────────────
@@ -619,7 +637,7 @@ def matrix_lines(res: LogResult) -> list[str]:
 @dataclass
 class LogqlArgs:
     query: str | None = None
-    since: str = "1h"
+    since: str = DEFAULT_SINCE
     end: str | None = None
     limit: int = DEFAULT_LOG_LIMIT
     direction: str = "backward"
@@ -680,12 +698,10 @@ def logql_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: C
     a = ap.parse_args(argv)
     args = LogqlArgs(query=a.query, since=a.since, end=a.end, limit=a.limit, direction=a.direction,
                      width=a.width, labels=a.labels, label_values=a.label_values, series=a.series)
-    _run_main(client, lambda c: logql_run(c, args, at), "logql-failed", a.max_lines, a.json, env, at)
+    _run_main(client, lambda c: logql_run(c, args, at), "logql-failed", OutputArgs(max_lines=a.max_lines, as_json=a.json), env, at)
 
 
 # ── 환원 연산 — logql.py 의 서브커맨드 (계산은 obs.logs, 표는 여기) ────────────────────
-
-LOGS_SUBCOMMANDS: tuple[str, ...] = ("histogram", "templates", "around", "first-seen")
 
 
 def histogram_lines(value: Histogram, window: Window) -> list[str]:
@@ -744,7 +760,7 @@ def first_seen_lines(value: FirstSeen, window: Window) -> list[str]:
 class LogsArgs:
     cmd: str                    # histogram · templates · around · first-seen
     selector: str
-    since: str = "1h"
+    since: str = DEFAULT_SINCE
     end: str | None = None
     by: str = "detected_level"          # histogram
     step: str | None = None             # histogram · templates
@@ -853,7 +869,7 @@ def logs_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: Ca
                     by=getattr(a, "by", "detected_level"), step=getattr(a, "step", None), k=getattr(a, "k", DEFAULT_TEMPLATES_K),
                     ts=getattr(a, "ts", None), span=getattr(a, "span", DEFAULT_AROUND_SPAN), limit=getattr(a, "limit", DEFAULT_AROUND_LIMIT),
                     template=getattr(a, "template", None))
-    _run_main(client, lambda c: logs_run(c, args, at), "logql-%s-failed" % a.cmd, a.max_lines, a.json, env, at)
+    _run_main(client, lambda c: logs_run(c, args, at), "logql-%s-failed" % a.cmd, OutputArgs(max_lines=a.max_lines, as_json=a.json), env, at)
 
 
 # ── traceql ──────────────────────────────────────────────────────────────────────
@@ -934,7 +950,7 @@ class TraceqlArgs:
     cmd: str
     arg: str | None = None
     q: str | None = None
-    since: str = "1h"
+    since: str = DEFAULT_SINCE
     end: str | None = None
     limit: int = 20
     min_duration: str | None = None
@@ -996,12 +1012,10 @@ def traceql_main(argv: Sequence[str], env: Mapping[str, str], at: float, client:
     a = ap.parse_args(argv)
     args = TraceqlArgs(cmd=a.cmd, arg=a.arg, q=a.q, since=a.since, end=a.end, limit=a.limit,
                        min_duration=a.min_duration, scope=a.scope, top=a.top)
-    _run_main(client, lambda c: traceql_run(c, args, at), "traceql-failed", a.max_lines, a.json, env, at)
+    _run_main(client, lambda c: traceql_run(c, args, at), "traceql-failed", OutputArgs(max_lines=a.max_lines, as_json=a.json), env, at)
 
 
 # ── 환원 연산 — traceql.py 의 서브커맨드 (계산은 obs.traces, 표는 여기) ─────────────────
-
-TRACES_SUBCOMMANDS: tuple[str, ...] = ("exemplars", "critical-path", "service-graph", "diff")
 
 
 def exemplars_lines(value: Exemplars, window: Window) -> list[str]:
@@ -1119,7 +1133,7 @@ DIFF_DOC = """traceql.py diff <느린 traceID> <정상 traceID>
 class TracesArgs:
     cmd: str                                 # exemplars · critical-path · service-graph · diff
     q: str = ""                              # exemplars 의 조건식(중괄호 없이)
-    since: str = "1h"
+    since: str = DEFAULT_SINCE
     end: str | None = None
     k: int = DEFAULT_EXEMPLARS_K             # exemplars
     quantile: float = DEFAULT_QUANTILE       # exemplars · service-graph
@@ -1196,7 +1210,7 @@ def traces_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: 
                       k=getattr(a, "k", DEFAULT_EXEMPLARS_K), quantile=getattr(a, "quantile", DEFAULT_QUANTILE),
                       baseline_range=getattr(a, "baseline_range", DEFAULT_BASELINE_RANGE), limit=getattr(a, "limit", DEFAULT_SEARCH_LIMIT),
                       trace_id=getattr(a, "trace_id", None), slow_id=getattr(a, "slow_id", None), normal_id=getattr(a, "normal_id", None))
-    _run_main(client, lambda c: traces_run(c, args, at), "traceql-%s-failed" % a.cmd, a.max_lines, a.json, env, at)
+    _run_main(client, lambda c: traces_run(c, args, at), "traceql-%s-failed" % a.cmd, OutputArgs(max_lines=a.max_lines, as_json=a.json), env, at)
 
 
 # ── obs-doctor.py — 사람용. 물리가 보이는 유일한 출력 ───────────────────────────────

@@ -10,8 +10,9 @@ from pathlib import Path
 import pytest
 
 from obs.adapters import cli
-from obs.core import JSON, ObsError, json_list, json_obj, spill_root
-from tests.conftest import AT, ClientFactory, MainFn, MainRunner, RouteKey, _vector
+from obs.core import JSON, ObsError, Window, json_list, json_obj, spill_root
+from obs.metrics import DEFAULT_TOP_AGG, DEFAULT_TOP_K
+from tests.conftest import AT, ClientFactory, Config, MainFn, MainRunner, RouteKey, _vector
 from tests.record import strip_physical
 
 
@@ -193,3 +194,102 @@ def test_main_call_directory_named_by_at(run_main: MainRunner, base_env: dict[st
     run_main(cli.promql_main, ["up"], client)
     # then
     assert [p.name for p in spill_root(base_env).iterdir()] == ["19700102T034640.000000Z-promql"]
+
+
+# ── 옵션 → 요청 — 종류마다 대표 하나. 매핑 · 선언이 어디 있든 요청은 같아야 한다 ────────────
+
+EMPTY_LABELS: dict[str, JSON] = {"status": "success", "data": []}
+EMPTY_STREAMS: dict[str, JSON] = {"status": "success", "data": {"resultType": "streams", "result": []}}
+EMPTY_PATTERNS: dict[str, JSON] = {"status": "success", "data": []}
+
+OPTION_CASES: list[tuple[str, MainFn, list[str], dict[RouteKey, tuple[int, object]], RouteKey, dict[str, str], list[str]]] = [
+    # (옵션 종류, main, 그 종류를 명시한 argv, 라우트, 첫 요청의 (backend, path), 요청에 그대로 있어야 하는 파라미터, query 파라미터에 들어 있어야 하는 조각)
+    ("positional", cli.promql_main, ["up"], {("metrics", "api/v1/query"): (200, _vector())}, ("metrics", "api/v1/query"), {"query": "up"}, []),
+    ("flag", cli.promql_main, ["up", "--labels"], {("metrics", "api/v1/labels"): (200, EMPTY_LABELS)}, ("metrics", "api/v1/labels"), {"match[]": "up"}, []),
+    ("valued", cli.logql_main, ['{a="b"}', "--limit", "7", "--direction", "forward"], {("logs", "loki/api/v1/query_range"): (200, EMPTY_STREAMS)},
+     ("logs", "loki/api/v1/query_range"), {"limit": "7", "direction": "forward"}, []),
+    ("subcommand-valued", cli.promql_main, ["top", "up", "--by", "ns", "--k", "3"], {("metrics", "api/v1/query"): (200, _vector())},
+     ("metrics", "api/v1/query"), {}, ["topk(3,", "by (ns)"]),
+]
+
+
+def _first_request(t_calls_url: str, config: Config) -> tuple[RouteKey, dict[str, str]]:
+    """나간 첫 요청의 (backend, path) 와 문자열 파라미터."""
+    rq = strip_physical(t_calls_url, config, None)
+    return (rq.backend, rq.path), {k: str(v) for k, v in rq.params.items()}
+
+
+@pytest.mark.parametrize("main,argv,routes,route,expected,fragments", [c[1:] for c in OPTION_CASES], ids=[c[0] for c in OPTION_CASES])
+def test_main_option_reaches_request(main: MainFn, argv: list[str], routes: dict[RouteKey, tuple[int, object]], route: RouteKey,
+                                     expected: dict[str, str], fragments: list[str], run_main: MainRunner, make_client: ClientFactory,
+                                     config: Config) -> None:
+    """명시한 옵션(위치 인자 · 플래그 · 값 있는 옵션 · 서브커맨드의 값 있는 옵션)의 효과가 나간 요청의 경로 · 파라미터에 있다."""
+    # given — 그 종류의 옵션을 명시한 argv · 첫 요청 경로에 빈 응답
+    client, t = make_client(routes)
+    # when
+    run_main(main, argv, client)
+    # then
+    got_route, params = _first_request(t.calls[0].url, config)
+    assert got_route == route
+    assert {k: v for k, v in params.items() if k in expected} == expected
+    for fragment in fragments:
+        assert fragment in params["query"]
+
+
+DEFAULT_WINDOW: Window = Window.last(cli.DEFAULT_SINCE, None, at=AT)
+
+OMITTED_CASES: list[tuple[str, MainFn, list[str], dict[RouteKey, tuple[int, object]], dict[str, str], list[str]]] = [
+    # (옵션 종류, main, 그 종류를 생략한 argv, 라우트, 요청에 있어야 하는 기본값 파라미터, query 파라미터의 기본값 조각)
+    ("valued", cli.logql_main, ['{a="b"}'], {("logs", "loki/api/v1/query_range"): (200, EMPTY_STREAMS)},
+     {"limit": str(cli.DEFAULT_LOG_LIMIT), "direction": "backward"}, []),
+    ("subcommand-valued", cli.promql_main, ["top", "up"], {("metrics", "api/v1/query"): (200, _vector())},
+     {}, ["topk(%d," % DEFAULT_TOP_K, "%s by (pod)" % DEFAULT_TOP_AGG]),
+    ("common", cli.logql_main, ["templates", '{a="b"}'], {("logs", "loki/api/v1/patterns"): (200, EMPTY_PATTERNS)},
+     {"start": str(int(DEFAULT_WINDOW.start * 1e9)), "end": str(int(DEFAULT_WINDOW.end * 1e9))}, []),
+]
+
+
+@pytest.mark.parametrize("main,argv,routes,expected,fragments", [c[1:] for c in OMITTED_CASES], ids=[c[0] for c in OMITTED_CASES])
+def test_main_omitted_option_uses_default(main: MainFn, argv: list[str], routes: dict[RouteKey, tuple[int, object]], expected: dict[str, str],
+                                          fragments: list[str], run_main: MainRunner, make_client: ClientFactory, config: Config) -> None:
+    """생략한 옵션(값 있는 옵션 · 서브커맨드의 값 있는 옵션 · 서브커맨드 공통 옵션)은 요청에 그 기본값으로 나타난다 — limit 30 · backward · k 10 · pod · sum · 1h 창."""
+    # given — 그 종류의 옵션을 생략한 argv · 첫 요청 경로에 빈 응답 · at 은 AT
+    client, t = make_client(routes)
+    # when
+    run_main(main, argv, client)
+    # then
+    _, params = _first_request(t.calls[0].url, config)
+    assert {k: v for k, v in params.items() if k in expected} == expected
+    for fragment in fragments:
+        assert fragment in params["query"]
+
+
+def test_main_omitted_query_is_rejected_before_request(run_main: MainRunner, make_client: ClientFactory) -> None:
+    """위치 인자(PromQL)를 생략한 promql.py 는 요청 없이 ObsError 다 — nargs="?" 의 생략이 query=None 으로 *_run 에 닿아 거기서 거부된다(argparse 의 exit 2 가 아니다)."""
+    # given — 라우트 없는 fake transport · 빈 argv
+    client, t = make_client()
+    # when · then
+    with pytest.raises(ObsError, match="PromQL 이 필요하다"):
+        run_main(cli.promql_main, [], client)
+    assert t.calls == []
+
+
+THREE_SERIES: dict[str, JSON] = _vector(({"pod": "a"}, "1"), ({"pod": "b"}, "2"), ({"pod": "c"}, "3"))
+
+
+@pytest.mark.parametrize("option,shown,tail", [(["--max-lines", "1"], 1, "… 2줄 더 있음"), (["--json"], 0, "원본·요약:")], ids=["max-lines", "json"])
+def test_main_stdout_follows_max_lines_and_json(option: list[str], shown: int, tail: str, run_main: MainRunner, base_env: dict[str, str],
+                                                make_client: ClientFactory, capsys: pytest.CaptureFixture[str]) -> None:
+    """--max-lines 1 이면 stdout 은 요약 1줄 + "… 2줄 더 있음" 안내, --json 이면 경로 한 줄뿐이다 — 어느 쪽이든 summary.txt 에는 창 머리 뒤 3줄 전부가 있다."""
+    # given — 시계열 셋의 즉시 조회 응답 · base_env
+    client, _ = make_client({("metrics", "api/v1/query"): (200, THREE_SERIES)})
+    # when
+    run_main(cli.promql_main, ["up", *option], client)
+    # then
+    out = capsys.readouterr().out.splitlines()
+    assert len(out) == shown + 1
+    assert out[-1].startswith(tail)
+    summary = next(spill_root(base_env).glob("*/summary.txt")).read_text(encoding="utf-8").splitlines()
+    assert summary[0].startswith("# 창")
+    assert summary[1] == ""
+    assert len(summary[2:]) == 3
