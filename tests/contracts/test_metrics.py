@@ -598,7 +598,7 @@ def test_metrics_run_dispatches_by_subcommand(make_client: ClientFactory) -> Non
         assert got == kind
         assert isinstance(ev.value, Lines)
     _, _, window = cli.metrics_run(client, cli.MetricsArgs(cmd="red", service="svc", since="1h", baseline="prev"), at=AT)
-    assert window == Window.last("1h", None, AT).with_baseline("prev")
+    assert window == Window.last("1h", None, at=AT).with_baseline("prev")
     with pytest.raises(ObsError):
         cli.metrics_run(client, cli.MetricsArgs(cmd="nope", query="x"), at=AT)
 
@@ -610,7 +610,7 @@ def test_metrics_run_compare_window_has_baseline(make_client: ClientFactory) -> 
     # when
     _, _, window = cli.metrics_run(client, cli.MetricsArgs(cmd="compare", query="up", since="1h", baseline="prev"), at=AT)
     # then
-    assert window == Window.last("1h", None, AT).with_baseline("prev")
+    assert window == Window.last("1h", None, at=AT).with_baseline("prev")
     assert window.baseline is not None
 
 

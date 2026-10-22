@@ -20,7 +20,7 @@ def test_promql_requires_query(make_client: ClientFactory) -> None:
     """질의 없는 즉시 조회는 *_run 이 질의 전에 ObsError 로 거부한다 — argparse 가 아니라서 MCP 경로에서도 같은 검사가 산다."""
     client, t = make_client()
     with pytest.raises(cli.ObsError, match="PromQL 이 필요하다"):
-        cli.promql_run(client, cli.PromqlArgs())
+        cli.promql_run(client, cli.PromqlArgs(), at=AT)
     assert t.calls == []
 
 
@@ -28,7 +28,7 @@ def test_promql_backend_error_status(make_client: ClientFactory) -> None:
     """HTTP 200 이어도 본문이 `status: error` 면 논리 이름 · errorType · 메시지로 ObsError 다."""
     client, _ = make_client({("metrics", "api/v1/query"): (200, {"status": "error", "errorType": "bad_data", "error": "boom"})})
     with pytest.raises(cli.ObsError) as ei:
-        cli.promql_run(client, cli.PromqlArgs(query="up"))
+        cli.promql_run(client, cli.PromqlArgs(query="up"), at=AT)
     assert str(ei.value).startswith("metrics 백엔드 질의 오류(bad_data): boom")
 
 
@@ -39,7 +39,7 @@ def test_rejected_response_stays_in_log(make_client: ClientFactory) -> None:
     client, _ = make_client({("metrics", "api/v1/query"): (200, body)})
     # when
     with pytest.raises(cli.ObsError):
-        cli.promql_run(client, cli.PromqlArgs(query="up"))
+        cli.promql_run(client, cli.PromqlArgs(query="up"), at=AT)
     # then
     assert len(client.log) == 1
     assert client.log[0].status == 200
@@ -49,7 +49,7 @@ def test_rejected_response_stays_in_log(make_client: ClientFactory) -> None:
 def test_traceql_search_empty_hints_wider_window(make_client: ClientFactory) -> None:
     """search 결과가 비면 창을 넓히라는 힌트 한 줄을 낸다."""
     client, _ = make_client({("traces", "api/search"): (200, {"traces": []})})
-    ev, _, _ = cli.traceql_run(client, cli.TraceqlArgs(cmd="search"))
+    ev, _, _ = cli.traceql_run(client, cli.TraceqlArgs(cmd="search"), at=AT)
     assert ev.value.lines == ["(결과 없음 — 트레이스는 드물다. 창을 넓혀 다시: --since 24h · 7d)"]
 
 
@@ -57,7 +57,7 @@ def test_traceql_trace_requires_id(make_client: ClientFactory) -> None:
     """trace 명령에 ID 가 없으면 질의 전에 ObsError 다."""
     client, t = make_client()
     with pytest.raises(cli.ObsError, match="traceID 가 필요하다"):
-        cli.traceql_run(client, cli.TraceqlArgs(cmd="trace"))
+        cli.traceql_run(client, cli.TraceqlArgs(cmd="trace"), at=AT)
     assert t.calls == []
 
 
@@ -65,10 +65,9 @@ def test_traceql_trace_requires_id(make_client: ClientFactory) -> None:
 
 def test_emit_truncates_and_spills(tmp_path: Path) -> None:
     """emit 은 max_lines 를 넘으면 앞부분만 찍고 "N줄 더 있음" 과 호출 디렉터리를 안내하며, raw.json 과 summary.txt 에는 전체가 남는다."""
-    env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     out: list[str] = []
     lines = ["l%d" % i for i in range(10)]
-    res = cli.emit(lines, {"full": True}, "k", max_lines=3, env=env, out=out.append)
+    res = cli.emit(lines, {"full": True}, "k", max_lines=3, base=tmp_path, at=AT, out=out.append)
     assert res.lines == ["l0", "l1", "l2"]
     assert res.cut == 7
     assert res.ref.startswith("tmp/obs/")
@@ -80,9 +79,8 @@ def test_emit_truncates_and_spills(tmp_path: Path) -> None:
 
 def test_emit_quiet_writes_files_prints_only_path(tmp_path: Path) -> None:
     """quiet 이면 stdout 에 요약 없이 경로만 찍고 파일은 보통 때와 같다."""
-    env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     out: list[str] = []
-    res = cli.emit(["a", "b"], {"x": 1}, "k", max_lines=3, quiet=True, env=env, out=out.append)
+    res = cli.emit(["a", "b"], {"x": 1}, "k", max_lines=3, quiet=True, base=tmp_path, at=AT, out=out.append)
     assert res.lines == []
     assert out == ["원본·요약: %s/ (raw.json · summary.txt)" % res.ref]
     assert (tmp_path / res.ref / "summary.txt").read_text() == "a\nb\n"
@@ -90,9 +88,8 @@ def test_emit_quiet_writes_files_prints_only_path(tmp_path: Path) -> None:
 
 def test_emit_always_writes_even_when_fits(tmp_path: Path) -> None:
     """상한 안에 들어가도 호출 디렉터리는 만들고 stdout 은 요약 뒤에 경로 한 줄이다."""
-    env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     out: list[str] = []
-    res = cli.emit(["a", "b"], {"x": 1}, "k", max_lines=3, env=env, out=out.append)
+    res = cli.emit(["a", "b"], {"x": 1}, "k", max_lines=3, base=tmp_path, at=AT, out=out.append)
     assert res.cut == 0
     assert out == ["a", "b", "원본·요약: %s/ (raw.json · summary.txt)" % res.ref]
     assert sorted(q.name for q in (tmp_path / res.ref).iterdir()) == ["raw.json", "summary.txt"]
@@ -101,11 +98,10 @@ def test_emit_always_writes_even_when_fits(tmp_path: Path) -> None:
 def test_emit_writes_log_items_with_one_key_set(tmp_path: Path) -> None:
     """log(성공 · 실패 섞임)는 raw.json 에 같은 순서의 목록으로 쓰이고 원소마다 키 집합이 backend · path · params · status · body · error · size · truncated 로 같다."""
     # given — 성공 하나 · 전송 실패 하나
-    env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     log = [Response(backend="metrics", path="api/v1/query", status=200, body={"a": 1}, params={"query": "up"}, size=8),
            Response(backend="traces", path="api/search", status=None, body=None, error="traces 백엔드에 닿지 못했다")]
     # when
-    res = cli.emit(["x"], log, "k", max_lines=3, env=env, out=lambda _: None)
+    res = cli.emit(["x"], log, "k", max_lines=3, base=tmp_path, at=AT, out=lambda _: None)
     # then
     items = json.loads((tmp_path / res.ref / "raw.json").read_text())
     assert [(i["backend"], i["path"]) for i in items] == [(r.backend, r.path) for r in log]
@@ -113,6 +109,16 @@ def test_emit_writes_log_items_with_one_key_set(tmp_path: Path) -> None:
         assert set(item) == {"backend", "path", "params", "status", "body", "error", "size", "truncated"}
     assert [i["status"] for i in items] == [200, None]
     assert [i["error"] for i in items] == [None, "traces 백엔드에 닿지 못했다"]
+
+
+def test_emit_names_call_directory_by_at(tmp_path: Path) -> None:
+    """emit 이 만든 호출 디렉터리(ref) 이름의 시각은 인자 at 의 UTC 표기다 — 지금 시각이 아니다."""
+    # given — base 는 tmp · at 은 AT
+    # when
+    res = cli.emit(["a", "b"], {"x": 1}, "k", max_lines=3, base=tmp_path, at=AT, out=lambda _: None)
+    # then
+    assert res.ref == "tmp/obs/19700102T034640.000000Z-k"
+    assert (tmp_path / res.ref).is_dir()
 
 
 # ── finish — 성공은 emit, 실패도 호출 디렉터리 ───────────────────────────────────
@@ -141,11 +147,10 @@ def _only_dir(root: Path) -> Path:
 def test_finish_writes_log_as_raw_json(make_client: ClientFactory, tmp_path: Path) -> None:
     """성공하면 raw.json 의 원소 수가 client.log 와 같고, 디렉터리 이름은 run 의 kind 이며(-failed 아님), out 의 마지막 줄이 그 경로다."""
     # given — 호출 둘을 보내고 성공하는 run
-    env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     client, _ = make_client(FINISH_ROUTES)
     out: list[str] = []
     # when
-    cli.finish(client, _run_after(client, 2), "k-failed", 40, False, env=env, out=out.append)
+    cli.finish(client, _run_after(client, 2), "k-failed", 40, False, base=tmp_path, at=AT, out=out.append)
     # then
     assert len(client.log) == 2
     d = _only_dir(tmp_path)
@@ -157,11 +162,10 @@ def test_finish_writes_log_as_raw_json(make_client: ClientFactory, tmp_path: Pat
 def test_finish_names_call_directory_in_obs_error(make_client: ClientFactory, tmp_path: Path) -> None:
     """run 이 ObsError(하위 종류 포함)를 올리면 같은 종류로 다시 올라오고 — 문구가 원래 문구로 시작하며 끝에 -failed 디렉터리 경로와 raw.json 을 말한다."""
     # given — 호출 둘 뒤 BudgetExceeded
-    env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     client, _ = make_client(FINISH_ROUTES)
     # when
     with pytest.raises(BudgetExceeded) as ei:
-        cli.finish(client, _run_after(client, 2, BudgetExceeded("예산 초과 — 질의 20회 상한")), "promql-failed", 40, False, env=env, out=lambda _: None)
+        cli.finish(client, _run_after(client, 2, BudgetExceeded("예산 초과 — 질의 20회 상한")), "promql-failed", 40, False, base=tmp_path, at=AT, out=lambda _: None)
     # then
     msg = str(ei.value)
     assert msg.startswith("예산 초과 — 질의 20회 상한")
@@ -175,12 +179,11 @@ def test_finish_names_call_directory_in_obs_error(make_client: ClientFactory, tm
 def test_finish_spills_log_on_obs_error(make_client: ClientFactory, tmp_path: Path) -> None:
     """run 이 ObsError 를 올리면 그 디렉터리의 raw.json 은 client.log 전부(원소 2) · summary.txt 는 원래 오류 문구이고 out 으로는 아무것도 찍지 않는다."""
     # given — 호출 둘 뒤 ObsError
-    env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     client, _ = make_client(FINISH_ROUTES)
     out: list[str] = []
     # when
     with pytest.raises(ObsError):
-        cli.finish(client, _run_after(client, 2, ObsError("metrics 백엔드가 질의를 거부했다(400)")), "promql-failed", 40, False, env=env, out=out.append)
+        cli.finish(client, _run_after(client, 2, ObsError("metrics 백엔드가 질의를 거부했다(400)")), "promql-failed", 40, False, base=tmp_path, at=AT, out=out.append)
     # then
     d = _only_dir(tmp_path)
     assert len(json.loads((d / "raw.json").read_text())) == 2
@@ -191,13 +194,12 @@ def test_finish_spills_log_on_obs_error(make_client: ClientFactory, tmp_path: Pa
 def test_finish_spills_log_and_reraises_other_exceptions(make_client: ClientFactory, tmp_path: Path) -> None:
     """run 이 ObsError 가 아닌 예외(버그)를 올리면 그대로 올라오고, err 로 -failed 경로 한 줄을 찍으며, 디렉터리의 raw.json 에 보낸 호출(원소 1)이 있다."""
     # given — 호출 하나 뒤 ValueError
-    env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     client, _ = make_client(FINISH_ROUTES)
     err: list[str] = []
     bug = ValueError("bug")
     # when
     with pytest.raises(ValueError) as ei:
-        cli.finish(client, _run_after(client, 1, bug), "logql-failed", 40, False, env=env, out=lambda _: None, err=err.append)
+        cli.finish(client, _run_after(client, 1, bug), "logql-failed", 40, False, base=tmp_path, at=AT, out=lambda _: None, err=err.append)
     # then
     assert ei.value is bug
     d = _only_dir(tmp_path)
@@ -211,11 +213,10 @@ def test_finish_spills_log_and_reraises_other_exceptions(make_client: ClientFact
 def test_finish_without_sent_calls_leaves_no_directory(make_client: ClientFactory, tmp_path: Path) -> None:
     """보낸 호출이 없는 실패(보내기 전 거부)는 디렉터리를 만들지 않고 ObsError 문구가 그대로다 — 경로가 붙지 않는다."""
     # given — 호출 없이 ObsError
-    env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     client, _ = make_client()
     # when
     with pytest.raises(ObsError) as ei:
-        cli.finish(client, _run_after(client, 0, ObsError("PromQL 이 필요하다")), "promql-failed", 40, False, env=env, out=lambda _: None)
+        cli.finish(client, _run_after(client, 0, ObsError("PromQL 이 필요하다")), "promql-failed", 40, False, base=tmp_path, at=AT, out=lambda _: None)
     # then
     assert str(ei.value) == "PromQL 이 필요하다"
     assert not (tmp_path / "tmp" / "obs").exists()
@@ -224,17 +225,27 @@ def test_finish_without_sent_calls_leaves_no_directory(make_client: ClientFactor
 def test_finish_without_sent_calls_reraises_other_exceptions_silently(make_client: ClientFactory, tmp_path: Path) -> None:
     """보낸 호출이 없는 비-ObsError 예외(버그)는 같은 객체로 그대로 올라오고, err 로 아무것도 찍지 않으며, 디렉터리도 만들지 않는다."""
     # given — 호출 없이 ValueError
-    env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
     client, _ = make_client()
     err: list[str] = []
     bug = ValueError("bug")
     # when
     with pytest.raises(ValueError) as ei:
-        cli.finish(client, _run_after(client, 0, bug), "promql-failed", 40, False, env=env, out=lambda _: None, err=err.append)
+        cli.finish(client, _run_after(client, 0, bug), "promql-failed", 40, False, base=tmp_path, at=AT, out=lambda _: None, err=err.append)
     # then
     assert ei.value is bug
     assert err == []
     assert not (tmp_path / "tmp" / "obs").exists()
+
+
+def test_finish_names_failed_directory_by_at(make_client: ClientFactory, tmp_path: Path) -> None:
+    """실패한 run 의 <kind>-failed 디렉터리 이름의 시각도 인자 at 의 UTC 표기다."""
+    # given — 호출 하나 뒤 ObsError 를 올리는 run · at 은 AT
+    client, _ = make_client(FINISH_ROUTES)
+    # when
+    with pytest.raises(ObsError):
+        cli.finish(client, _run_after(client, 1, ObsError("metrics 백엔드가 질의를 거부했다(400)")), "k-failed", 40, False, base=tmp_path, at=AT, out=lambda _: None)
+    # then
+    assert _only_dir(tmp_path).name == "19700102T034640.000000Z-k-failed"
 
 
 # ── 인터페이스 — 물리 인자가 없다 ────────────────────────────────────────────────
@@ -434,14 +445,13 @@ def _summary_text(root: Path) -> str:
     return found[0].read_text(encoding="utf-8")
 
 
-def test_finish_writes_window_preamble_then_lines(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_finish_writes_window_preamble_then_lines(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """_finish 의 summary.txt 는 window_preamble(창) 뒤에 요약 줄이고, stdout 에는 요약 줄만 — `# ` 머리 줄이 없다."""
     # given — 기준선이 달린 창 · 요약 줄 둘 · spill 은 tmp
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     w = Window(AT - HOUR, AT).with_baseline("1d")
     ev = Evidence(value=Lines(["a 1", "b 2"]))
     # when
-    cli._finish(ev, [], "k", w, 40, False)  # pyright: ignore[reportPrivateUsage]
+    cli._finish(ev, [], "k", w, 40, False, base=tmp_path, at=AT)  # pyright: ignore[reportPrivateUsage]
     # then
     assert _summary_text(tmp_path).splitlines() == [*cli.window_preamble(w), "a 1", "b 2"]
     out = capsys.readouterr().out.splitlines()
@@ -583,7 +593,7 @@ def test_run_window_is_cli_window(make_client: ClientFactory, run: Callable[[Cli
     # when
     _, _, window = run(client)
     # then
-    assert window == Window.last("30m", "-10m", AT)
+    assert window == Window.last("30m", "-10m", at=AT)
 
 
 def _lines_of(client: Client, backend: str) -> list[str]:

@@ -819,6 +819,6 @@ def test_logs_run_around_empty_lines_show_ts_plus_minus_span(make_client: Client
     assert len(lines) == 1
     assert lines[0].startswith("(데이터 없음")
     assert cli.window_str(Window(AT - 30 * MINUTE - 60, AT - 30 * MINUTE + 60)) in lines[0]
-    assert cli.window_str(Window.last("1h", None, AT)) not in lines[0]
+    assert cli.window_str(Window.last("1h", None, at=AT)) not in lines[0]
 
 

@@ -23,7 +23,6 @@ from __future__ import annotations
 import dataclasses
 import datetime as _dt
 import json
-import os
 import re
 import shutil
 import urllib.error
@@ -215,9 +214,8 @@ def _read_config_file(env: Mapping[str, str], home: Path | None) -> tuple[dict[s
     return {}, None
 
 
-def load_config(env: Mapping[str, str] | None = None, home: Path | None = None) -> Config:
+def load_config(env: Mapping[str, str], home: Path | None = None) -> Config:
     """env → 설정 파일 → 내장 기본값. 각 값의 출처를 Resolved 로 남긴다."""
-    env = os.environ if env is None else env
     file_data, file_path = _read_config_file(env, home)
     raw_uids = file_data.get("uids")
     if raw_uids is not None and not isinstance(raw_uids, dict):
@@ -246,8 +244,7 @@ def load_config(env: Mapping[str, str] | None = None, home: Path | None = None) 
     )
 
 
-def token_from_env(env: Mapping[str, str] | None = None) -> str:
-    env = os.environ if env is None else env
+def token_from_env(env: Mapping[str, str]) -> str:
     return env.get(ENV_TOKEN, "").strip()
 
 
@@ -311,9 +308,9 @@ class Window:
     baseline: Window | None = None
 
     @classmethod
-    def last(cls, since: str, end: str | None = None, at: float | None = None) -> Window:
+    def last(cls, since: str, end: str | None = None, *, at: float) -> Window:
         """`since='1h'` [`end='-10m'`] → 창. `at` 은 now 의 대체(테스트용)."""
-        base = now() if at is None else at
+        base = at
         end_ts = parse_time(end, base)
         return cls(start=end_ts - parse_duration(since), end=end_ts)
 
@@ -362,9 +359,13 @@ class Evidence(Generic[V]):
 
 # ── spill — 원본은 파일로, 컨텍스트에는 포인터만 ─────────────────────────────────
 
-def spill_root(env: Mapping[str, str] | None = None, cwd: Path | None = None) -> Path:
+def project_dir(env: Mapping[str, str], cwd: Path | None = None) -> Path:
+    """${CLAUDE_PROJECT_DIR} — 없으면 cwd(없으면 프로세스의 cwd). env → 경로 해석의 유일한 자리."""
+    raise NotImplementedError("project_dir")
+
+
+def spill_root(env: Mapping[str, str], cwd: Path | None = None) -> Path:
     """${CLAUDE_PROJECT_DIR}/tmp/obs — 없으면 cwd 의 tmp/obs."""
-    env = os.environ if env is None else env
     proj = env.get("CLAUDE_PROJECT_DIR", "").strip()
     base = Path(proj) if proj else (cwd or Path.cwd())
     return base / "tmp" / "obs"
@@ -375,12 +376,11 @@ SPILL_SUMMARY: str = "summary.txt"   # 호출 디렉터리 안 — 잘리지 않
 SPILL_HEAD_CHARS: int = 1_000        # 예산 초과 응답의 기록에 남기는 본문 앞부분 길이(문자)
 
 
-def spill(kind: str, payload: object, summary: Sequence[str] = (), env: Mapping[str, str] | None = None,
-          cwd: Path | None = None, keep: int = SPILL_KEEP) -> Path:
+def spill(kind: str, payload: object, summary: Sequence[str], base: Path, at: float, keep: int = SPILL_KEEP) -> Path:
     """한 호출의 산출물을 <spill_root>/<UTC시각.마이크로초>-<kind>/ 디렉터리 하나에 떨어뜨리고 그 경로를 돌려준다 —
     raw.json(응답 원본) · summary.txt(요약 전체, stdout 절단과 무관). 최근 keep 개 디렉터리만 남긴다.
     이름은 재사용되지 않는다 — 한 번 안내한 경로는 그 호출만 가리킨다."""
-    root = spill_root(env, cwd)
+    root = base / "tmp" / "obs"
     root.mkdir(parents=True, exist_ok=True)
     # 마이크로초까지 — 같은 초 안의 spill 이 지워진 이름을 다시 받아, 앞서 안내한 경로가 다른 호출을 가리키는 일을 막는다
     stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
@@ -415,11 +415,8 @@ def prune(root: Path, keep: int = SPILL_KEEP, protect: Path | None = None) -> in
     return removed
 
 
-def spill_ref(path: Path, env: Mapping[str, str] | None = None, cwd: Path | None = None) -> str:
+def spill_ref(path: Path, base: Path) -> str:
     """spill 경로(호출 디렉터리)를 사람·agent 가 부를 상대 경로로."""
-    env = os.environ if env is None else env
-    proj = env.get("CLAUDE_PROJECT_DIR", "").strip()
-    base = Path(proj) if proj else (cwd or Path.cwd())
     try:
         return str(path.relative_to(base))
     except ValueError:
@@ -547,9 +544,8 @@ class Client:
     log: list[Response] = field(default_factory=list[Response])   # 전송을 시도한 호출 전부, 호출 순서 — 보내기 전 거부(모르는 backend · 질의 횟수 예산)는 없다
 
     @classmethod
-    def from_env(cls, env: Mapping[str, str] | None = None, budget: Budget | None = None,
+    def from_env(cls, env: Mapping[str, str], budget: Budget | None = None,
                  transport: Transport | None = None) -> Client:
-        env = os.environ if env is None else env
         token = token_from_env(env)
         if not token:
             raise ObsError(
@@ -636,10 +632,9 @@ class DoctorReport:
         return self.token_present and all(p.ok for p in self.probes)
 
 
-def doctor(config: Config, token: str, env: Mapping[str, str] | None = None,
+def doctor(config: Config, token: str, env: Mapping[str, str],
            transport: Transport | None = None, cwd: Path | None = None) -> DoctorReport:
     """해석된 물리 경로 · 연결 · 인증 상태. 토큰 값은 보이지 않는다(있음/없음만)."""
-    env = os.environ if env is None else env
     probes: list[Probe] = []
     client = Client(config=config, token=token, budget=Budget(max_queries=len(_PROBES) + 1), transport=transport)
     for backend in LOGICAL_BACKENDS:

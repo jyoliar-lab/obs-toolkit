@@ -18,7 +18,7 @@ import pytest
 
 from obs.core import (
     JSON, SPILL_HEAD_CHARS, Budget, Config, Lines, BudgetExceeded, Client, Evidence, ObsError, Response, Window, doctor, fmt_rfc3339,
-    http_error_message, load_config, parse_duration, parse_time, prune, spill, spill_ref, spill_root, to_dict, to_json,
+    http_error_message, load_config, parse_duration, parse_time, project_dir, prune, spill, spill_ref, spill_root, to_dict, to_json,
 )
 from tests.conftest import AT, DAY, HOUR, MINUTE, PHYSICAL, WEEK, ClientFactory, FakeTransport, RouteKey
 
@@ -126,10 +126,43 @@ def test_spill_root_prefers_project_dir(tmp_path: Path) -> None:
     assert spill_root({}, cwd=tmp_path / "cwd") == tmp_path / "cwd" / "tmp" / "obs"
 
 
+def test_project_dir_prefers_env_then_cwd(tmp_path: Path) -> None:
+    """project_dir 은 env 의 CLAUDE_PROJECT_DIR 이고, 없거나 공백뿐이면 cwd 다."""
+    # given — 값 있음 · 없음 · 공백뿐
+    with_env = {"CLAUDE_PROJECT_DIR": str(tmp_path / "proj")}
+    # when · then
+    assert project_dir(with_env) == tmp_path / "proj"
+    assert project_dir({}, cwd=tmp_path / "cwd") == tmp_path / "cwd"
+    assert project_dir({"CLAUDE_PROJECT_DIR": "  "}, cwd=tmp_path / "cwd") == tmp_path / "cwd"
+
+
+def test_spill_names_directory_by_at(tmp_path: Path) -> None:
+    """spill 디렉터리 이름의 시각은 인자 at 의 UTC 표기다 — AT(1970-01-02 03:46:40Z)이면 19700102T034640.000000Z 이고 지금 시각이 아니다."""
+    # given — base 는 tmp · at 은 고정 상수
+    # when
+    path = spill("k", {}, [], tmp_path, AT)
+    # then
+    assert path == tmp_path / "tmp" / "obs" / "19700102T034640.000000Z-k"
+    assert path.is_dir()
+
+
+def test_spill_same_at_gets_distinct_name(tmp_path: Path) -> None:
+    """같은 base · 같은 at 로 두 번 spill 하면 두 번째 이름은 -2 접미로 첫째와 다르고 첫째는 그대로다 — 안내한 경로가 다른 호출을 가리키지 않는다."""
+    # given — 같은 at 로 하나 있다
+    first = spill("k", {"i": 1}, [], tmp_path, AT)
+    # when
+    second = spill("k", {"i": 2}, [], tmp_path, AT)
+    # then
+    assert second != first
+    assert second.name == first.name + "-2"
+    assert json.loads((first / "raw.json").read_text()) == {"i": 1}
+    assert json.loads((second / "raw.json").read_text()) == {"i": 2}
+
+
 def test_spill_writes_and_prunes(tmp_path: Path) -> None:
     """spill 은 호출마다 새 디렉터리에 raw.json · summary.txt 를 쓰고 keep 개를 넘으면 오래된 것부터 지우며 프로젝트 기준 상대 경로를 돌려준다."""
     env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
-    paths = [spill("k", {"i": i}, ["요약 %d" % i, "둘째 줄"], env, keep=3) for i in range(5)]
+    paths = [spill("k", {"i": i}, ["요약 %d" % i, "둘째 줄"], tmp_path, AT + i, keep=3) for i in range(5)]
     root = spill_root(env)
     assert all(p.parent == root and p.name.endswith("-k") for p in paths)
     assert all(p.is_dir() for p in paths[2:])
@@ -139,7 +172,7 @@ def test_spill_writes_and_prunes(tmp_path: Path) -> None:
     assert [json.loads((p / "raw.json").read_text()) for p in paths[2:]] == [{"i": 2}, {"i": 3}, {"i": 4}]   # 원본도 제자리
     assert [(p / "summary.txt").read_text() for p in paths[2:]] == ["요약 %d\n둘째 줄\n" % i for i in (2, 3, 4)]  # 요약 전체
     assert sorted(q.name for q in paths[-1].iterdir()) == ["raw.json", "summary.txt"]
-    assert spill_ref(paths[-1], env) == "tmp/obs/" + paths[-1].name
+    assert spill_ref(paths[-1], tmp_path) == "tmp/obs/" + paths[-1].name
 
 
 def test_prune_oldest_first(tmp_path: Path) -> None:
