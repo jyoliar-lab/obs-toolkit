@@ -55,7 +55,7 @@ fixture 에 `recorded: manual` 표시가 있는 것은 재현할 수 없는 조�
 ```bash
 python -m pip install mutmut==3.8.0          # 또는 python -m pip install --group measure (pip ≥ 25.1 · 핀은 pyproject 의 [dependency-groups])
 unset OBS_TEST_UPDATE                        # 켜져 있으면 format 티어가 스냅샷을 다시 쓰고 통과해 렌더러 변이가 전부 살아남는다
-export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES   # macOS 만 — fork 된 워커가 시스템 프록시를 조회하면 abort(suspicious)한다. Linux 에서는 효과 없음
+export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES   # macOS 만 — fork 된 워커의 abort 방지
 rm -rf mutants && mutmut run                 # 빈 mutants/ 에서 시작 — 전제 검증 세 단계(stats · clean tests · forced fail)를 지나 전체를 돈다. 워커 수 기본 = CPU 수(--max-children N 으로 고정)
 mutmut results                               # killed 를 뺀 목록 — survived · no tests · timeout · suspicious
 mutmut show <mutant 이름>                    # 한 mutant 의 diff. mutmut browse 는 터미널 UI
@@ -64,8 +64,6 @@ mutmut print-time-estimates                  # 예상 시간 — 첫 실행 뒤(
 ```
 
 `python -m mutmut` 이 아니라 **`mutmut run`** 이다. 워커는 fork 라 macOS · Linux 에서 돈다(Windows 는 WSL). 상태의 뜻 — **killed**(테스트가 변이를 잡았다) · **survived**(테스트 전부 통과 — 그 결과를 검사하는 테스트가 없다) · **no tests**(그 함수를 지나는 테스트가 없다 — 함수 단위 미실행) · **timeout** · **suspicious**(측정 자체의 문제 — 설정 · 테스트를 먼저 본다). 점수는 `killed / total` 이고 `no tests` 를 뺀 분모도 함께 적는다. 측정 조건(Python 버전 · 워커 수 · 실행 시간)을 결과와 같이 남긴다 — 수치는 기록이지 목표가 아니다. 생존 mutant 는 고칠 목록이 아니라 읽고 분류할 목록이다.
-
-**워커 수와 결정론.** 병렬 실행(워커 = CPU 수)이 기본이고, 결과는 mutant 단위로 단일 워커(`--max-children 1`)와 같다 — 단일 워커 기준선은 필요 없다. 같게 만드는 것은 측정 조건 둘이다. ① `tests/conftest.py` 가 mutant 세션(`MUTANT_UNDER_TEST` 가 있다)에 프로세스별 `basetemp`(`mutants/.pytest-basetemp/<pid>`)를 준다 — 기본 root(`$TMPDIR/pytest-of-<user>/`)를 워커들이 함께 쓰면 세션 종료의 죽은 링크 정리(`pytest-current`)가 경합해 `FileNotFoundError` 로 워커가 죽고, mutmut 은 그것을 killed 로 읽는다(테스트는 통과했는데 killed 인 가짜). ② macOS 에서는 위 `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` 를 둔다 — 없으면 프록시 처리를 바꾼 mutant(`obs.core.x__urllib_transport__mutmut_8` · `9`)가 실제 `getproxies()`(macOS 의 SystemConfiguration)를 부르는 테스트가 먼저 돈 실행에서 fork 뒤 abort(−6)해 suspicious 로 나오고, 실행마다 killed 와 오간다. 그래도 **같은 HEAD 의 실행끼리 판정이 뒤집히는 mutant 는 잡음이 아니라 "성질 테스트가 없는 약속" 의 신호다** — 동작 차이가 동률 · 반복 순서뿐인 mutant 는 그 순서를 보는 것이 스냅샷 하나면 해시 시드(실행마다 다르다 — 워커는 fork 라 한 실행 안에서는 같다)에 따라 산다. 답은 시드 고정이 아니라 그 순서를 단언하는 contracts 테스트다(예: `diff_of` 의 같은 이름 · 여러 서비스 행이 service 오름차순 — 동률 후보를 여럿 두어 우연히 통과할 확률을 낮춘다).
 
 ### 커버리지 (coverage.py)
 
