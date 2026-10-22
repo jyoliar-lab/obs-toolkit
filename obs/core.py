@@ -309,9 +309,8 @@ class Window:
 
     @classmethod
     def last(cls, since: str, end: str | None = None, *, at: float) -> Window:
-        """`since='1h'` [`end='-10m'`] → 창. `at` 은 now 의 대체(테스트용)."""
-        base = at
-        end_ts = parse_time(end, base)
+        """`since='1h'` [`end='-10m'`] → 창. 상대 시각은 기준 시각 `at` 에서 잰다."""
+        end_ts = parse_time(end, at)
         return cls(start=end_ts - parse_duration(since), end=end_ts)
 
     @property
@@ -367,8 +366,11 @@ def project_dir(env: Mapping[str, str], cwd: Path | None = None) -> Path:
 
 def spill_root(env: Mapping[str, str], cwd: Path | None = None) -> Path:
     """${CLAUDE_PROJECT_DIR}/tmp/obs — 없으면 cwd 의 tmp/obs."""
-    proj = env.get("CLAUDE_PROJECT_DIR", "").strip()
-    base = Path(proj) if proj else (cwd or Path.cwd())
+    return _obs_dir(project_dir(env, cwd))
+
+
+def _obs_dir(base: Path) -> Path:
+    """<base>/tmp/obs — 프로젝트 디렉터리 base 아래의 spill 자리."""
     return base / "tmp" / "obs"
 
 
@@ -381,7 +383,7 @@ def spill(kind: str, payload: object, summary: Sequence[str], base: Path, at: fl
     """한 호출의 산출물을 <spill_root>/<UTC시각.마이크로초>-<kind>/ 디렉터리 하나에 떨어뜨리고 그 경로를 돌려준다 —
     raw.json(응답 원본) · summary.txt(요약 전체, stdout 절단과 무관). 최근 keep 개 디렉터리만 남긴다.
     이름은 재사용되지 않는다 — 한 번 안내한 경로는 그 호출만 가리킨다."""
-    root = base / "tmp" / "obs"
+    root = _obs_dir(base)
     root.mkdir(parents=True, exist_ok=True)
     # 마이크로초까지 — 같은 초 안의 spill 이 지워진 이름을 다시 받아, 앞서 안내한 경로가 다른 호출을 가리키는 일을 막는다
     stamp = _dt.datetime.fromtimestamp(at, _dt.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")

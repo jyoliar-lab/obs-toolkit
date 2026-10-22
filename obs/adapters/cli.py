@@ -27,7 +27,7 @@ from typing import Callable, Mapping, Sequence, TypeAlias
 from obs.core import (
     JSON, Client, DoctorReport, Evidence, Lines, ObsError, Params, Response, Window, doctor, fmt_ts, load_config,
     SPILL_RAW, SPILL_SUMMARY, json_labels, json_list, json_strs,
-    parse_duration, parse_time, now, spill, spill_ref, spill_root, to_json, token_from_env,
+    parse_duration, parse_time, now, project_dir, spill, spill_ref, to_json, token_from_env,
 )
 from obs.logs import (
     DEFAULT_AROUND_LIMIT, DEFAULT_AROUND_SPAN, DEFAULT_TEMPLATES_K, Context, FirstSeen, Histogram, LogEntry, LogResult, Stream,
@@ -172,8 +172,8 @@ def _client() -> Client:
 
 
 def _base() -> Path:
-    """red 의 임시 조립 — 다음 단계가 project_dir(env) 로 바꾼다."""
-    return spill_root(os.environ).parent.parent
+    """spill 의 프로젝트 디렉터리 — 프로세스 env 의 CLAUDE_PROJECT_DIR(없으면 cwd)."""
+    return project_dir(os.environ)
 
 
 def main_guard(fn: Callable[[], None]) -> None:
@@ -484,8 +484,7 @@ class MetricsArgs:
 def metrics_run(client: Client, a: MetricsArgs, at: float) -> RunResult:
     """→ (Evidence[Lines], 원본, kind, 창). 계산은 obs.metrics 가, 표는 *_lines 가. stdout 을 만지지 않는다.
     top 은 창이 없다 — --end 시각 하나(since 는 쓰이지 않는다)."""
-    base_ts = at
-    window = Window.last(a.since, a.end, at=at) if a.cmd != "top" else Window(parse_time(a.end, base_ts), parse_time(a.end, base_ts))
+    window = Window.last(a.since, a.end, at=at) if a.cmd != "top" else Window(parse_time(a.end, at), parse_time(a.end, at))
     if a.cmd == "summarize":
         ev = summarize(client, a.query, window, a.step)
         return _evidence(summary_lines(ev.value, window)), "promql-summarize", window
