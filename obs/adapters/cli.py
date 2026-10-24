@@ -93,7 +93,43 @@ def parse_label_sets(body: dict[str, JSON]) -> list[dict[str, str]]:
 # ── 응답 dataclass + 파서 — Tempo 는 obs.traces 로 이동(Span · parse_spans · TraceHit · parse_search · TagScope · parse_tags · parse_tag_values · check_json) ──
 
 
-# ── 출력 절제 ────────────────────────────────────────────────────────────────────
+# ── 출력 경로 — 파일은 spill_call · stdout 은 print_summary · 둘을 잇는 것은 finish ──────────
+
+@dataclass(frozen=True)
+class OutputArgs:
+    """--max-lines · --json — 여섯 명령이 공유하는 stdout 절제 옵션. 기본값은 여기 한 곳."""
+    max_lines: int = DEFAULT_MAX_LINES      # stdout 줄 상한
+    files_only: bool = False                # True = stdout 에 요약을 찍지 않고 호출 디렉터리 경로만 — 파일(raw.json · summary.txt)은 어느 쪽이든 같다
+
+
+@dataclass(frozen=True)
+class CallDir:
+    """spill_call 이 만든 호출 디렉터리 — 성공 · 실패 어느 길이든 이것 하나."""
+    ref: str                                # 프로젝트(base) 기준 상대 경로 — "tmp/obs/<at 의 UTC>-<kind>"
+
+    @property
+    def where(self) -> str:
+        """사람에게 안내하는 문구 — "<ref>/ (raw.json · summary.txt)". SPILL_RAW · SPILL_SUMMARY 를 잇는 유일한 자리."""
+        raise NotImplementedError("CallDir.where")
+
+
+def spill_call(kind: str, payload: object, summary: Sequence[str], *, base: Path, at: float) -> CallDir:
+    """한 호출의 산출물을 호출 디렉터리 하나로 — core spill 한 번 + spill_ref 한 번. 성공 · 실패 길이 지나는 하나의 입구.
+    예외는 던지지 않는다(spill 의 OSError 그대로) · 언제나 디렉터리를 만든다."""
+    raise NotImplementedError("spill_call")
+
+
+@dataclass(frozen=True)
+class Printed:
+    """print_summary 가 stdout 에 찍은 것 — 테스트가 검사한다. 파일 자리는 없다(그건 CallDir)."""
+    lines: list[str]                        # 찍은 요약 줄 — files_only 이면 빈 목록
+    cut: int                                # 찍지 않은 줄 수
+
+
+def print_summary(lines: list[str], output: OutputArgs, where: str, *, out: Callable[[str], None] = print) -> Printed:
+    """stdout 절제 — 앞 max_lines 줄과 잘림 안내, files_only 면 경로 한 줄만. 안내 문구는 받은 where 그대로 · 파일을 만들지 않는다."""
+    raise NotImplementedError("print_summary")
+
 
 @dataclass
 class Emitted:
@@ -172,7 +208,7 @@ def _spill_failed(client: Client, failed_kind: str, error: BaseException, base: 
     return "%s/ (%s · %s)" % (ref, SPILL_RAW, SPILL_SUMMARY)
 
 
-def finish(client: Client, run: Callable[[], Renderable], failed_kind: str, max_lines: int, as_json: bool, *,
+def finish(client: Client, run: Callable[[], Renderable], failed_kind: str, output: OutputArgs, *,
            base: Path, at: float, out: Callable[[str], None] = print, err: Callable[[str], None] = _stderr) -> None:
     """run 을 돌리고 끝낸다 — 성공이면 client.log 를 원본으로 emit(지금의 _finish). 실패(어떤 예외든)면 client.log 가 비지 않을 때
     <failed_kind> 호출 디렉터리를 남기고(summary.txt 는 오류 문구) — ObsError 는 같은 종류로 문구 끝에 경로를 붙여 다시 올리고,
@@ -187,21 +223,15 @@ def finish(client: Client, run: Callable[[], Renderable], failed_kind: str, max_
         if client.log:
             err("원본: %s" % _spill_failed(client, failed_kind, e, base, at))
         raise
-    _finish(r.lines() or [NO_RESULT], client.log, r.kind, r.window, max_lines, as_json, base=base, at=at, out=out)
+    # stub — 호출자를 새 꼴로만. spill_call → print_summary 로 바꾸는 것은 green
+    _finish(r.lines() or [NO_RESULT], client.log, r.kind, r.window, output.max_lines, output.files_only, base=base, at=at, out=out)
 
 
 def _run_main(client: Callable[[], Client], run: Callable[[Client], Renderable], failed_kind: str, output: OutputArgs,
               env: Mapping[str, str], at: float) -> None:
     """*_main 의 끝 — parse 뒤에 client() 로 Client 하나를 만들어 run 과 finish 가 같이 쓴다. spill 은 env 의 프로젝트 디렉터리에."""
     c = client()
-    finish(c, lambda: run(c), failed_kind, output.max_lines, output.as_json, base=project_dir(env), at=at)
-
-
-@dataclass(frozen=True)
-class OutputArgs:
-    """--max-lines · --json — 여섯 명령이 공유하는 stdout 절제 옵션. 기본값은 여기 한 곳."""
-    max_lines: int = DEFAULT_MAX_LINES      # stdout 줄 상한
-    as_json: bool = False                   # True = 요약 대신 호출 디렉터리 경로만
+    finish(c, lambda: run(c), failed_kind, output, base=project_dir(env), at=at)
 
 
 if TYPE_CHECKING:
