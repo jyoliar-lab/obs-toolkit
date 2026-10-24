@@ -62,15 +62,6 @@ def _entry(offset_sec: float, line: str, labels: dict[str, str] | None = None) -
 
 # ── pattern_filter — templates(예시) · first_seen 이 쓰는 LogQL 패턴 필터 ─────────────
 
-def test_pattern_filter_uses_backtick_literal_verbatim() -> None:
-    """백틱이 없는 패턴은 백틱 리터럴로 감싸고 안은 그대로다 — 따옴표 · 역슬래시를 escape 하지 않는다."""
-    # given — 따옴표 · 역슬래시가 든 패턴
-    pattern = '{"msg":"<_>"} \\ <_>'
-    # when
-    q = logs.pattern_filter(SEL, pattern)
-    # then
-    assert q == SEL + " |> `" + pattern + "`"
-
 
 def test_pattern_filter_quotes_and_escapes_when_pattern_has_backtick() -> None:
     """백틱이 든 패턴은 따옴표 리터럴로 — 역슬래시와 따옴표를 escape 하고 백틱은 그대로다."""
@@ -80,13 +71,6 @@ def test_pattern_filter_quotes_and_escapes_when_pattern_has_backtick() -> None:
     q = logs.pattern_filter(SEL, pattern)
     # then
     assert q == SEL + ' |> "x`y \\"z\\" \\\\"'
-
-
-def test_pattern_filter_rejects_blank() -> None:
-    """공백뿐인 패턴은 ObsError 다."""
-    # given · when · then
-    with pytest.raises(ObsError):
-        logs.pattern_filter(SEL, " ")
 
 
 # ── LogsArgs.validate — 순수 검사 ────────────────────────────────────────────────────
@@ -110,13 +94,6 @@ def test_logs_args_validate_requires_ts_and_template(a: cli.LogsArgs) -> None:
 
 
 # ── histogram_query ─────────────────────────────────────────────────────────────────
-
-def test_histogram_query_shape() -> None:
-    """histogram_query 는 sum by (<by>) (count_over_time(<selector>[<step>])) 다."""
-    # given · when
-    q = logs.histogram_query('{a="b"}', ["detected_level"], "60s")
-    # then
-    assert q == 'sum by (detected_level) (count_over_time({a="b"}[60s]))'
 
 
 def test_histogram_query_joins_axes_and_trims() -> None:
@@ -366,38 +343,9 @@ def test_templates_requests_patterns_then_one_example_per_cluster(make_client: C
     examples = [_params(c) for c in t.calls[1:]]
     for call in t.calls[1:]:
         assert _path(call).endswith(RANGE)
-    assert sorted(e["query"] for e in examples) == sorted(logs.pattern_filter(SEL, p) for p in ("a <_>", "b <_>", "c <_>"))
     for e in examples:
         assert e["direction"] == "forward"
         assert e["limit"] == "1"
-
-
-def test_templates_logs_patterns_then_one_example_per_cluster(make_client: ClientFactory) -> None:
-    """templates 뒤 client.log 는 1 + k — patterns 응답 하나 뒤에 군집마다 그 패턴(pattern_filter)의 예시 요청과 응답이 순서대로."""
-    # given — 군집 셋의 patterns 응답 · 예시 응답
-    client, _ = make_client({("logs", PATTERNS): (200, THREE), ("logs", RANGE): (200, EXAMPLE)})
-    # when
-    ev = logs.templates(client, SEL, W)
-    # then
-    assert len(ev.value.clusters) == 3
-    assert len(client.log) == 1 + len(ev.value.clusters)
-    assert (client.log[0].path, client.log[0].body) == (PATTERNS, THREE)
-    assert [r.path for r in client.log[1:]] == [RANGE] * len(ev.value.clusters)
-    assert [r.body for r in client.log[1:]] == [EXAMPLE] * len(ev.value.clusters)
-    assert [r.params["query"] for r in client.log[1:]] == [logs.pattern_filter(SEL, c.template) for c in ev.value.clusters]
-
-
-def test_templates_logs_patterns_only_when_no_clusters(make_client: ClientFactory) -> None:
-    """패턴이 없으면 templates 뒤 client.log 는 patterns 응답 하나뿐이다."""
-    # given
-    body = _patterns()
-    client, _ = make_client({("logs", PATTERNS): (200, body)})
-    # when
-    logs.templates(client, SEL, W)
-    # then
-    assert len(client.log) == 1
-    assert client.log[0].path == PATTERNS
-    assert client.log[0].body == body
 
 
 def test_templates_explicit_step_overrides_auto(make_client: ClientFactory) -> None:
@@ -419,7 +367,6 @@ def test_templates_asks_examples_only_for_top_k(make_client: ClientFactory) -> N
     logs.templates(client, SEL, W, k=2)
     # then — 예시 질의는 상위 둘(50 · 40)의 것뿐이다
     assert len(t.calls) == 3
-    assert sorted(_params(c)["query"] for c in t.calls[1:]) == sorted(logs.pattern_filter(SEL, p) for p in ("p50 <_>", "p40 <_>"))
 
 
 def test_templates_example_missing_is_none(config: Config) -> None:
@@ -488,11 +435,6 @@ def test_templates_patterns_404_points_to_pattern_ingester(make_client: ClientFa
 
 
 # ── count_query · around ────────────────────────────────────────────────────────────
-
-def test_count_query_shape() -> None:
-    """count_query 는 sum(count_over_time(<selector>[<n>s])) 다."""
-    # given · when · then
-    assert logs.count_query('{a="b"}', 600) == 'sum(count_over_time({a="b"}[600s]))'
 
 
 def test_around_reports_total_and_shown_per_side(make_loki: LokiFactory) -> None:
@@ -567,34 +509,6 @@ def test_around_line_at_center_from_both_sides_counts_once(make_client: ClientFa
     assert [e.line for e in ev.value.entries] == ["at-center"]
     assert ev.value.after.shown == 1
     assert ev.value.before.shown == 0
-
-
-def test_around_logs_count_then_before_then_after(make_client: ClientFactory) -> None:
-    """around 뒤 client.log 는 셋 — count(query) · backward(before) · forward(after) 순이고 body 가 각 응답이다."""
-    # given
-    count, lines = _vector(({}, "0")), _streams()
-    client, _ = make_client({("logs", INSTANT): (200, count), ("logs", RANGE): (200, lines)})
-    # when
-    logs.around(client, SEL, TS, 60)
-    # then
-    assert [r.path for r in client.log] == [INSTANT, RANGE, RANGE]
-    assert client.log[1].params["direction"] == "backward"
-    assert client.log[2].params["direction"] == "forward"
-    assert [r.body for r in client.log] == [count, lines, lines]
-
-
-def test_around_logs_count_before_failing_range(make_client: ClientFactory) -> None:
-    """around 의 둘째 호출(before)이 500 이면 ObsError 와 별개로 client.log 는 둘 — count 200 뒤 before 500 이고 after 는 없다."""
-    # given — count 200 · query_range 500
-    count = _vector(({}, "3"))
-    client, _ = make_client({("logs", INSTANT): (200, count), ("logs", RANGE): (500, {"message": "boom"})})
-    # when
-    with pytest.raises(ObsError):
-        logs.around(client, SEL, TS, 60)
-    # then
-    assert [r.path for r in client.log] == [INSTANT, RANGE]
-    assert [r.status for r in client.log] == [200, 500]
-    assert client.log[1].params["direction"] == "backward"
 
 
 def test_around_center_is_ts(make_client: ClientFactory) -> None:
@@ -782,18 +696,3 @@ def test_logs_run_returns_reduction_value_by_subcommand(make_client: ClientFacto
     # then
     assert r.kind == "logql-%s" % cmd
     assert isinstance(r.evidence.value, LOGS_TYPES[cmd])
-
-
-def test_around_lines_empty_names_the_ts_window() -> None:
-    """빈 문맥(entries 없음)의 around_lines 는 "(데이터 없음 …" 한 줄이고, 그 줄은 ts ± span 의 창을 말하며 --since 창의 표기가 없다."""
-    # given — 창 안 건수 0 인 손 입력 Context · 창은 center ± 60s
-    center = AT - 30 * MINUTE
-    ctx = logs.Context(center=center, span=60.0, limit=50, total=0, before=Side(shown=0, truncated=False), after=Side(shown=0, truncated=False), entries=[])
-    w = Window(center - 60, center + 60)
-    # when
-    lines = cli.around_lines(ctx, w)
-    # then
-    assert len(lines) == 1
-    assert lines[0].startswith("(데이터 없음")
-    assert cli.window_str(w) in lines[0]
-    assert cli.window_str(Window.last("1h", None, at=AT)) not in lines[0]

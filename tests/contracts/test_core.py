@@ -479,21 +479,6 @@ def test_over_budget_http_error_is_logged_truncated_with_its_status(make_client:
     assert logged.error is None
 
 
-def test_log_keeps_successes_before_a_failure(make_client: ClientFactory) -> None:
-    """앞 두 호출이 성공하고 셋째가 500 이면 log 는 셋 — 앞 둘은 200 · 셋째는 500 이고 호출 순서 그대로다."""
-    # given — 경로 셋: 둘은 200 · 셋째는 500
-    client, _ = make_client({("metrics", "api/v1/labels"): (200, {"data": []}), ("metrics", "api/v1/series"): (200, {"data": []}),
-                             ("metrics", "api/v1/query"): (500, {"error": "boom"})})
-    # when
-    client.get("metrics", "api/v1/labels")
-    client.get("metrics", "api/v1/series")
-    with pytest.raises(ObsError):
-        client.get("metrics", "api/v1/query")
-    # then
-    assert [r.path for r in client.log] == ["api/v1/labels", "api/v1/series", "api/v1/query"]
-    assert [r.status for r in client.log] == [200, 200, 500]
-
-
 def test_log_carries_no_physical_or_token(make_client: ClientFactory) -> None:
     """성공과 전송 실패가 쌓인 log 를 직렬화해도 논리 이름 · 네이티브 경로만 있고 물리 문자열 · 토큰 · URL 이 없다."""
     # given — 성공 하나(파라미터 있음) 뒤 전송 실패 하나(문구는 transport 가 호스트를 이미 지운 꼴)

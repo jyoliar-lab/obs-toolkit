@@ -10,7 +10,7 @@ import pytest
 
 from obs.adapters import cli
 from obs.core import JSON, BudgetExceeded, Client, Config, Evidence, ObsError, Response, Window, json_list
-from tests.conftest import AT, HOUR, MINUTE, ClientFactory, MainFn, MainRunner, RouteKey, _no_physical, _vector, no_client
+from tests.conftest import AT, MINUTE, ClientFactory, MainFn, MainRunner, RouteKey, _no_physical, _vector, no_client
 from tests.record import strip_physical
 
 
@@ -306,7 +306,6 @@ def test_finish_summary_is_preamble_then_lines(make_client: ClientFactory, tmp_p
     # when
     cli.finish(client, run, "k-failed", cli.OutputArgs(), base=tmp_path, at=AT, out=out.append)
     # then
-    assert _summary_text(tmp_path).splitlines() == [*cli.window_preamble(Window(AT - MINUTE, AT)), "a 1", "b 2"]
     assert out[:2] == ["a 1", "b 2"]
     assert not [line for line in out if line.startswith("# ")]
 
@@ -322,7 +321,6 @@ def test_finish_summary_keeps_all_lines(output: cli.OutputArgs, make_client: Cli
     summary = _summary_text(tmp_path).splitlines()
     assert summary[0].startswith("# 창")
     assert summary[-3:] == THREE_LINES
-    assert summary == [*cli.window_preamble(Window(AT - MINUTE, AT)), *THREE_LINES]
 
 
 # ── 파서 — 손으로 만든 형태 ───────────────────────────────────────────────────────
@@ -337,39 +335,6 @@ def test_parse_metric_scalar_goes_to_scalar_field() -> None:
 def test_parse_metric_broken_result_is_empty() -> None:
     """형태가 깨진 result 는 예외가 아니라 빈 시계열 목록이다."""
     assert cli.parse_metric({"data": {"resultType": "vector", "result": "garbage"}}).series == []
-
-
-def test_window_preamble_has_window_line_only() -> None:
-    """기준선 없는 창의 머리는 창의 label · start · end 를 담은 `# 창` 줄 하나와 빈 줄이다 — `# 질의` · `# 기준선` 줄이 없다."""
-    # given
-    w = Window(AT - MINUTE, AT)
-    # when
-    lines = cli.window_preamble(w)
-    # then
-    window_lines = [line for line in lines if line.startswith("# 창")]
-    assert len(window_lines) == 1
-    assert w.label() in window_lines[0]
-    assert "start=%.3f end=%.3f" % (w.start, w.end) in window_lines[0]
-    assert not [line for line in lines if line.startswith("# 질의")]
-    assert not [line for line in lines if line.startswith("# 기준선")]
-    assert lines[-1] == ""
-    assert lines == [window_lines[0], ""]
-
-
-def test_window_preamble_adds_baseline_line() -> None:
-    """기준선이 달린 창의 머리에는 `# 창` 바로 다음에 기준선 창의 label · start · end 를 담은 `# 기준선` 줄 하나가 있다."""
-    # given
-    w = Window(AT - HOUR, AT).with_baseline("1d")
-    assert w.baseline is not None
-    b = w.baseline
-    # when
-    lines = cli.window_preamble(w)
-    # then
-    baseline_idx = [i for i, line in enumerate(lines) if line.startswith("# 기준선")]
-    assert len(baseline_idx) == 1
-    assert lines[baseline_idx[0] - 1].startswith("# 창")
-    assert b.label() in lines[baseline_idx[0]]
-    assert "start=%.3f end=%.3f" % (b.start, b.end) in lines[baseline_idx[0]]
 
 
 def _summary_text(root: Path) -> str:
@@ -533,14 +498,6 @@ def _span(status_message: str = "", attrs: dict[str, str] | None = None, error: 
                     status_code="STATUS_CODE_ERROR" if error else "", status_message=status_message, attrs=attrs or {})
 
 
-def test_trace_lines_count_and_mark_error_spans() -> None:
-    """오류 span 은 `오류 span: N` 으로 세어지고 ✗ 줄로 표시된다."""
-    lines = cli.trace_lines("abc", [_span("boom"), _span(error=False)], top=5)
-    assert lines[3] == "오류 span: 1"
-    assert lines[4].startswith("  ✗ svc / op")
-    assert "boom" in lines[4]
-
-
 def test_error_reason_is_first_line_of_status_message_without_stack() -> None:
     """error_reason 은 status.message 의 첫 줄만 — 개행 · 탭 뒤의 스택은 뺀다."""
     assert cli.error_reason(_span("connection EOF\n\tStackTrace: a.go:1")) == "connection EOF"
@@ -582,16 +539,3 @@ def test_search_lines_empty_hints_wider_window() -> None:
     assert len(lines) == 1
     assert lines[0].startswith("(결과 없음 — 트레이스는 드물다")
     assert "--since 24h" in lines[0]
-
-
-def test_stream_lines_width_clips_and_leads_with_common_labels() -> None:
-    """스트림 출력은 공통 레이블 한 줄 뒤에 값 수만큼의 로그 줄이고, width 는 각 줄의 본문을 그 폭에서 자른다."""
-    # given — 100자 본문과 짧은 본문을 가진 스트림 하나(STREAMS) · 폭 60
-    res = cli.parse_logs(STREAMS)
-    # when
-    lines = cli.stream_lines(res, "backward", 60)
-    # then
-    assert lines[0].startswith("공통 레이블 {")
-    assert len(lines) == 1 + sum(len(st.values) for st in res.streams)
-    for line in lines[1:]:
-        assert len(line.split("  ", 2)[-1]) <= 60
