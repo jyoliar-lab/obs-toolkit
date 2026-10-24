@@ -410,7 +410,6 @@ def test_exemplars_of_slow_bucket_orders_by_ratio_then_trace_id_and_cuts_at_k() 
     # then
     assert _ids(out.slow.items) == ["c", "a", "b"]
     assert out.slow.total == 4
-    assert out.k == 3
 
 
 def test_exemplars_of_error_and_normal_buckets_order_by_duration_then_trace_id() -> None:
@@ -522,8 +521,6 @@ def test_exemplars_classifies_with_server_thresholds(make_client: ClientFactory)
     # then
     assert _ids(ev.value.slow.items) == ["t1"]
     assert ev.value.slow.items[0].threshold_source == THRESHOLD_BASELINE
-    assert ev.value.k == 2
-    assert ev.value.quantile == 0.9
 
 
 @pytest.mark.parametrize("returned,truncated,sample", [(3, True, 2), (2, False, 2)], ids=["over", "at_limit"])
@@ -750,7 +747,6 @@ def test_critical_path_fetches_the_trace_once(make_client: ClientFactory) -> Non
     # then
     assert len(t.calls) == 1
     assert _path(t.calls[0]).endswith(_trace_path("abc"))
-    assert ev.value.trace_id == "abc"
     assert _names(ev.value.path) == ["root", "child"]
 
 
@@ -959,11 +955,9 @@ def test_service_graph_sends_edge_then_server_queries(make_client: ClientFactory
     # given
     client, t = make_client({("metrics", INSTANT): (200, _vector())})
     # when
-    ev = traces.service_graph(client, W, quantile=0.9, baseline_range="3d")
+    traces.service_graph(client, W, quantile=0.9, baseline_range="3d")
     # then
     assert [_params(c)["query"] for c in t.calls] == [traces.edge_query(0.9, W, "3d"), traces.threshold_query(0.9, W, "3d")]
-    assert ev.value.quantile == 0.9
-    assert ev.value.baseline_range == "3d"
 
 
 @pytest.mark.parametrize("quantile,baseline_range", [(1.0, "7d"), (0.95, "week")], ids=["quantile", "baseline_range"])

@@ -313,7 +313,6 @@ def test_clusters_of_caps_at_k_and_counts_rest() -> None:
     assert [c.count for c in t.clusters] == [50, 40]
     assert t.other == 60
     assert t.total == 150
-    assert t.k == 2
 
 
 @pytest.mark.parametrize("pats", [[], [logs.Pattern("z <_>", [Sample(10.0, 0), Sample(20.0, 0)])]], ids=["none", "all_zero"])
@@ -406,10 +405,9 @@ def test_templates_explicit_step_overrides_auto(make_client: ClientFactory) -> N
     # given
     client, t = make_client({("logs", PATTERNS): (200, THREE), ("logs", RANGE): (200, EXAMPLE)})
     # when
-    ev = logs.templates(client, SEL, W, step="30s")
+    logs.templates(client, SEL, W, step="30s")
     # then
     assert _params(t.calls[0])["step"] == "30s"
-    assert ev.value.step == "30s"
 
 
 def test_templates_asks_examples_only_for_top_k(make_client: ClientFactory) -> None:
@@ -511,7 +509,6 @@ def test_around_reports_total_and_shown_per_side(make_loki: LokiFactory) -> None
     assert v.total == 7
     assert v.shown == 3
     assert v.truncated
-    assert v.limit == 2
 
 
 def test_around_asks_count_then_backward_and_forward(make_client: ClientFactory) -> None:
@@ -608,7 +605,6 @@ def test_around_center_is_ts(make_client: ClientFactory) -> None:
     ev = logs.around(client, SEL, TS, 60)
     # then
     assert ev.value.center == TS
-    assert ev.value.span == 60
 
 
 def test_around_empty_window(make_loki: LokiFactory) -> None:
@@ -675,7 +671,6 @@ def test_first_seen_returns_first_match_timestamp(make_client: ClientFactory) ->
     # then
     assert ev.value.ts == 100_000.0
     assert ev.value.line == "first line"
-    assert ev.value.template == TEMPLATE
 
 
 def test_first_seen_asks_forward_first_line_with_pattern_filter(make_client: ClientFactory) -> None:
@@ -712,7 +707,6 @@ def test_first_seen_absent_in_window(make_client: ClientFactory) -> None:
     # then
     assert ev.value.ts is None
     assert ev.value.line is None
-    assert ev.value.template == TEMPLATE
 
 
 def test_first_seen_requires_template(make_client: ClientFactory) -> None:

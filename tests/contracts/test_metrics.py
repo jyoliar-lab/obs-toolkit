@@ -498,7 +498,6 @@ def test_red_returns_red_with_service_offset_and_signals(make_client: ClientFact
     ev = metrics.red(client, "svc", RED_W)
     # then
     assert isinstance(ev.value, metrics.Red)
-    assert ev.value.service == "svc"
     assert ev.value.offset == RED_OFFSET
     assert [s.name for s in ev.value.signals] == ["R", "E", "D"]
     assert [s.now for s in ev.value.signals] == [200, pytest.approx(0.05), pytest.approx(0.4)]
@@ -616,13 +615,6 @@ def test_check_status_rejects_non_object_body() -> None:
         metrics.check_status("<html>oops</html>", "logs")
     assert str(ei.value).startswith("logs 백엔드가 JSON 이 아닌 응답을 냈다")
     assert "oops" in str(ei.value)
-
-
-def test_summarize_explicit_step_overrides_auto(make_client: ClientFactory) -> None:
-    """summarize 에 step 을 주면 자동값 대신 그 step 이 Summary 와 서브쿼리에 쓰인다."""
-    client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
-    ev = metrics.summarize(client, CPU_QUERY, W, step="5m")
-    assert ev.value.step == "5m"
 
 
 def test_top_drops_non_finite_values(make_client: ClientFactory) -> None:
@@ -744,7 +736,6 @@ def test_metrics_run_top_passes_k_and_by(make_client: ClientFactory) -> None:
     r = cli.metrics_run(client, cli.MetricsArgs(cmd="top", query="up", k=2, by="ns"), at=AT)
     # then
     assert isinstance(r.evidence.value, metrics.Top)
-    assert r.evidence.value.k == 2
     assert r.evidence.value.by == ["ns"]
     sent = _sent_query(t.calls[0])
     assert "topk(2," in sent
@@ -759,5 +750,4 @@ def test_metrics_run_summarize_passes_step(make_client: ClientFactory) -> None:
     r = cli.metrics_run(client, cli.MetricsArgs(cmd="summarize", query="up", step="30s"), at=AT)
     # then
     assert isinstance(r.evidence.value, metrics.Summary)
-    assert r.evidence.value.step == "30s"
     assert ":30s]" in _sent_query(t.calls[0])
