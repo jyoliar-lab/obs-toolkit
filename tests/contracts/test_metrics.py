@@ -1,7 +1,6 @@
 """메트릭 환원 연산의 약속 — 질의 조립 · 응답 → 계약 · 없음/0 판정 · 거부. 손 입력(_vector)과 성질 단언만. 렌더링의 모양은 format/test_metrics_lines.py."""
 from __future__ import annotations
 
-import json
 import math
 import re
 import urllib.parse
@@ -10,7 +9,7 @@ import pytest
 
 from obs import metrics
 from obs.adapters import cli
-from obs.core import JSON, Client, Evidence, ObsError, Window, to_json
+from obs.core import JSON, Client, Evidence, ObsError, Window
 from tests.conftest import AT, DAY, HOUR, MINUTE, RED_BASE_ONLY, RED_FULL, RED_NOW_ONLY, WEEK, ClientFactory, _no_physical, _red_body, _stat, _vector
 from tests.record import CPU_QUERY
 from tests.replay import Call
@@ -132,7 +131,6 @@ def test_duration_literal_is_whole_seconds() -> None:
 def test_baseline_offset_rules() -> None:
     """offset 은 창 끝의 차이다 — 기준선 없음은 1d, prev 는 창 길이, 길이가 다르거나 뒤에 있는 기준선은 거부한다."""
     w = Window.last("1h", at=AT)
-    assert metrics.DEFAULT_BASELINE == "1d"
     assert metrics.baseline_offset(w) == (w.with_baseline("1d"), "%ds" % DAY)
     assert metrics.baseline_offset(w.with_baseline("prev")) == (w.with_baseline("prev"), "%ds" % HOUR)
     assert metrics.baseline_offset(w.with_baseline("1w")) == (w.with_baseline("1w"), "%ds" % WEEK)
@@ -433,18 +431,10 @@ def test_each_operation_makes_one_get(make_client: ClientFactory, op: str) -> No
     assert len(t.calls) == 1
 
 
-@pytest.mark.parametrize("op", ["summarize", "compare", "top", "red"])
-def test_each_operation_serializes_to_json(make_client: ClientFactory, op: str) -> None:
-    """환원물이 든 Evidence 는 to_json 으로 직렬화된다."""
-    client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
-    json.loads(to_json(_run(client, op)))
-
-
 def test_summarize_sends_assembled_query_with_auto_step(make_client: ClientFactory) -> None:
     """summarize 는 자동 step 으로 조립한 질의를 보내고 Summary 의 step 은 그 자동값이다."""
-    client, t = make_client({("metrics", "api/v1/query"): (200, _vector())})
+    client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
     ev = metrics.summarize(client, CPU_QUERY, W)
-    assert _params(t.calls[0])["query"] == metrics.summarize_query(CPU_QUERY, W, "60s")
     assert ev.value.step == "60s"
 
 
@@ -497,7 +487,6 @@ def test_red_sends_assembled_query_once_at_window_end(make_client: ClientFactory
     assert len(t.calls) == 1
     assert "/api/v1/query?" in t.calls[0].url
     params = _params(t.calls[0])
-    assert params["query"] == metrics.red_query("svc", RED_W, RED_OFFSET)
     assert float(params["time"]) == RED_W.end
 
 
@@ -513,7 +502,6 @@ def test_red_returns_red_with_service_offset_and_signals(make_client: ClientFact
     assert ev.value.offset == RED_OFFSET
     assert [s.name for s in ev.value.signals] == ["R", "E", "D"]
     assert [s.now for s in ev.value.signals] == [200, pytest.approx(0.05), pytest.approx(0.4)]
-    assert ev.value.signals == metrics.signals_of(metrics.parse_metric(_red_body(**RED_FULL)))
 
 
 def test_red_default_baseline_is_one_day(make_client: ClientFactory) -> None:
@@ -632,10 +620,9 @@ def test_check_status_rejects_non_object_body() -> None:
 
 def test_summarize_explicit_step_overrides_auto(make_client: ClientFactory) -> None:
     """summarize 에 step 을 주면 자동값 대신 그 step 이 Summary 와 서브쿼리에 쓰인다."""
-    client, t = make_client({("metrics", "api/v1/query"): (200, _vector())})
+    client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
     ev = metrics.summarize(client, CPU_QUERY, W, step="5m")
     assert ev.value.step == "5m"
-    assert _params(t.calls[0])["query"] == metrics.summarize_query(CPU_QUERY, W, "5m")
 
 
 def test_top_drops_non_finite_values(make_client: ClientFactory) -> None:

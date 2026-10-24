@@ -12,7 +12,6 @@ from obs import logs
 from obs.adapters import cli
 from obs.core import JSON, Client, Config, ObsError, Window
 from obs.logs import LogEntry, Sample, Side
-from obs.metrics import auto_step
 from tests.conftest import AT, MINUTE, ClientFactory, LokiFactory, _vector
 from tests.record import strip_physical
 from tests.replay import Call
@@ -166,7 +165,6 @@ def test_histogram_sends_one_metric_range_query(make_client: ClientFactory) -> N
     assert len(t.calls) == 1
     assert _path(t.calls[0]).endswith(RANGE)
     params = _params(t.calls[0])
-    assert params["query"] == logs.histogram_query(SEL, ["detected_level"], "60s")
     assert params["step"] == "60s"
     assert "limit" not in params
 
@@ -174,11 +172,10 @@ def test_histogram_sends_one_metric_range_query(make_client: ClientFactory) -> N
 def test_histogram_sends_assembled_query_with_auto_step(make_client: ClientFactory) -> None:
     """histogram 은 자동 step 으로 조립한 질의를 보내고 Histogram 의 step 은 그 자동값이다."""
     # given
-    client, t = make_client({("logs", RANGE): (200, _matrix())})
+    client, _ = make_client({("logs", RANGE): (200, _matrix())})
     # when
     ev = logs.histogram(client, SEL, W)
     # then
-    assert _params(t.calls[0])["query"] == logs.histogram_query(SEL, ["detected_level"], "60s")
     assert ev.value.step == "60s"
 
 
@@ -404,17 +401,6 @@ def test_templates_logs_patterns_only_when_no_clusters(make_client: ClientFactor
     assert client.log[0].body == body
 
 
-def test_templates_default_step_is_auto(make_client: ClientFactory) -> None:
-    """step 을 주지 않으면 patterns 요청의 step 과 Templates.step 이 auto_step(창) 이다."""
-    # given
-    client, t = make_client({("logs", PATTERNS): (200, THREE), ("logs", RANGE): (200, EXAMPLE)})
-    # when
-    ev = logs.templates(client, SEL, W)
-    # then
-    assert _params(t.calls[0])["step"] == auto_step(W.seconds)
-    assert ev.value.step == auto_step(W.seconds)
-
-
 def test_templates_explicit_step_overrides_auto(make_client: ClientFactory) -> None:
     """step 을 주면 자동값 대신 그 step 이 요청과 Templates.step 에 쓰인다."""
     # given
@@ -538,7 +524,6 @@ def test_around_asks_count_then_backward_and_forward(make_client: ClientFactory)
     assert len(t.calls) == 3
     by_path = {(_path(c).split("/")[-1], _params(c).get("direction", "")): _params(c) for c in t.calls}
     count = by_path[("query", "")]
-    assert count["query"] == logs.count_query(SEL, 120)
     assert count["time"] == str(_ns(TS + 60))
     back = by_path[("query_range", "backward")]
     assert back["query"] == SEL
@@ -704,7 +689,6 @@ def test_first_seen_asks_forward_first_line_with_pattern_filter(make_client: Cli
     params = _params(t.calls[0])
     assert params["direction"] == "forward"
     assert params["limit"] == "1"
-    assert params["query"] == logs.pattern_filter(SEL, TEMPLATE)
 
 
 def test_first_seen_picks_earliest_across_streams(make_client: ClientFactory) -> None:

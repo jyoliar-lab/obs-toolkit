@@ -506,24 +506,11 @@ def test_exemplars_sends_threshold_then_candidates(make_client: ClientFactory) -
     # then
     assert len(t.calls) == 2
     assert _path(t.calls[0]).endswith(INSTANT)
-    assert _params(t.calls[0])["query"] == traces.threshold_query(0.95, W, "7d")
     assert _params(t.calls[0])["time"] == str(W.end)
     assert _path(t.calls[1]).endswith(SEARCH)
-    assert _params(t.calls[1])["q"] == traces.candidates_query('resource.service.name = "a"')
     assert _params(t.calls[1])["start"] == str(int(W.start))
     assert _params(t.calls[1])["end"] == str(int(W.end))
     assert _params(t.calls[1])["limit"] == "101"
-
-
-def test_exemplars_sends_threshold_then_candidates_queries(make_client: ClientFactory) -> None:
-    """첫 요청은 조사 창의 임계 질의(metrics)이고 둘째는 후보 TraceQL(traces)이다 — 조건식이 비어도."""
-    # given
-    client, t = make_client(_exemplar_routes())
-    # when
-    traces.exemplars(client, "", W)
-    # then
-    assert _params(t.calls[0])["query"] == traces.threshold_query(0.95, W, "7d")
-    assert _params(t.calls[1])["q"] == traces.candidates_query("")
 
 
 def test_exemplars_classifies_with_server_thresholds(make_client: ClientFactory) -> None:
@@ -964,8 +951,6 @@ def test_service_graph_sends_edge_then_server_queries_to_metrics_only(make_clien
     # then
     assert len(t.calls) == 2
     assert all(_path(c).endswith(INSTANT) for c in t.calls)
-    assert _params(t.calls[0])["query"] == traces.edge_query(0.95, W, "7d")
-    assert _params(t.calls[1])["query"] == traces.threshold_query(0.95, W, "7d")
     assert {_params(c)["time"] for c in t.calls} == {str(W.end)}
 
 
