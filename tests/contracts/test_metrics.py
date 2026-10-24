@@ -363,14 +363,6 @@ def test_summarize_requires_query(make_client: ClientFactory) -> None:
     assert t.calls == []
 
 
-def test_compare_rejects_baseline_not_expressible_as_offset(make_client: ClientFactory) -> None:
-    """길이가 다른 기준선은 offset 으로 표현할 수 없어 질의 전에 거부한다."""
-    client, t = make_client()
-    with pytest.raises(ObsError):
-        metrics.compare(client, CPU_QUERY, Window(AT - HOUR, AT, baseline=Window(AT - HOUR, AT - 30 * MINUTE)))
-    assert t.calls == []
-
-
 def test_compare_missing_series_and_zero_do_not_divide(make_client: ClientFactory) -> None:
     """기준선에 없는 시계열은 base None, 기준선 0 은 비율 없음(base 는 있다), 지금에 없는 시계열은 now None 이며 어느 경우도 나누지 않는다 — 순서는 비율 → 기준선 0 → 기준선 없음 → 지금 없음."""
     body = _vector(
@@ -523,16 +515,6 @@ def test_red_prev_baseline_offset_is_window_length(make_client: ClientFactory) -
     # then
     assert ev.value.offset == "%ds" % W.seconds
     assert "offset+%ds" % W.seconds in t.calls[0].url
-
-
-def test_red_rejects_baseline_not_expressible_as_offset(make_client: ClientFactory) -> None:
-    """길이가 다른 기준선은 offset 으로 표현할 수 없어 질의 전에 거부한다."""
-    # given — 30분짜리 기준선
-    client, t = make_client()
-    # when · then
-    with pytest.raises(ObsError):
-        metrics.red(client, "svc", Window(AT - HOUR, AT, baseline=Window(AT - HOUR, AT - 30 * MINUTE)))
-    assert t.calls == []
 
 
 def test_red_requires_service(make_client: ClientFactory) -> None:

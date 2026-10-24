@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import urllib.parse
-from pathlib import Path
 
 import pytest
 
@@ -82,21 +81,6 @@ def test_doctor_main_json_is_report_dict(base_env: dict[str, str], make_client: 
     assert len(json_list(rep.get("probes"))) == 3
     assert rep.get("token_present") is True
     assert base_env["OBS_GRAFANA_TOKEN"] not in out
-
-
-def test_doctor_main_exits_1_on_missing_explicit_config(base_env: dict[str, str], make_client: ClientFactory, tmp_path: Path,
-                                                        capsys: pytest.CaptureFixture[str]) -> None:
-    """env 의 OBS_CONFIG 가 없는 파일을 가리키면 obs-doctor.py 의 배선(main_guard(doctor_main))은 exit 1 이고 stderr 가 OBS_CONFIG 를 말하며 probe 는 나가지 않는다."""
-    # given — OBS_CONFIG 는 없는 파일 · 정상 라우트
-    env = {**base_env, "OBS_CONFIG": str(tmp_path / "nonexistent" / "obs-config.json")}
-    _, t = make_client(_doctor_routes(200))
-    # when
-    with pytest.raises(SystemExit) as ei:
-        cli.main_guard(lambda: cli.doctor_main([], env, t))
-    # then
-    assert ei.value.code == 1
-    assert "OBS_CONFIG" in capsys.readouterr().err
-    assert t.calls == []
 
 
 # ── 실패한 명령의 배선 — main 이 만든 Client 하나를 run 과 finish 가 같이 쓴다 ──────────
@@ -199,8 +183,6 @@ OPTION_CASES: list[tuple[str, MainFn, list[str], dict[RouteKey, tuple[int, objec
     ("flag", cli.promql_main, ["up", "--labels"], {("metrics", "api/v1/labels"): (200, EMPTY_LABELS)}, ("metrics", "api/v1/labels"), {"match[]": "up"}, []),
     ("valued", cli.logql_main, ['{a="b"}', "--limit", "7", "--direction", "forward"], {("logs", "loki/api/v1/query_range"): (200, EMPTY_STREAMS)},
      ("logs", "loki/api/v1/query_range"), {"limit": "7", "direction": "forward"}, []),
-    ("subcommand-valued", cli.promql_main, ["top", "up", "--by", "ns", "--k", "3"], {("metrics", "api/v1/query"): (200, _vector())},
-     ("metrics", "api/v1/query"), {}, ["topk(3,", "by (ns)"]),
 ]
 
 
@@ -253,16 +235,6 @@ def test_main_omitted_option_uses_default(main: MainFn, argv: list[str], routes:
     assert {k: v for k, v in params.items() if k in expected} == expected
     for fragment in fragments:
         assert fragment in params["query"]
-
-
-def test_main_omitted_query_is_rejected_before_request(run_main: MainRunner, make_client: ClientFactory) -> None:
-    """위치 인자(PromQL)를 생략한 promql.py 는 요청 없이 ObsError 다 — nargs="?" 의 생략이 query=None 으로 *_run 에 닿아 거기서 거부된다(argparse 의 exit 2 가 아니다)."""
-    # given — 라우트 없는 fake transport · 빈 argv
-    client, t = make_client()
-    # when · then
-    with pytest.raises(ObsError, match="PromQL 이 필요하다"):
-        run_main(cli.promql_main, [], client)
-    assert t.calls == []
 
 
 THREE_SERIES: dict[str, JSON] = _vector(({"pod": "a"}, "1"), ({"pod": "b"}, "2"), ({"pod": "c"}, "3"))

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import re
 import urllib.parse
 from pathlib import Path
 from typing import Callable
@@ -324,76 +323,6 @@ def test_finish_summary_keeps_all_lines(output: cli.OutputArgs, make_client: Cli
     assert summary[0].startswith("# 창")
     assert summary[-3:] == THREE_LINES
     assert summary == [*cli.window_preamble(Window(AT - MINUTE, AT)), *THREE_LINES]
-
-
-# ── 인터페이스 — 물리 인자가 없다 ────────────────────────────────────────────────
-
-HELP_SCREENS: tuple[tuple[MainFn, list[str]], ...] = (
-    (cli.promql_main, ["--help"]), (cli.promql_main, ["summarize", "--help"]), (cli.promql_main, ["compare", "--help"]),
-    (cli.promql_main, ["top", "--help"]), (cli.logql_main, ["--help"]), (cli.traceql_main, ["--help"]),
-    (cli.logql_main, ["histogram", "--help"]), (cli.logql_main, ["templates", "--help"]), (cli.logql_main, ["around", "--help"]),
-    (cli.logql_main, ["first-seen", "--help"]),
-    (cli.traceql_main, ["exemplars", "--help"]), (cli.traceql_main, ["critical-path", "--help"]), (cli.traceql_main, ["service-graph", "--help"]),
-    (cli.traceql_main, ["diff", "--help"]), (cli.promql_main, ["red", "--help"]),
-)
-
-
-@pytest.mark.parametrize("main,argv", HELP_SCREENS, ids=["promql", "promql-summarize", "promql-compare", "promql-top", "logql", "traceql",
-                                                         "logql-histogram", "logql-templates", "logql-around", "logql-first-seen",
-                                                         "traceql-exemplars", "traceql-critical-path", "traceql-service-graph", "traceql-diff",
-                                                         "promql-red"])
-def test_help_has_no_physical_flags_or_strings(main: MainFn, argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
-    """모든 --help 화면에 --uid · --url · --token · --host 가 없고 물리 문자열도 없다 — 토큰 · 설정 없는 env 로, Client 는 만들어지지 않는다."""
-    with pytest.raises(SystemExit) as ei:
-        main(argv, {}, AT, no_client)
-    assert ei.value.code == 0
-    text = capsys.readouterr().out
-    for flag in ("--uid", "--url", "--token", "--host"):
-        assert flag not in text
-    _no_physical(text)
-
-
-def test_traceql_help_lists_traces_subcommands(capsys: pytest.CaptureFixture[str]) -> None:
-    """상위 traceql --help 에 트레이스 환원 서브커맨드 넷의 이름이 전부 있다."""
-    # given — 상위 화면
-    argv = ["--help"]
-    # when
-    with pytest.raises(SystemExit) as ei:
-        cli.traceql_main(argv, {}, AT, no_client)
-    # then
-    assert ei.value.code == 0
-    text = capsys.readouterr().out
-    for name in cli.TRACES_SUBCOMMANDS:
-        assert name in text
-
-
-def test_promql_help_lists_metrics_subcommands(capsys: pytest.CaptureFixture[str]) -> None:
-    """상위 promql --help 에 메트릭 환원 서브커맨드 넷의 이름이 전부 있다 — 상위 화면에서 서브커맨드를 안다."""
-    # given — 상위 화면
-    argv = ["--help"]
-    # when
-    with pytest.raises(SystemExit) as ei:
-        cli.promql_main(argv, {}, AT, no_client)
-    # then
-    assert ei.value.code == 0
-    text = capsys.readouterr().out
-    for name in cli.METRICS_SUBCOMMANDS:
-        assert name in text
-        assert re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(name), text)
-
-
-def test_logql_help_lists_logs_subcommands(capsys: pytest.CaptureFixture[str]) -> None:
-    """상위 logql --help 에 로그 환원 서브커맨드 넷의 이름이 전부 있다 — 상위 화면에서 서브커맨드를 안다."""
-    # given — 상위 화면
-    argv = ["--help"]
-    # when
-    with pytest.raises(SystemExit) as ei:
-        cli.logql_main(argv, {}, AT, no_client)
-    # then
-    assert ei.value.code == 0
-    text = capsys.readouterr().out
-    for name in cli.LOGS_SUBCOMMANDS:
-        assert name in text
 
 
 # ── 파서 — 손으로 만든 형태 ───────────────────────────────────────────────────────

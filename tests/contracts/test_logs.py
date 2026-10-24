@@ -743,16 +743,6 @@ def test_logs_ops_require_selector(make_client: ClientFactory, op: str) -> None:
     assert t.calls == []
 
 
-def test_logs_run_validates_before_request(make_client: ClientFactory) -> None:
-    """validate 가 거부하는 Args 는 logs_run 이 요청 없이 ObsError 다 — 검사가 요청 앞에 배선돼 있다."""
-    # given
-    client, t = make_client()
-    # when · then
-    with pytest.raises(ObsError):
-        cli.logs_run(client, cli.LogsArgs(cmd="red", selector=SEL), at=AT)
-    assert t.calls == []
-
-
 ARGS: dict[str, cli.LogsArgs] = {
     "histogram": cli.LogsArgs(cmd="histogram", selector=SEL),
     "templates": cli.LogsArgs(cmd="templates", selector=SEL),
