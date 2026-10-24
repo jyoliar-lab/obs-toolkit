@@ -28,7 +28,7 @@ from obs.adapters.cli_argparse import (
     logql_parser, logs_parser, metrics_parser, promql_parser, traceql_parser, traces_parser,
 )
 from obs.core import (
-    JSON, Client, DoctorReport, Evidence, ObsError, Params, Response, Transport, V, Window, doctor, fmt_ts, load_config,
+    JSON, Client, DoctorReport, Evidence, ObsError, Params, Transport, V, Window, doctor, fmt_ts, load_config,
     SPILL_RAW, SPILL_SUMMARY, json_labels, json_list, json_strs,
     parse_duration, parse_time, project_dir, spill, spill_ref, to_json, token_from_env,
 )
@@ -139,32 +139,6 @@ def print_summary(lines: list[str], output: OutputArgs, where: str, *, out: Call
     return Printed(lines=shown, cut=cut)
 
 
-@dataclass
-class Emitted:
-    """stdout 에 찍은 것과 호출 디렉터리 — 테스트가 검사한다."""
-    lines: list[str]
-    cut: int
-    ref: str          # 호출 디렉터리(프로젝트 기준 상대 경로) — raw.json · summary.txt 가 그 안에
-
-
-def emit(lines: list[str], full: object, kind: str, max_lines: int, *, base: Path, at: float, quiet: bool = False,
-         out: Callable[[str], None] = print, preamble: Sequence[str] = ()) -> Emitted:
-    """항상 호출 디렉터리를 만든다(원본 raw.json · 요약 전체 summary.txt). stdout 에는 앞 max_lines 줄만 —
-    quiet 면 요약을 찍지 않고 경로만. 잘렸으면 몇 줄이 더 있는지 알린다.
-    `preamble` 은 summary.txt 의 머리에만 쓴다(창 · 기준선 — stdout 에는 찍지 않는다)."""
-    ref = spill_ref(spill(kind, full, [*preamble, *lines] if preamble else lines, base, at), base)
-    shown = [] if quiet else lines[:max_lines]
-    for line in shown:
-        out(line)
-    cut = len(lines) - len(shown)
-    where = "%s/ (%s · %s)" % (ref, SPILL_RAW, SPILL_SUMMARY)
-    if cut > 0 and not quiet:
-        out("… %d줄 더 있음 (총 %d줄). 원본·요약: %s" % (cut, len(lines), where))
-    else:
-        out("원본·요약: %s" % where)
-    return Emitted(lines=shown, cut=cut, ref=ref)
-
-
 def clip(text: str, width: int) -> str:
     text = text.replace("\n", "⏎")
     return text if len(text) <= width else text[: width - 1] + "…"
@@ -199,26 +173,18 @@ def window_preamble(window: Window) -> list[str]:
     return [*lines, ""]
 
 
-def _finish(lines: list[str], raw: list[Response], kind: str, window: Window, max_lines: int, as_json: bool, *,
-            base: Path, at: float, out: Callable[[str], None] = print) -> None:
-    """요약 줄을 stdout 규약으로. as_json 은 stdout 에 요약을 찍지 않고 경로만(파일은 어느 쪽이든 같다).
-    summary.txt 는 머리(창) + 요약 전체다."""
-    emit(lines, raw, kind, max_lines, base=base, at=at, quiet=as_json, out=out, preamble=window_preamble(window))
-
-
 def _stderr(line: str) -> None:
     print(line, file=sys.stderr)
 
 
 def _spill_failed(client: Client, failed_kind: str, error: BaseException, base: Path, at: float) -> str:
     """실패한 run 의 client.log 를 <failed_kind> 호출 디렉터리로 — summary.txt 는 오류 문구. 안내할 경로 문구를 돌려준다."""
-    ref = spill_ref(spill(failed_kind, client.log, [str(error)], base, at), base)
-    return "%s/ (%s · %s)" % (ref, SPILL_RAW, SPILL_SUMMARY)
+    return spill_call(failed_kind, client.log, [str(error)], base=base, at=at).where
 
 
 def finish(client: Client, run: Callable[[], Renderable], failed_kind: str, output: OutputArgs, *,
            base: Path, at: float, out: Callable[[str], None] = print, err: Callable[[str], None] = _stderr) -> None:
-    """run 을 돌리고 끝낸다 — 성공이면 client.log 를 원본으로 emit(지금의 _finish). 실패(어떤 예외든)면 client.log 가 비지 않을 때
+    """run 을 돌리고 끝낸다 — 성공이면 client.log 를 원본 · 창 머리 + 요약을 summary.txt 로 spill_call 하고 stdout 은 print_summary. 실패(어떤 예외든)면 client.log 가 비지 않을 때
     <failed_kind> 호출 디렉터리를 남기고(summary.txt 는 오류 문구) — ObsError 는 같은 종류로 문구 끝에 경로를 붙여 다시 올리고,
     그 외 예외는 err 로 경로 한 줄을 찍은 뒤 그대로 올린다. 보낸 호출이 없으면 디렉터리 없이 예외 그대로."""
     try:
@@ -231,8 +197,9 @@ def finish(client: Client, run: Callable[[], Renderable], failed_kind: str, outp
         if client.log:
             err("원본: %s" % _spill_failed(client, failed_kind, e, base, at))
         raise
-    # stub — 호출자를 새 꼴로만. spill_call → print_summary 로 바꾸는 것은 green
-    _finish(r.lines() or [NO_RESULT], client.log, r.kind, r.window, output.max_lines, output.files_only, base=base, at=at, out=out)
+    lines = r.lines() or [NO_RESULT]
+    call = spill_call(r.kind, client.log, [*window_preamble(r.window), *lines], base=base, at=at)
+    print_summary(lines, output, call.where, out=out)
 
 
 def _run_main(client: Callable[[], Client], run: Callable[[Client], Renderable], failed_kind: str, output: OutputArgs,
@@ -913,7 +880,7 @@ def traces_run(client: Client, a: TracesArgs, at: float) -> TracesResult:
 
 
 def traces_main(argv: Sequence[str], env: Mapping[str, str], at: float, client: Callable[[], Client]) -> None:
-    """argparse 서브파서 → TracesArgs → traces_run → _finish."""
+    """argparse 서브파서 → TracesArgs → traces_run → finish."""
     a = traces_parser().parse_args(argv)
     args = map_args(TracesArgs, a)
     _run_main(client, lambda c: traces_run(c, args, at), "traceql-%s-failed" % a.cmd, map_args(OutputArgs, a), env, at)
