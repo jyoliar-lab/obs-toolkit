@@ -110,13 +110,13 @@ class CallDir:
     @property
     def where(self) -> str:
         """사람에게 안내하는 문구 — "<ref>/ (raw.json · summary.txt)". SPILL_RAW · SPILL_SUMMARY 를 잇는 유일한 자리."""
-        raise NotImplementedError("CallDir.where")
+        return "%s/ (%s · %s)" % (self.ref, SPILL_RAW, SPILL_SUMMARY)
 
 
 def spill_call(kind: str, payload: object, summary: Sequence[str], *, base: Path, at: float) -> CallDir:
     """한 호출의 산출물을 호출 디렉터리 하나로 — core spill 한 번 + spill_ref 한 번. 성공 · 실패 길이 지나는 하나의 입구.
     예외는 던지지 않는다(spill 의 OSError 그대로) · 언제나 디렉터리를 만든다."""
-    raise NotImplementedError("spill_call")
+    return CallDir(ref=spill_ref(spill(kind, payload, summary, base, at), base))
 
 
 @dataclass(frozen=True)
@@ -128,7 +128,15 @@ class Printed:
 
 def print_summary(lines: list[str], output: OutputArgs, where: str, *, out: Callable[[str], None] = print) -> Printed:
     """stdout 절제 — 앞 max_lines 줄과 잘림 안내, files_only 면 경로 한 줄만. 안내 문구는 받은 where 그대로 · 파일을 만들지 않는다."""
-    raise NotImplementedError("print_summary")
+    shown = [] if output.files_only else lines[:output.max_lines]
+    for line in shown:
+        out(line)
+    cut = len(lines) - len(shown)
+    if cut > 0 and not output.files_only:
+        out("… %d줄 더 있음 (총 %d줄). 원본·요약: %s" % (cut, len(lines), where))
+    else:
+        out("원본·요약: %s" % where)
+    return Printed(lines=shown, cut=cut)
 
 
 @dataclass
