@@ -323,6 +323,7 @@ def test_finish_summary_keeps_all_lines(output: cli.OutputArgs, make_client: Cli
     summary = _summary_text(tmp_path).splitlines()
     assert summary[0].startswith("# 창")
     assert summary[-3:] == THREE_LINES
+    assert summary == [*cli.window_preamble(Window(AT - MINUTE, AT)), *THREE_LINES]
 
 
 # ── 인터페이스 — 물리 인자가 없다 ────────────────────────────────────────────────
