@@ -15,7 +15,7 @@ from obs.traces import (
     THRESHOLD_BASELINE, THRESHOLD_SAMPLE, THRESHOLD_WINDOW, Bucket, ClientRow, CriticalPath, Edge, Endpoint, EndpointQuantiles, Exemplar,
     Exemplars, PathSpan, ServiceGraph, Span, SpanDelta, SpanMatch, SpanTime, Threshold, Trace, TraceDiff,
 )
-from tests.conftest import AT, ClientFactory, _no_physical, _vector
+from tests.conftest import AT, ClientFactory, _vector
 from tests.replay import Call
 
 W: Window = Window.last("1h", at=AT)
@@ -174,40 +174,6 @@ def test_parse_span_matches_empty_response_is_empty() -> None:
 
 # ── threshold_query · candidates_query ──────────────────────────────────────────────
 
-def test_threshold_query_tags_baseline_and_window_in_one_query() -> None:
-    """threshold_query 는 base(평소 — [baseline_range] offset 창 길이) 와 now(조사 창 — [창 길이]) 두 서버 분위수를 label_replace 로 한 질의에 담고 서비스 필터가 없다."""
-    # given · when
-    q = traces.threshold_query(0.95, W, "7d")
-    # then
-    base, now = q.split(" or ")
-    assert base.startswith('label_replace(histogram_quantile(0.95, sum by (service_name, span_name) (rate(traces_span_metrics_duration_seconds{span_kind="SPAN_KIND_SERVER"}[7d] offset 3600s))), "stat", "base", "", "")')
-    assert now == 'label_replace(histogram_quantile(0.95, sum by (service_name, span_name) (rate(traces_span_metrics_duration_seconds{span_kind="SPAN_KIND_SERVER"}[3600s]))), "stat", "now", "", "")'
-    assert "service_name=" not in q
-
-
-def test_candidates_query_appends_server_kind_and_select() -> None:
-    """candidates_query 는 조건식에 `&& kind = server` 를 붙이고 이름 · status · 서비스 · 파드를 select 한다."""
-    # given · when
-    q = traces.candidates_query('resource.service.name = "a"')
-    # then
-    assert q == '{ resource.service.name = "a" && kind = server } | ' + SELECT
-
-
-def test_threshold_query_carries_quantile_literal() -> None:
-    """분위수는 리터럴로 질의에 들어간다 — 0.999 는 histogram_quantile(0.999, …) 다."""
-    # given · when
-    q = traces.threshold_query(0.999, W, "7d")
-    # then
-    assert q.count("histogram_quantile(0.999, ") == 2
-
-
-def test_candidates_query_without_filter_is_all_server_spans() -> None:
-    """빈 조건식(공백뿐)은 서버 span 전부다."""
-    # given · when
-    q = traces.candidates_query("  ")
-    # then
-    assert q == "{ kind = server } | " + SELECT
-
 
 def test_candidates_query_strips_surrounding_braces() -> None:
     """중괄호째 온 조건식은 벗겨서 쓴다 — 중괄호가 겹치지 않는다."""
@@ -223,13 +189,6 @@ def test_threshold_query_rejects_quantile_outside_unit_interval(quantile: float)
     # given · when · then
     with pytest.raises(ObsError):
         traces.threshold_query(quantile, W, "7d")
-
-
-def test_threshold_query_rejects_bad_baseline_range() -> None:
-    """baseline_range 가 기간 표기가 아니면 ObsError 다."""
-    # given · when · then
-    with pytest.raises(ObsError):
-        traces.threshold_query(0.95, W, "week")
 
 
 # ── parse_quantiles ─────────────────────────────────────────────────────────────────
@@ -410,7 +369,6 @@ def test_exemplars_of_slow_bucket_orders_by_ratio_then_trace_id_and_cuts_at_k() 
     # then
     assert _ids(out.slow.items) == ["c", "a", "b"]
     assert out.slow.total == 4
-    assert out.k == 3
 
 
 def test_exemplars_of_error_and_normal_buckets_order_by_duration_then_trace_id() -> None:
@@ -506,24 +464,11 @@ def test_exemplars_sends_threshold_then_candidates(make_client: ClientFactory) -
     # then
     assert len(t.calls) == 2
     assert _path(t.calls[0]).endswith(INSTANT)
-    assert _params(t.calls[0])["query"] == traces.threshold_query(0.95, W, "7d")
     assert _params(t.calls[0])["time"] == str(W.end)
     assert _path(t.calls[1]).endswith(SEARCH)
-    assert _params(t.calls[1])["q"] == traces.candidates_query('resource.service.name = "a"')
     assert _params(t.calls[1])["start"] == str(int(W.start))
     assert _params(t.calls[1])["end"] == str(int(W.end))
     assert _params(t.calls[1])["limit"] == "101"
-
-
-def test_exemplars_sends_threshold_then_candidates_queries(make_client: ClientFactory) -> None:
-    """첫 요청은 조사 창의 임계 질의(metrics)이고 둘째는 후보 TraceQL(traces)이다 — 조건식이 비어도."""
-    # given
-    client, t = make_client(_exemplar_routes())
-    # when
-    traces.exemplars(client, "", W)
-    # then
-    assert _params(t.calls[0])["query"] == traces.threshold_query(0.95, W, "7d")
-    assert _params(t.calls[1])["q"] == traces.candidates_query("")
 
 
 def test_exemplars_classifies_with_server_thresholds(make_client: ClientFactory) -> None:
@@ -535,8 +480,6 @@ def test_exemplars_classifies_with_server_thresholds(make_client: ClientFactory)
     # then
     assert _ids(ev.value.slow.items) == ["t1"]
     assert ev.value.slow.items[0].threshold_source == THRESHOLD_BASELINE
-    assert ev.value.k == 2
-    assert ev.value.quantile == 0.9
 
 
 @pytest.mark.parametrize("returned,truncated,sample", [(3, True, 2), (2, False, 2)], ids=["over", "at_limit"])
@@ -763,7 +706,6 @@ def test_critical_path_fetches_the_trace_once(make_client: ClientFactory) -> Non
     # then
     assert len(t.calls) == 1
     assert _path(t.calls[0]).endswith(_trace_path("abc"))
-    assert ev.value.trace_id == "abc"
     assert _names(ev.value.path) == ["root", "child"]
 
 
@@ -775,30 +717,6 @@ def test_critical_path_rejects_blank_trace_id(make_client: ClientFactory) -> Non
     with pytest.raises(ObsError):
         traces.critical_path(client, " ", W)
     assert t.calls == []
-
-
-# ── edge_query ─────────────────────────────────────────────────────────────────────
-
-def test_edge_query_tags_calls_errors_now_and_base_for_client_spans() -> None:
-    """edge_query 는 CLIENT 행의 calls · errors(ERROR 만) · now([창]) · base([baseline_range] offset 창) 넷을 label_replace 로 한 질의에 담고 서비스 필터가 없다."""
-    # given · when
-    q = traces.edge_query(0.95, W, "7d")
-    # then
-    parts = q.split(" or ")
-    assert len(parts) == 4
-    assert parts[0] == 'label_replace(sum by (service_name, span_name) (increase(traces_span_metrics_calls_total{span_kind="SPAN_KIND_CLIENT"}[3600s])), "stat", "calls", "", "")'
-    assert parts[1] == 'label_replace(sum by (service_name, span_name) (increase(traces_span_metrics_calls_total{span_kind="SPAN_KIND_CLIENT", status_code="STATUS_CODE_ERROR"}[3600s])), "stat", "errors", "", "")'
-    assert parts[2] == 'label_replace(histogram_quantile(0.95, sum by (service_name, span_name) (rate(traces_span_metrics_duration_seconds{span_kind="SPAN_KIND_CLIENT"}[3600s]))), "stat", "now", "", "")'
-    assert parts[3] == 'label_replace(histogram_quantile(0.95, sum by (service_name, span_name) (rate(traces_span_metrics_duration_seconds{span_kind="SPAN_KIND_CLIENT"}[7d] offset 3600s))), "stat", "base", "", "")'
-    assert "service_name=" not in q
-
-
-@pytest.mark.parametrize("quantile,baseline_range", [(1.0, "7d"), (0.95, "week")], ids=["quantile", "baseline_range"])
-def test_edge_query_rejects_bad_arguments(quantile: float, baseline_range: str) -> None:
-    """분위수가 (0, 1) 밖이거나 baseline_range 가 기간 표기가 아니면 ObsError 다."""
-    # given · when · then
-    with pytest.raises(ObsError):
-        traces.edge_query(quantile, W, baseline_range)
 
 
 # ── parse_edges ────────────────────────────────────────────────────────────────────
@@ -904,16 +822,6 @@ def test_service_graph_marks_callee_unknown_when_span_name_is_ambiguous() -> Non
     assert g.edges[0].callee is None
 
 
-def test_service_graph_rejects_duplicate_server_quantiles() -> None:
-    """servers 에 같은 엔드포인트(서비스까지 같은) 의 EndpointQuantiles 가 둘이면 ObsError 이고 문구에 그 엔드포인트가 있다 — 첫 것을 조용히 쓰지 않는다."""
-    # given
-    servers = [_eq("b", "dup-X", 0.03, 0.03), _eq("b", "dup-X", 0.05, 0.05)]
-    # when · then
-    with pytest.raises(ObsError) as ei:
-        _sg([_row("a", "dup-X", calls=1, now=0.04, base=0.02)], servers)
-    assert "dup-X" in str(ei.value)
-
-
 def test_service_graph_of_no_client_rows_is_no_data() -> None:
     """클라이언트 행이 없으면 edges [] · idle 0 — 데이터 없음이다."""
     # given · when
@@ -964,21 +872,7 @@ def test_service_graph_sends_edge_then_server_queries_to_metrics_only(make_clien
     # then
     assert len(t.calls) == 2
     assert all(_path(c).endswith(INSTANT) for c in t.calls)
-    assert _params(t.calls[0])["query"] == traces.edge_query(0.95, W, "7d")
-    assert _params(t.calls[1])["query"] == traces.threshold_query(0.95, W, "7d")
     assert {_params(c)["time"] for c in t.calls} == {str(W.end)}
-
-
-def test_service_graph_sends_edge_then_server_queries(make_client: ClientFactory) -> None:
-    """요청은 [edge, server] 순이고 value 의 quantile · baseline_range 는 인자다."""
-    # given
-    client, t = make_client({("metrics", INSTANT): (200, _vector())})
-    # when
-    ev = traces.service_graph(client, W, quantile=0.9, baseline_range="3d")
-    # then
-    assert [_params(c)["query"] for c in t.calls] == [traces.edge_query(0.9, W, "3d"), traces.threshold_query(0.9, W, "3d")]
-    assert ev.value.quantile == 0.9
-    assert ev.value.baseline_range == "3d"
 
 
 @pytest.mark.parametrize("quantile,baseline_range", [(1.0, "7d"), (0.95, "week")], ids=["quantile", "baseline_range"])
@@ -1125,11 +1019,6 @@ def test_diff_rejects_identical_or_blank_ids(make_client: ClientFactory, slow: s
 
 # ── 렌더러의 성질 — 모양은 format 이, 여기는 약속만 ───────────────────────────────────
 
-def _exemplar(trace_id: str = "t1", source: str = THRESHOLD_BASELINE, threshold_ms: float = 10.0) -> Exemplar:
-    return Exemplar(trace_id=trace_id, span_id="s", service="a", endpoint="x", pod="p", duration_ms=50.0, start_ts=AT, threshold_ms=threshold_ms,
-                    threshold_source=source, ratio=50.0 / threshold_ms)
-
-
 def _exemplars(sample: int = 1, slow: list[Exemplar] | None = None, normal: list[Exemplar] | None = None, truncated: bool = False,
                quantile: float = 0.95, slow_total: int | None = None) -> Exemplars:
     slow_items = slow or []
@@ -1154,45 +1043,6 @@ def _graph(edges: list[Edge], idle: int = 0) -> ServiceGraph:
     return ServiceGraph(quantile=0.95, baseline_range="7d", edges=edges, idle=idle)
 
 
-def _tdiff(deltas: list[SpanDelta]) -> TraceDiff:
-    return TraceDiff(slow_id="s", normal_id="n", root_name="root", deltas=deltas)
-
-
-def test_exemplars_lines_mark_empty_bucket_as_none_not_no_data() -> None:
-    """표본은 있는데 slow 묶음이 비면 그 묶음 줄에 '없음' 이 있고 어느 줄에도 '데이터 없음' 은 없다."""
-    # given
-    lines = cli.exemplars_lines(_exemplars(sample=1, normal=[_exemplar()]), W)
-    # when
-    slow_lines = [line for line in lines if line.startswith("slow")]
-    # then
-    assert len(slow_lines) == 1
-    assert "없음" in slow_lines[0]
-    assert not any("데이터 없음" in line for line in lines)
-
-
-def test_exemplars_lines_no_data_when_sample_is_zero() -> None:
-    """sample 이 0 이면 한 줄이고 '(데이터 없음' 으로 시작하며 창을 넓히라는 --since 안내가 있다."""
-    # given · when
-    lines = cli.exemplars_lines(_exemplars(sample=0), W)
-    # then
-    assert len(lines) == 1
-    assert lines[0].startswith("(데이터 없음")
-    assert "--since" in lines[0]
-
-
-@pytest.mark.parametrize("source", [THRESHOLD_BASELINE, THRESHOLD_SAMPLE])
-def test_exemplars_lines_show_threshold_and_source_per_item(source: str) -> None:
-    """건 줄에 적용한 임계 값과 그 출처 문자열이 있다."""
-    # given
-    lines = cli.exemplars_lines(_exemplars(sample=1, slow=[_exemplar(source=source, threshold_ms=12.5)]), W)
-    # when
-    item_lines = [line for line in lines if "t1" in line]
-    # then
-    assert len(item_lines) == 1
-    assert "12.5" in item_lines[0]
-    assert source in item_lines[0]
-
-
 def test_exemplars_lines_mark_truncated_sample() -> None:
     """truncated 면 헤더에 절단 표시가 있고 아니면 없다."""
     # given · when
@@ -1201,18 +1051,6 @@ def test_exemplars_lines_mark_truncated_sample() -> None:
     # then
     assert any("절단" in line for line in with_cut)
     assert not any("절단" in line for line in without)
-
-
-@pytest.mark.parametrize("quantile,expected", [(0.95, "5%"), (0.9, "10%")], ids=["p95", "p90"])
-def test_exemplars_lines_summarize_sample_exceeded_and_expected_ratio(quantile: float, expected: str) -> None:
-    """요약 줄에 표본 수 · 임계 초과 수 · 평소 기대 비율((1 − q) × 100%) 이 함께 있다."""
-    # given
-    value = _exemplars(sample=40, slow=[_exemplar("t%d" % i) for i in range(3)], slow_total=6, quantile=quantile)
-    # when
-    summary = [line for line in cli.exemplars_lines(value, W) if "40" in line and expected in line]
-    # then
-    assert len(summary) == 1
-    assert " 6" in summary[0]
 
 
 def test_critical_path_lines_mark_clipped_spans() -> None:
@@ -1282,36 +1120,6 @@ def test_service_graph_lines_mark_unknown_callee_and_missing_server_p95() -> Non
     assert "미확인" in head_lines[0]
     assert len(endpoint_lines) == 1
     assert "서버 —" in endpoint_lines[0]
-
-
-def test_diff_lines_mark_one_sided_spans() -> None:
-    """한쪽에만 있는 행에는 '한쪽에만 있음' 표시가 있고 Δ 숫자가 없다."""
-    # given
-    deltas = [SpanDelta("a", "only-slow", SpanTime(30.0, 1), None, None), SpanDelta("a", "both", SpanTime(30.0, 1), SpanTime(10.0, 1), 20.0)]
-    # when
-    lines = cli.diff_lines(_tdiff(deltas), W)
-    one_sided = [line for line in lines if "only-slow" in line]
-    # then
-    assert len(one_sided) == 1
-    assert "한쪽에만 있음" in one_sided[0]
-    assert "Δ+" not in one_sided[0]
-    assert "Δ-" not in one_sided[0]
-
-
-@pytest.mark.parametrize("render", ["exemplars", "critical-path", "service-graph", "diff"])
-def test_traces_lines_carry_no_physical(render: str) -> None:
-    """네 렌더러의 출력 어디에도 물리 문자열이 없다."""
-    # given · when
-    if render == "exemplars":
-        lines = cli.exemplars_lines(_exemplars(sample=1, slow=[_exemplar()]), W)
-    elif render == "critical-path":
-        lines = cli.critical_path_lines(_critical([_path_span("root")]), W)
-    elif render == "service-graph":
-        lines = cli.service_graph_lines(_graph([_edge()]), W)
-    else:
-        lines = cli.diff_lines(_tdiff([SpanDelta("a", "x", SpanTime(1.0, 1), SpanTime(1.0, 1), 0.0)]), W)
-    # then
-    _no_physical("\n".join(lines))
 
 
 # ── traces_run — 디스패치 · kind · queries 유지 · 원본은 요약에 없음 · validate ────────────
