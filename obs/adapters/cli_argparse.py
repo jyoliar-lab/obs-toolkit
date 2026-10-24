@@ -232,10 +232,10 @@ DIFF_DOC = """traceql.py diff <느린 traceID> <정상 traceID>
 """ + TRACES_COMMON_DOC
 
 def output_options(ap: argparse.ArgumentParser) -> None:
-    """--max-lines · --json — 여섯 명령이 공유하는 stdout 절제 옵션(dest max_lines · as_json). default 는 SUPPRESS."""
+    """--max-lines · --json — 여섯 명령이 공유하는 stdout 절제 옵션(dest max_lines · files_only). default 는 SUPPRESS."""
     ap.add_argument("--max-lines", type=int,
                     help="stdout 줄 수 상한. 기본 %d — 나머지는 호출 디렉터리의 summary.txt 에" % DEFAULT_MAX_LINES)
-    ap.add_argument("--json", dest="as_json", action="store_true", help="stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 성공 · 실패 모두 남는다)")
+    ap.add_argument("--json", dest="files_only", action="store_true", help="stdout 에 요약을 찍지 않고 호출 디렉터리 경로만(파일은 성공 · 실패 모두 남는다)")
 
 
 def _parser(prog: str, description: str) -> argparse.ArgumentParser:

@@ -1,4 +1,4 @@
-"""CLI 어댑터의 약속 — 질의 없음 · ID 없음 거부, 백엔드 오류 상태, 빈 검색의 힌트, 출력 절제(emit), --help 의 물리 비노출."""
+"""CLI 어댑터의 약속 — 질의 없음 · ID 없음 거부, 백엔드 오류 상태, 빈 검색의 힌트, 출력 경로(spill_call · print_summary · finish), --help 의 물리 비노출."""
 from __future__ import annotations
 
 import json
@@ -55,79 +55,127 @@ def test_traceql_trace_requires_id(make_client: ClientFactory) -> None:
     assert t.calls == []
 
 
-# ── 출력 절제 ────────────────────────────────────────────────────────────────────
+# ── 출력 경로 — 파일은 spill_call · stdout 은 print_summary ─────────────────────────────
 
-def test_emit_truncates_and_spills(tmp_path: Path) -> None:
-    """emit 은 max_lines 를 넘으면 앞부분만 찍고 "N줄 더 있음" 과 호출 디렉터리를 안내하며, raw.json 과 summary.txt 에는 전체가 남는다."""
-    out: list[str] = []
-    lines = ["l%d" % i for i in range(10)]
-    res = cli.emit(lines, {"full": True}, "k", max_lines=3, base=tmp_path, at=AT, out=out.append)
-    assert res.lines == ["l0", "l1", "l2"]
-    assert res.cut == 7
-    assert res.ref.startswith("tmp/obs/")
-    assert res.ref.endswith("-k")
-    assert out[-1] == "… 7줄 더 있음 (총 10줄). 원본·요약: %s/ (raw.json · summary.txt)" % res.ref
-    assert json.loads((tmp_path / res.ref / "raw.json").read_text()) == {"full": True}
-    assert (tmp_path / res.ref / "summary.txt").read_text().splitlines() == lines
+SPILL_PAYLOAD: list[Response] = [
+    Response(backend="metrics", path="api/v1/query", status=200, body={"a": 1}, params={"query": "up"}, size=8),
+    Response(backend="traces", path="api/search", status=None, body=None, error="traces 백엔드에 닿지 못했다"),
+]
+"""spill_call 의 payload 표본 — 성공 하나 · 전송 실패 하나(섞임)."""
+SPILL_SUMMARY: list[str] = ["# 창", "", "a 1"]
+"""spill_call 의 summary 표본 — 셋 줄."""
 
 
-def test_emit_quiet_writes_files_prints_only_path(tmp_path: Path) -> None:
-    """quiet 이면 stdout 에 요약 없이 경로만 찍고 파일은 보통 때와 같다."""
-    out: list[str] = []
-    res = cli.emit(["a", "b"], {"x": 1}, "k", max_lines=3, quiet=True, base=tmp_path, at=AT, out=out.append)
-    assert res.lines == []
-    assert out == ["원본·요약: %s/ (raw.json · summary.txt)" % res.ref]
-    assert (tmp_path / res.ref / "summary.txt").read_text() == "a\nb\n"
-
-
-def test_emit_always_writes_even_when_fits(tmp_path: Path) -> None:
-    """상한 안에 들어가도 호출 디렉터리는 만들고 stdout 은 요약 뒤에 경로 한 줄이다."""
-    out: list[str] = []
-    res = cli.emit(["a", "b"], {"x": 1}, "k", max_lines=3, base=tmp_path, at=AT, out=out.append)
-    assert res.cut == 0
-    assert out == ["a", "b", "원본·요약: %s/ (raw.json · summary.txt)" % res.ref]
-    assert sorted(q.name for q in (tmp_path / res.ref).iterdir()) == ["raw.json", "summary.txt"]
-
-
-def test_emit_writes_log_items_with_one_key_set(tmp_path: Path) -> None:
-    """log(성공 · 실패 섞임)는 raw.json 에 같은 순서의 목록으로 쓰이고 원소마다 키 집합이 backend · path · params · status · body · error · size · truncated 로 같다."""
-    # given — 성공 하나 · 전송 실패 하나
-    log = [Response(backend="metrics", path="api/v1/query", status=200, body={"a": 1}, params={"query": "up"}, size=8),
-           Response(backend="traces", path="api/search", status=None, body=None, error="traces 백엔드에 닿지 못했다")]
+def test_spill_call_names_directory_by_at(tmp_path: Path) -> None:
+    """spill_call 은 <base>/tmp/obs/ 아래 디렉터리 하나를 만들고 그 이름의 시각은 인자 at 의 UTC 표기다 — 지금 시각이 아니다."""
+    # given — base 는 tmp · at 은 AT
     # when
-    res = cli.emit(["x"], log, "k", max_lines=3, base=tmp_path, at=AT, out=lambda _: None)
+    cli.spill_call("k", SPILL_PAYLOAD, SPILL_SUMMARY, base=tmp_path, at=AT)
     # then
-    items = json.loads((tmp_path / res.ref / "raw.json").read_text())
-    assert [(i["backend"], i["path"]) for i in items] == [(r.backend, r.path) for r in log]
+    dirs = sorted((tmp_path / "tmp" / "obs").iterdir())
+    assert len(dirs) == 1
+    assert dirs[0].name == "19700102T034640.000000Z-k"
+    assert dirs[0].is_dir()
+
+
+def test_spill_call_writes_payload_as_raw_json(tmp_path: Path) -> None:
+    """raw.json 은 payload 와 같은 순서의 목록이고 원소마다 키 집합이 backend · path · params · status · body · error · size · truncated 로 같다 — 성공 · 실패가 섞여도."""
+    # given — 성공 하나 · 전송 실패 하나
+    # when
+    cli.spill_call("k", SPILL_PAYLOAD, SPILL_SUMMARY, base=tmp_path, at=AT)
+    # then
+    items = json.loads((_only_dir(tmp_path) / "raw.json").read_text())
+    assert [(i["backend"], i["path"]) for i in items] == [(r.backend, r.path) for r in SPILL_PAYLOAD]
     for item in items:
         assert set(item) == {"backend", "path", "params", "status", "body", "error", "size", "truncated"}
     assert [i["status"] for i in items] == [200, None]
     assert [i["error"] for i in items] == [None, "traces 백엔드에 닿지 못했다"]
 
 
-def test_emit_names_call_directory_by_at(tmp_path: Path) -> None:
-    """emit 이 만든 호출 디렉터리(ref) 이름의 시각은 인자 at 의 UTC 표기다 — 지금 시각이 아니다."""
-    # given — base 는 tmp · at 은 AT
+def test_spill_call_writes_summary_lines(tmp_path: Path) -> None:
+    """summary.txt 의 줄은 인자 summary 그대로다 — 순서와 수(셋)."""
+    # given — summary 셋 줄(빈 줄 포함)
     # when
-    res = cli.emit(["a", "b"], {"x": 1}, "k", max_lines=3, base=tmp_path, at=AT, out=lambda _: None)
+    cli.spill_call("k", SPILL_PAYLOAD, SPILL_SUMMARY, base=tmp_path, at=AT)
     # then
-    assert res.ref == "tmp/obs/19700102T034640.000000Z-k"
-    assert (tmp_path / res.ref).is_dir()
+    assert (_only_dir(tmp_path) / "summary.txt").read_text(encoding="utf-8").splitlines() == SPILL_SUMMARY
 
 
-# ── finish — 성공은 emit, 실패도 호출 디렉터리 ───────────────────────────────────
+def test_spill_call_returns_ref_and_where(tmp_path: Path) -> None:
+    """반환 CallDir 의 ref 는 그 디렉터리의 base 기준 상대 경로이고, where 는 "<ref>/ (raw.json · summary.txt)" 다."""
+    # given — base 는 tmp
+    # when
+    d = cli.spill_call("k", SPILL_PAYLOAD, SPILL_SUMMARY, base=tmp_path, at=AT)
+    # then
+    assert d.ref == str(_only_dir(tmp_path).relative_to(tmp_path))
+    assert d.ref.startswith("tmp/obs/")
+    assert d.ref.endswith("-k")
+    assert d.where == "%s/ (raw.json · summary.txt)" % d.ref
+
+
+WHERE = "tmp/obs/19700102T034640.000000Z-k/ (raw.json · summary.txt)"
+"""print_summary 가 받아 그대로 찍어야 하는 안내 문구 표본."""
+
+
+def test_print_summary_truncates_and_hints_rest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """max_lines 를 넘으면 앞 max_lines 줄만 찍고 마지막 줄은 "… N줄 더 있음 (총 M줄). 원본·요약: <where>" 이며, Printed 는 찍은 줄과 안 찍은 수다."""
+    # given — 열 줄 · 상한 3 · out 은 목록 · cwd 는 tmp(파일을 만들면 보이게)
+    monkeypatch.chdir(tmp_path)
+    out: list[str] = []
+    lines = ["l%d" % i for i in range(10)]
+    # when
+    res = cli.print_summary(lines, cli.OutputArgs(max_lines=3), WHERE, out=out.append)
+    # then
+    assert out[:3] == ["l0", "l1", "l2"]
+    assert out[3] == "… 7줄 더 있음 (총 10줄). 원본·요약: %s" % WHERE
+    assert len(out) == 4
+    assert res.lines == ["l0", "l1", "l2"]
+    assert res.cut == 7
+    assert not (tmp_path / "tmp").exists()
+
+
+def test_print_summary_files_only_prints_only_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """files_only 면 요약을 한 줄도 찍지 않고 "원본·요약: <where>" 한 줄뿐이며, Printed.lines 는 비고 cut 은 줄 수 전부다."""
+    # given — 두 줄 · files_only
+    monkeypatch.chdir(tmp_path)
+    out: list[str] = []
+    # when
+    res = cli.print_summary(["a", "b"], cli.OutputArgs(files_only=True), WHERE, out=out.append)
+    # then
+    assert out == ["원본·요약: %s" % WHERE]
+    assert res.lines == []
+    assert res.cut == 2
+    assert not (tmp_path / "tmp").exists()
+
+
+@pytest.mark.parametrize("lines", [["a", "b"], ["a", "b", "c"]], ids=["under", "exact"])
+def test_print_summary_fits_prints_all_then_path(lines: list[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """상한 안(아래 · 딱 맞음)이면 줄 전부 뒤에 "원본·요약: <where>" 한 줄이고 "더 있음" 안내가 없으며 cut 은 0 이다."""
+    # given — 상한 3 에 두 줄 / 셋 줄
+    monkeypatch.chdir(tmp_path)
+    out: list[str] = []
+    # when
+    res = cli.print_summary(lines, cli.OutputArgs(max_lines=3), WHERE, out=out.append)
+    # then
+    assert out == [*lines, "원본·요약: %s" % WHERE]
+    assert not [line for line in out if "더 있음" in line]
+    assert res.lines == lines
+    assert res.cut == 0
+
+
+# ── finish — 결정 넷과 배선: 성공은 spill_call → print_summary, 실패도 호출 디렉터리 ───────────────────────────────────
 
 FINISH_ROUTES: dict[RouteKey, tuple[int, object]] = {("metrics", "api/v1/labels"): (200, {"data": []}), ("metrics", "api/v1/series"): (200, {"data": []})}
 
 
-def _run_after(client: Client, calls: int, raise_: BaseException | None = None) -> Callable[[], cli.RunResult[list[str]]]:
-    """호출 calls 개(labels · series 순)를 보낸 뒤 raise_ 를 올리거나 요약 하나(줄 목록을 그대로 렌더)를 돌려주는 run 대역."""
+def _run_after(client: Client, calls: int, raise_: BaseException | None = None, lines: list[str] | None = None) -> Callable[[], cli.RunResult[list[str]]]:
+    """호출 calls 개(labels · series 순)를 보낸 뒤 raise_ 를 올리거나 요약 하나(lines 를 그대로 렌더 — 기본 ["x"])를 돌려주는 run 대역."""
     def run() -> cli.RunResult[list[str]]:
         for path in ("api/v1/labels", "api/v1/series")[:calls]:
             client.get("metrics", path)
         if raise_ is not None:
             raise raise_
-        return cli.RunResult(Evidence(["x"]), "k", Window(AT - MINUTE, AT), lambda v, w: v)
+        return cli.RunResult(Evidence(lines if lines is not None else ["x"]), "k", Window(AT - MINUTE, AT), lambda v, w: v)
     return run
 
 
@@ -144,7 +192,7 @@ def test_finish_writes_log_as_raw_json(make_client: ClientFactory, tmp_path: Pat
     client, _ = make_client(FINISH_ROUTES)
     out: list[str] = []
     # when
-    cli.finish(client, _run_after(client, 2), "k-failed", 40, False, base=tmp_path, at=AT, out=out.append)
+    cli.finish(client, _run_after(client, 2), "k-failed", cli.OutputArgs(), base=tmp_path, at=AT, out=out.append)
     # then
     assert len(client.log) == 2
     d = _only_dir(tmp_path)
@@ -159,7 +207,7 @@ def test_finish_names_call_directory_in_obs_error(make_client: ClientFactory, tm
     client, _ = make_client(FINISH_ROUTES)
     # when
     with pytest.raises(BudgetExceeded) as ei:
-        cli.finish(client, _run_after(client, 2, BudgetExceeded("예산 초과 — 질의 20회 상한")), "promql-failed", 40, False, base=tmp_path, at=AT, out=lambda _: None)
+        cli.finish(client, _run_after(client, 2, BudgetExceeded("예산 초과 — 질의 20회 상한")), "promql-failed", cli.OutputArgs(), base=tmp_path, at=AT, out=lambda _: None)
     # then
     msg = str(ei.value)
     assert msg.startswith("예산 초과 — 질의 20회 상한")
@@ -177,7 +225,7 @@ def test_finish_spills_log_on_obs_error(make_client: ClientFactory, tmp_path: Pa
     out: list[str] = []
     # when
     with pytest.raises(ObsError):
-        cli.finish(client, _run_after(client, 2, ObsError("metrics 백엔드가 질의를 거부했다(400)")), "promql-failed", 40, False, base=tmp_path, at=AT, out=out.append)
+        cli.finish(client, _run_after(client, 2, ObsError("metrics 백엔드가 질의를 거부했다(400)")), "promql-failed", cli.OutputArgs(), base=tmp_path, at=AT, out=out.append)
     # then
     d = _only_dir(tmp_path)
     assert len(json.loads((d / "raw.json").read_text())) == 2
@@ -193,7 +241,7 @@ def test_finish_spills_log_and_reraises_other_exceptions(make_client: ClientFact
     bug = ValueError("bug")
     # when
     with pytest.raises(ValueError) as ei:
-        cli.finish(client, _run_after(client, 1, bug), "logql-failed", 40, False, base=tmp_path, at=AT, out=lambda _: None, err=err.append)
+        cli.finish(client, _run_after(client, 1, bug), "logql-failed", cli.OutputArgs(), base=tmp_path, at=AT, out=lambda _: None, err=err.append)
     # then
     assert ei.value is bug
     d = _only_dir(tmp_path)
@@ -210,7 +258,7 @@ def test_finish_without_sent_calls_leaves_no_directory(make_client: ClientFactor
     client, _ = make_client()
     # when
     with pytest.raises(ObsError) as ei:
-        cli.finish(client, _run_after(client, 0, ObsError("PromQL 이 필요하다")), "promql-failed", 40, False, base=tmp_path, at=AT, out=lambda _: None)
+        cli.finish(client, _run_after(client, 0, ObsError("PromQL 이 필요하다")), "promql-failed", cli.OutputArgs(), base=tmp_path, at=AT, out=lambda _: None)
     # then
     assert str(ei.value) == "PromQL 이 필요하다"
     assert not (tmp_path / "tmp" / "obs").exists()
@@ -224,22 +272,58 @@ def test_finish_without_sent_calls_reraises_other_exceptions_silently(make_clien
     bug = ValueError("bug")
     # when
     with pytest.raises(ValueError) as ei:
-        cli.finish(client, _run_after(client, 0, bug), "promql-failed", 40, False, base=tmp_path, at=AT, out=lambda _: None, err=err.append)
+        cli.finish(client, _run_after(client, 0, bug), "promql-failed", cli.OutputArgs(), base=tmp_path, at=AT, out=lambda _: None, err=err.append)
     # then
     assert ei.value is bug
     assert err == []
     assert not (tmp_path / "tmp" / "obs").exists()
 
 
-def test_finish_names_failed_directory_by_at(make_client: ClientFactory, tmp_path: Path) -> None:
-    """실패한 run 의 <kind>-failed 디렉터리 이름의 시각도 인자 at 의 UTC 표기다."""
-    # given — 호출 하나 뒤 ObsError 를 올리는 run · at 은 AT
+THREE_LINES: list[str] = ["a 1", "b 2", "c 3"]
+"""finish 의 OutputArgs 전달 · summary 전체를 보는 run 의 요약 — 셋 줄."""
+
+
+@pytest.mark.parametrize("output,shown,tail", [(cli.OutputArgs(max_lines=1), 1, "… 2줄 더 있음"), (cli.OutputArgs(files_only=True), 0, "원본·요약:")],
+                         ids=["max-lines", "files-only"])
+def test_finish_passes_output_to_print_summary(output: cli.OutputArgs, shown: int, tail: str, make_client: ClientFactory, tmp_path: Path) -> None:
+    """finish 는 받은 OutputArgs 를 그대로 stdout 절제에 쓴다 — max_lines=1 이면 요약 1줄 + "… 2줄 더 있음" 안내, files_only 면 경로 한 줄뿐."""
+    # given — 요약 셋 줄을 내는 성공 run
+    client, _ = make_client(FINISH_ROUTES)
+    out: list[str] = []
+    # when
+    cli.finish(client, _run_after(client, 1, lines=THREE_LINES), "k-failed", output, base=tmp_path, at=AT, out=out.append)
+    # then
+    assert len(out) == shown + 1
+    assert out[:shown] == THREE_LINES[:shown]
+    assert out[-1].startswith(tail)
+
+
+def test_finish_summary_is_preamble_then_lines(make_client: ClientFactory, tmp_path: Path) -> None:
+    """성공한 run 의 summary.txt 는 run 의 창으로 만든 window_preamble 뒤에 요약 줄 전부이고, stdout 에는 `# ` 머리 줄이 없다."""
+    # given — 요약 두 줄을 내는 성공 run(창은 _run_after 의 것)
+    client, _ = make_client(FINISH_ROUTES)
+    out: list[str] = []
+    run = _run_after(client, 1, lines=["a 1", "b 2"])
+    # when
+    cli.finish(client, run, "k-failed", cli.OutputArgs(), base=tmp_path, at=AT, out=out.append)
+    # then
+    assert _summary_text(tmp_path).splitlines() == [*cli.window_preamble(Window(AT - MINUTE, AT)), "a 1", "b 2"]
+    assert out[:2] == ["a 1", "b 2"]
+    assert not [line for line in out if line.startswith("# ")]
+
+
+@pytest.mark.parametrize("output", [cli.OutputArgs(max_lines=1), cli.OutputArgs(files_only=True)], ids=["max-lines", "files-only"])
+def test_finish_summary_keeps_all_lines(output: cli.OutputArgs, make_client: ClientFactory, tmp_path: Path) -> None:
+    """stdout 을 절제해도(max_lines=1 · files_only) summary.txt 에는 창 머리 뒤 요약 셋 줄 전부가 있다."""
+    # given — 요약 셋 줄을 내는 성공 run
     client, _ = make_client(FINISH_ROUTES)
     # when
-    with pytest.raises(ObsError):
-        cli.finish(client, _run_after(client, 1, ObsError("metrics 백엔드가 질의를 거부했다(400)")), "k-failed", 40, False, base=tmp_path, at=AT, out=lambda _: None)
+    cli.finish(client, _run_after(client, 1, lines=THREE_LINES), "k-failed", output, base=tmp_path, at=AT, out=lambda _: None)
     # then
-    assert _only_dir(tmp_path).name == "19700102T034640.000000Z-k-failed"
+    summary = _summary_text(tmp_path).splitlines()
+    assert summary[0].startswith("# 창")
+    assert summary[-3:] == THREE_LINES
+    assert summary == [*cli.window_preamble(Window(AT - MINUTE, AT)), *THREE_LINES]
 
 
 # ── 인터페이스 — 물리 인자가 없다 ────────────────────────────────────────────────
@@ -365,18 +449,6 @@ def _summary_text(root: Path) -> str:
     assert len(found) == 1, "summary.txt 가 하나가 아니다: %r" % found
     return found[0].read_text(encoding="utf-8")
 
-
-def test_finish_writes_window_preamble_then_lines(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """_finish 의 summary.txt 는 window_preamble(창) 뒤에 요약 줄이고, stdout 에는 요약 줄만 — `# ` 머리 줄이 없다."""
-    # given — 기준선이 달린 창 · 요약 줄 둘 · spill 은 tmp
-    w = Window(AT - HOUR, AT).with_baseline("1d")
-    # when
-    cli._finish(["a 1", "b 2"], [], "k", w, 40, False, base=tmp_path, at=AT)  # pyright: ignore[reportPrivateUsage]
-    # then
-    assert _summary_text(tmp_path).splitlines() == [*cli.window_preamble(w), "a 1", "b 2"]
-    out = capsys.readouterr().out.splitlines()
-    assert out[:2] == ["a 1", "b 2"]
-    assert not [line for line in out if line.startswith("# ")]
 
 
 def test_promql_main_summarize_writes_no_assembled_query(run_main: MainRunner, base_env: dict[str, str], make_client: ClientFactory,

@@ -61,11 +61,11 @@ PRESENT_CASES: list[tuple[str, ParserFn, list[str], Callable[[argparse.Namespace
 @pytest.mark.parametrize("parser,argv,mapper,expected", [c[1:] for c in PRESENT_CASES], ids=[c[0] for c in PRESENT_CASES])
 def test_map_args_takes_present_options_by_field_name(parser: ParserFn, argv: list[str], mapper: Callable[[argparse.Namespace], MappedArgs],
                                                       expected: MappedArgs) -> None:
-    """명시한 옵션은 같은 이름의 필드로 옮겨지고(타입 변환 포함) 나머지 필드는 dataclass 기본값이다 — Namespace 의 여분 속성(max_lines · as_json)은 예외 없이 무시된다."""
+    """명시한 옵션은 같은 이름의 필드로 옮겨지고(타입 변환 포함) 나머지 필드는 dataclass 기본값이다 — Namespace 의 여분 속성(max_lines · files_only)은 예외 없이 무시된다."""
     # given — 옵션 종류 하나를 명시한 argv 의 Namespace(--max-lines · --json 이 함께 있다)
     ns = parser().parse_args(argv)
     assert hasattr(ns, "max_lines")
-    assert hasattr(ns, "as_json")
+    assert hasattr(ns, "files_only")
     # when
     got = mapper(ns)
     # then
@@ -73,7 +73,7 @@ def test_map_args_takes_present_options_by_field_name(parser: ParserFn, argv: li
     assert type(got) is type(expected)
 
 
-@pytest.mark.parametrize("argv,expected", [(['{a="b"}', "--max-lines", "3", "--json"], cli.OutputArgs(max_lines=3, as_json=True)),
+@pytest.mark.parametrize("argv,expected", [(['{a="b"}', "--max-lines", "3", "--json"], cli.OutputArgs(max_lines=3, files_only=True)),
                                            (['{a="b"}'], cli.OutputArgs())], ids=["given", "omitted"])
 def test_map_args_output_options(argv: list[str], expected: cli.OutputArgs) -> None:
     """--max-lines · --json 은 OutputArgs 로 같은 길을 지난다 — 주면 그 값, 생략하면 dataclass 기본값(DEFAULT_MAX_LINES · False). Namespace 의 query 는 무시된다."""
@@ -85,7 +85,7 @@ def test_map_args_output_options(argv: list[str], expected: cli.OutputArgs) -> N
     # then
     assert got == expected
     assert cli.OutputArgs().max_lines == cli.DEFAULT_MAX_LINES
-    assert cli.OutputArgs().as_json is False
+    assert cli.OutputArgs().files_only is False
 
 
 DEFAULT_CASES: list[tuple[str, ParserFn, list[str], Callable[[argparse.Namespace], MappedArgs], MappedArgs]] = [

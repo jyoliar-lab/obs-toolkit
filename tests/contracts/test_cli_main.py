@@ -1,6 +1,6 @@
 """CLI 진입점 중 하위층이 없는 것 — main_guard(ObsError → stderr · exit 1)와 doctor_main(exit 0/1 · --json).
-promql_main · logql_main · traceql_main 은 argparse → *_run → emit 의 배선뿐이라 여기서 다시 검사하지 않는다 — *_run 은 contracts · format 이,
-emit 은 test_cli.py 가, 세 파서의 구성은 --help 테스트가 이미 지난다."""
+promql_main · logql_main · traceql_main 은 argparse → *_run → finish 의 배선뿐이라 여기서 다시 검사하지 않는다 — *_run 은 contracts · format 이,
+출력 경로(spill_call · print_summary · finish)는 test_cli.py 가, 세 파서의 구성은 --help 테스트가 이미 지난다."""
 from __future__ import annotations
 
 import json
@@ -185,15 +185,6 @@ def test_main_window_end_is_at(run_main: MainRunner, base_env: dict[str, str], m
     assert summary[0].startswith("# 창")
     assert "end=%.3f" % AT in summary[0]
 
-
-def test_main_call_directory_named_by_at(run_main: MainRunner, base_env: dict[str, str], make_client: ClientFactory) -> None:
-    """호출 디렉터리 이름의 시각은 인자 at 의 UTC 표기다 — AT 이면 19700102T034640.000000Z-promql."""
-    # given — 빈 응답 · at 은 AT
-    client, _ = make_client({("metrics", "api/v1/query"): (200, _vector())})
-    # when
-    run_main(cli.promql_main, ["up"], client)
-    # then
-    assert [p.name for p in spill_root(base_env).iterdir()] == ["19700102T034640.000000Z-promql"]
 
 
 # ── 옵션 → 요청 — 종류마다 대표 하나. 매핑 · 선언이 어디 있든 요청은 같아야 한다 ────────────
