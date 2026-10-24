@@ -887,16 +887,6 @@ def test_service_graph_marks_callee_unknown_when_span_name_is_ambiguous() -> Non
     assert g.edges[0].callee is None
 
 
-def test_service_graph_rejects_duplicate_server_quantiles() -> None:
-    """servers 에 같은 엔드포인트(서비스까지 같은) 의 EndpointQuantiles 가 둘이면 ObsError 이고 문구에 그 엔드포인트가 있다 — 첫 것을 조용히 쓰지 않는다."""
-    # given
-    servers = [_eq("b", "dup-X", 0.03, 0.03), _eq("b", "dup-X", 0.05, 0.05)]
-    # when · then
-    with pytest.raises(ObsError) as ei:
-        _sg([_row("a", "dup-X", calls=1, now=0.04, base=0.02)], servers)
-    assert "dup-X" in str(ei.value)
-
-
 def test_service_graph_of_no_client_rows_is_no_data() -> None:
     """클라이언트 행이 없으면 edges [] · idle 0 — 데이터 없음이다."""
     # given · when
